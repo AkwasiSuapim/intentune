@@ -72,11 +72,15 @@ Energy and danceability reward closeness to the user's preferred values. A large
 
 ### Competing Data Shapes
 
-The file contains both dictionaries and dataclasses. The functional recommender uses dictionary profiles with `preferred_energy` and `preferred_danceability`, while the `UserProfile` dataclass uses `target_energy` and `likes_acoustic`.
+The file still contains both dictionaries and dataclasses -- this has not been rewritten. The functional recommender uses dictionary profiles with `preferred_energy` and `preferred_danceability`, while the `UserProfile` dataclass uses `target_energy` and `likes_acoustic`.
+
+**Partially addressed (Phase 2):** `src/intentune/domain/models.py` now defines a single canonical, typed vocabulary (`preferred_energy`, `preferred_danceability`, etc.) that both the dictionary and dataclass APIs can converge toward later. The two existing historical APIs still coexist unchanged for compatibility; unifying them is left to a future phase.
+
+`likes_acoustic` remains on the legacy `UserProfile` dataclass for backward compatibility only. It is now explicitly documented as deprecated and has never had any effect on scoring.
 
 ### Hard-Coded Adaptation
 
-The object-oriented `Recommender` converts `UserProfile` into a dictionary and hard-codes preferred danceability to `0.5`. This can create inconsistent behavior.
+**Resolved (Phase 2):** The object-oriented `Recommender` previously hard-coded preferred danceability to `0.5` regardless of what the caller supplied. The legacy `UserProfile` dataclass now has a real `preferred_danceability` field (defaulting to `0.5` to preserve historical behavior for existing call sites); the wrapper reads that field instead of a literal constant, so an explicit value now actually reaches scoring. See docs/technical-decisions.md, TD-008.
 
 ### Side Effects in Data Loading
 
@@ -89,6 +93,8 @@ The current interaction is terminal-only and the sample profile is hard-coded.
 ### Catalog Coupling
 
 The engine assumes all candidates have CSV-style genre, mood, energy, and danceability fields. Future YouTube candidates may not have all those values.
+
+**Not yet addressed:** `src/intentune/domain/models.py` now defines a source-independent `MusicCandidate` model whose audio-feature fields are optional for exactly this reason, but `load_songs()`, `score_song()`, and `recommend_songs()` still operate on CSV-shaped dictionaries and have not been rewired to use `MusicCandidate`. That wiring is deferred to a later phase so this milestone could focus on the models themselves without touching scoring behavior.
 
 ### Missing Product Capabilities
 

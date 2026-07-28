@@ -60,6 +60,8 @@ Validated recommendation request
 
 Contains business rules that should not depend on HTTP, databases, Streamlit, AI providers, or YouTube.
 
+**Current:** `src/intentune/domain/models.py` defines the first concrete piece of this layer: typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). They hold no CSV, HTTP, database, or provider-specific knowledge. Scoring and ranking still live in `src/recommender.py` and have not been rewritten to use these models yet -- see docs/development-phases.md, Phase 3.
+
 Responsibilities:
 
 - User preference models

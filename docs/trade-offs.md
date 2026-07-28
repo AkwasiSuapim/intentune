@@ -111,6 +111,22 @@ Structured output, validation, timeouts, fallback behavior, and provider abstrac
 
 Use official APIs, normalize metadata, avoid unsupported claims, and keep the internal catalog available.
 
+## Canonical Domain Models Before Rewiring Scoring and Adapters
+
+### Gain
+
+- A single typed, source-independent vocabulary (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`) exists for future FastAPI, AI, YouTube, and database work to target.
+- Existing scoring, ranking, CLI output, and all 21 original tests are provably unchanged.
+
+### Cost
+
+- Three shapes now coexist during the transition: the historical dictionary API, the historical dataclass API (`Song`, `UserProfile` in `src/recommender.py`), and the new canonical domain models in `src/intentune/domain/models.py`. They are not yet unified.
+- The legacy `UserProfile` dataclass still carries a deprecated, inert `likes_acoustic` field for backward compatibility.
+
+### Revisit When
+
+Scoring and ranking are rewritten to consume `MusicCandidate`/`UserProfile`/`ScoreBreakdown` directly (see docs/development-phases.md, Phase 3's Expanded and Configurable Scoring Engine milestone), at which point the historical dict and dataclass shapes can be retired or reduced to thin compatibility wrappers.
+
 ## Trade-off Entry Template
 
 ```text

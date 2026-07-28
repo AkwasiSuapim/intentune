@@ -78,6 +78,22 @@ This file records important architectural and implementation decisions. Each dec
 
 **Revisit When:** The product requires stronger UI customization, multiple clients, or a separate frontend team.
 
+## TD-008: Establish Canonical, Source-Independent Domain Models
+
+**Status:** Accepted
+
+**Decision:** Intentune's domain models must not depend on CSV formats, provider responses, HTTP frameworks, AI providers, or database schemas.
+
+**Detail:** `src/intentune/domain/models.py` introduces typed dataclasses -- `MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation` -- that any future FastAPI request, AI adapter, CSV loader, database repository, or YouTube adapter can produce or consume. They replace neither the existing dictionary-based functional API nor the existing dataclass-based OOP wrapper in `src/recommender.py`; both keep working unchanged.
+
+**Reason:** The current implementation mixes dictionary profiles (`preferred_energy`, `preferred_danceability`) with a dataclass profile (`target_energy`, no danceability field, an inert `likes_acoustic` field). A single canonical vocabulary must exist before FastAPI, AI, YouTube, or a database can be added, otherwise each new adapter would invent its own shape.
+
+**Alternative:** Keep extending the existing dictionaries and dataclasses ad hoc as new candidate sources are added.
+
+**Consequence:** Three co-existing shapes exist during the transition: the historical dict API, the historical dataclass API, and the new canonical domain models. This is intentional duplication, tracked in docs/trade-offs.md, and will shrink as scoring and ranking are migrated onto the canonical models in a later phase.
+
+**Also fixed as part of this decision:** the OOP `Recommender` wrapper no longer hard-codes `preferred_danceability` to `0.5` -- the legacy `UserProfile` dataclass gained a real `preferred_danceability` field (default `0.5`, matching the old hard-coded value exactly so existing call sites are unaffected) that the wrapper now actually reads.
+
 ## New Decision Template
 
 ```text

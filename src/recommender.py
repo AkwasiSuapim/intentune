@@ -31,11 +31,21 @@ class UserProfile:
     """
     Represents a user's taste preferences.
     Required by tests/test_recommender.py
+
+    preferred_danceability defaults to 0.5, the value the Recommender wrapper
+    used to hard-code regardless of the caller's intent. The default keeps
+    old call sites (which never set this field) scoring exactly as before;
+    passing an explicit value now actually reaches the scoring engine instead
+    of being silently discarded.
+
+    likes_acoustic is deprecated: it is accepted for backward compatibility
+    with existing call sites only and has no effect on scoring or ranking.
     """
     favorite_genre: str
     favorite_mood: str
     target_energy: float
     likes_acoustic: bool
+    preferred_danceability: float = 0.5
 
 class Recommender:
     """
@@ -44,47 +54,46 @@ class Recommender:
     """
     def __init__(self, songs: List[Song]):
         self.songs = songs
+        self._songs_by_id = {song.id: song for song in songs}
+        self._song_dicts = [self._to_song_dict(song) for song in songs]
+        self.last_recommendations: List[Dict] = []
+
+    @staticmethod
+    def _to_song_dict(song: Song) -> Dict:
+        return {
+            "id": song.id,
+            "title": song.title,
+            "artist": song.artist,
+            "genre": song.genre,
+            "mood": song.mood,
+            "energy": song.energy,
+            "tempo_bpm": int(song.tempo_bpm),
+            "valence": song.valence,
+            "danceability": song.danceability,
+            "acousticness": song.acousticness,
+        }
+
+    @staticmethod
+    def _to_user_prefs(user: UserProfile) -> Dict:
+        return {
+            "favorite_genre": user.favorite_genre,
+            "favorite_mood": user.favorite_mood,
+            "preferred_energy": user.target_energy,
+            "preferred_danceability": user.preferred_danceability,
+        }
 
     def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
         recommendations = recommend_songs(
-            {
-                "favorite_genre": user.favorite_genre,
-                "favorite_mood": user.favorite_mood,
-                "preferred_energy": user.target_energy,
-                "preferred_danceability": 0.5,
-            },
-            [
-                {
-                    "id": song.id,
-                    "title": song.title,
-                    "artist": song.artist,
-                    "genre": song.genre,
-                    "mood": song.mood,
-                    "energy": song.energy,
-                    "tempo_bpm": int(song.tempo_bpm),
-                    "valence": song.valence,
-                    "danceability": song.danceability,
-                    "acousticness": song.acousticness,
-                }
-                for song in self.songs
-            ],
+            self._to_user_prefs(user),
+            self._song_dicts,
             k=k,
         )
-        ranked_songs = []
-        for recommendation in recommendations:
-            song_dict = recommendation["song"]
-            matching_song = next(song for song in self.songs if song.id == song_dict["id"])
-            ranked_songs.append(matching_song)
-        return ranked_songs
+        self.last_recommendations = recommendations
+        return [self._songs_by_id[recommendation["song"]["id"]] for recommendation in recommendations]
 
     def explain_recommendation(self, user: UserProfile, song: Song) -> str:
         score, reasons = score_song(
-            {
-                "favorite_genre": user.favorite_genre,
-                "favorite_mood": user.favorite_mood,
-                "preferred_energy": user.target_energy,
-                "preferred_danceability": 0.5,
-            },
+            self._to_user_prefs(user),
             {
                 "genre": song.genre,
                 "mood": song.mood,

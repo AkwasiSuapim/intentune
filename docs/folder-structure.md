@@ -17,10 +17,18 @@ intentune/
 ├── src/
 │   ├── __init__.py
 │   ├── main.py
-│   └── recommender.py
+│   ├── recommender.py
+│   └── intentune/
+│       ├── __init__.py
+│       └── domain/
+│           ├── __init__.py
+│           └── models.py
 └── tests/
-    └── test_recommender.py
+    ├── test_recommender.py
+    └── test_domain_models.py
 ```
+
+`src/intentune/domain/models.py` is the first piece of the proposed `domain/` directory below. It was introduced deliberately small: only typed models and their validation, no scoring, ranking, or adapters yet. Empty placeholder folders (`api/`, `adapters/`, `application/`, `ports/`, `ui/`) are intentionally not created until working code needs them, per the Migration Rule below.
 
 ## Proposed Incremental Structure
 
