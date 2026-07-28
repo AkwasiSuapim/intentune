@@ -1,8 +1,8 @@
-# 🎵 Music Recommender Simulation
+# Intentune
 
 ## Project Summary
 
-This project is a command-line content-based music recommendation simulator. It loads a catalog of songs from data/songs.csv, compares each song with an individual user profile, assigns a personalized score out of 10, and ranks the strongest matches. The scoring system uses genre, mood, energy, and danceability. Each recommendation also includes human-readable reasons explaining how the final score was calculated.
+Intentune began as a CodePath Music Recommender Simulation and is being developed into a larger personalized music recommendation platform. The current application is a command-line content-based music recommendation simulator. It loads a catalog of songs from `data/songs.csv`, compares each song with an individual user profile, assigns a personalized score out of 10, and ranks the strongest matches. The scoring system uses genre, mood, energy, and danceability. Each recommendation also includes human-readable reasons explaining how the final score was calculated.
 
 ---
 
@@ -162,8 +162,6 @@ Top recommendations:
    - energy similarity (+1.88)
    - danceability similarity (+1.98)
 ```
-##![alt text](image-2.png)
-
 ---
 
 ## Experiments You Tried
@@ -196,7 +194,5 @@ Read and complete the model card here:
 My biggest learning moment was understanding the difference between scoring one song and ranking the full catalog. The scoring function measures how well one song matches a user, while the ranking function compares all the scores and places the strongest matches first. I also learned that a song is not automatically a good recommendation for everyone. Its value depends on the preferences of the individual user.
 
 AI tools helped me brainstorm the system design, scoring rules, tests, edge cases, refactoring, and documentation. However, I still had to double-check the AI-generated work. Some tests initially failed, and the command-line program later revealed a mismatch between the result structure and the way `main.py` displayed it. Pytest and CLI verification helped me find and correct these problems. I was surprised that a simple weighted algorithm could still make the results feel personalized. If I extended the project, I would allow the profile to learn from likes, skips, saves, and replays, while also adding partial matches and more diverse recommendations.
-
-
 
 

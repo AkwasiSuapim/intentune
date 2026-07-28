@@ -1,20 +1,25 @@
-# Byte compiled
+# Python
 __pycache__/
 *.py[cod]
-*.pyo
+.pytest_cache/
 
 # Virtual environments
 .venv/
-env/
 venv/
+env/
 
-# OS files
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# macOS
 .DS_Store
 
-# Pytest cache
-.pytest_cache/
+# Generated analysis
 graphify-out/
-image.png
-image-1.png
-image-2.png
-*.pyc
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

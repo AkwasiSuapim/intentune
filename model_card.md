@@ -1,8 +1,8 @@
-# 🎧 Model Card: Music Recommender Simulation
+# Model Card: Intentune
 
 ## Model Name
 
-VibeMatch 1.0. The name reflects the idea of matching songs to a user's preferred musical vibe.
+Intentune Baseline 1.0. This name identifies the initial deterministic recommendation model used by Intentune.
 
 ## Goal / Task
 
