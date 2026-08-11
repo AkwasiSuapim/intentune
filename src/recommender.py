@@ -1,13 +1,17 @@
-import csv
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 from dataclasses import dataclass
 
-GENRE_WEIGHT = 3.0
-MOOD_WEIGHT = 3.0
-ENERGY_WEIGHT = 2.0
-DANCEABILITY_WEIGHT = 2.0
-MAX_SCORE = 10.0
+from src.intentune.domain.models import MusicCandidate, UserProfile as CanonicalUserProfile
+from src.intentune.domain.scoring import (
+    score_candidate,
+    GENRE_WEIGHT,
+    MOOD_WEIGHT,
+    ENERGY_WEIGHT,
+    DANCEABILITY_WEIGHT,
+    MAX_SCORE,
+)
+from src.intentune.domain.ranking import rank_candidates
+from src.intentune.adapters.csv_catalog import load_music_candidates
 
 @dataclass
 class Song:
@@ -103,108 +107,137 @@ class Recommender:
         )
         return " | ".join(reasons)
 
-def load_songs(csv_path: str) -> List[Dict]:
-    """Load songs from a CSV file into a list of dictionaries."""
-    csv_file = Path(csv_path)
-    if not csv_file.is_absolute():
-        csv_file = Path(__file__).resolve().parent.parent / csv_file
 
-    with csv_file.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        songs = []
-        for row in reader:
-            song = {
-                "id": int(row["id"].strip()),
-                "title": row["title"].strip(),
-                "artist": row["artist"].strip(),
-                "genre": row["genre"].strip(),
-                "mood": row["mood"].strip(),
-                "energy": float(row["energy"].strip()),
-                "tempo_bpm": int(row["tempo_bpm"].strip()),
-                "valence": float(row["valence"].strip()),
-                "danceability": float(row["danceability"].strip()),
-                "acousticness": float(row["acousticness"].strip()),
-            }
-            songs.append(song)
+# ---------------------------------------------------------------------------
+# Legacy <-> canonical boundary conversions.
+#
+# Direction: legacy input -> converter -> canonical domain flow -> converter
+# -> legacy output. The canonical scorer/ranker in src/intentune/domain/ is
+# the single source of truth; score_song() and recommend_songs() below no
+# longer contain their own copy of the scoring math.
+# ---------------------------------------------------------------------------
+
+_REQUIRED_LEGACY_PROFILE_KEYS = ("favorite_genre", "favorite_mood", "preferred_energy", "preferred_danceability")
+_REQUIRED_LEGACY_SONG_FIELDS = ("genre", "mood", "energy", "danceability")
+_PLACEHOLDER_SCORE_SONG_IDENTITY = "legacy-score-song"
+
+
+def legacy_profile_to_user_profile(user_prefs: Dict) -> CanonicalUserProfile:
+    """Convert a legacy dictionary profile into a canonical UserProfile.
+
+    ListeningContext and FeatureWeights are not populated here -- the legacy
+    dictionary profile has no session-context or per-feature-weight concept
+    yet. They remain future inputs (see docs/development-phases.md).
+    """
+    for key in _REQUIRED_LEGACY_PROFILE_KEYS:
+        if key not in user_prefs:
+            raise KeyError(f"Missing user preference: {key}")
+
+    return CanonicalUserProfile(
+        preferred_genres=(str(user_prefs["favorite_genre"]),),
+        preferred_moods=(str(user_prefs["favorite_mood"]),),
+        preferred_energy=user_prefs["preferred_energy"],
+        preferred_danceability=user_prefs["preferred_danceability"],
+    )
+
+
+def song_dict_to_music_candidate(song: Dict) -> MusicCandidate:
+    """Convert a full legacy song dictionary (as returned by load_songs()) into a MusicCandidate."""
+    for key in _REQUIRED_LEGACY_SONG_FIELDS:
+        if key not in song:
+            raise KeyError(f"Missing song field: {key}")
+
+    return MusicCandidate(
+        candidate_id=str(song["id"]),
+        title=str(song["title"]),
+        creator=str(song["artist"]),
+        source="legacy-dict",
+        genre=song["genre"],
+        mood=song["mood"],
+        energy=song["energy"],
+        danceability=song["danceability"],
+        tempo_bpm=song.get("tempo_bpm"),
+        valence=song.get("valence"),
+        acousticness=song.get("acousticness"),
+    )
+
+
+def _score_fields_to_music_candidate(song: Dict) -> MusicCandidate:
+    """Convert score_song()'s narrower 4-field song dict into a MusicCandidate.
+
+    score_song() never receives an id, title, or artist -- only the four
+    scoring fields -- so a fixed placeholder identity is used. It is never
+    exposed to callers of score_song().
+    """
+    for key in _REQUIRED_LEGACY_SONG_FIELDS:
+        if key not in song:
+            raise KeyError(f"Missing song field: {key}")
+
+    return MusicCandidate(
+        candidate_id=_PLACEHOLDER_SCORE_SONG_IDENTITY,
+        title=_PLACEHOLDER_SCORE_SONG_IDENTITY,
+        creator=_PLACEHOLDER_SCORE_SONG_IDENTITY,
+        source="legacy-dict",
+        genre=song["genre"],
+        mood=song["mood"],
+        energy=song["energy"],
+        danceability=song["danceability"],
+    )
+
+
+def _candidate_to_song_dict(candidate: MusicCandidate) -> Dict:
+    """Convert a CSV-sourced MusicCandidate back into the historical song dict shape."""
+    return {
+        "id": int(candidate.candidate_id),
+        "title": candidate.title,
+        "artist": candidate.creator,
+        "genre": candidate.genre,
+        "mood": candidate.mood,
+        "energy": candidate.energy,
+        "tempo_bpm": int(candidate.tempo_bpm),
+        "valence": candidate.valence,
+        "danceability": candidate.danceability,
+        "acousticness": candidate.acousticness,
+    }
+
+
+def load_songs(csv_path: str) -> List[Dict]:
+    """Load songs from a CSV file into a list of dictionaries.
+
+    Delegates the actual CSV parsing to the canonical CSV adapter
+    (src/intentune/adapters/csv_catalog.py) and converts the resulting
+    MusicCandidate objects back into the historical dictionary shape, so
+    there is only one implementation of CSV parsing in the codebase.
+    """
+    candidates = load_music_candidates(csv_path)
+    songs = [_candidate_to_song_dict(candidate) for candidate in candidates]
 
     print(f"Loaded songs: {len(songs)}")
     return songs
 
-def _validate_numeric_preference(value: float, field_name: str) -> float:
-    if not isinstance(value, (int, float)):
-        raise ValueError(f"{field_name} must be numeric")
-    if not 0.0 <= float(value) <= 1.0:
-        raise ValueError(f"{field_name} must be between 0.0 and 1.0")
-    return float(value)
-
-
-def _calculate_similarity_points(preferred_value: float, actual_value: float, weight: float) -> Tuple[float, str]:
-    difference = abs(actual_value - preferred_value)
-    if difference >= 0.5:
-        similarity = 0.0
-    else:
-        similarity = 1.0 - difference
-    similarity = max(0.0, min(1.0, similarity))
-    points = similarity * weight
-    return points, f"similarity ({points:.2f})"
-
 
 def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
-    """Score one song against a user profile and explain the result."""
-    required_user_keys = ["favorite_genre", "favorite_mood", "preferred_energy", "preferred_danceability"]
-    required_song_keys = ["genre", "mood", "energy", "danceability"]
+    """Score one song against a user profile and explain the result.
 
-    for key in required_user_keys:
-        if key not in user_prefs:
-            raise KeyError(f"Missing user preference: {key}")
-    for key in required_song_keys:
-        if key not in song:
-            raise KeyError(f"Missing song field: {key}")
+    Delegates to the canonical scorer (src/intentune/domain/scoring.py) after
+    converting the legacy dict shapes into MusicCandidate/UserProfile.
+    """
+    profile = legacy_profile_to_user_profile(user_prefs)
+    candidate = _score_fields_to_music_candidate(song)
 
-    preferred_energy = _validate_numeric_preference(user_prefs["preferred_energy"], "preferred_energy")
-    preferred_danceability = _validate_numeric_preference(user_prefs["preferred_danceability"], "preferred_danceability")
-    song_energy = _validate_numeric_preference(song["energy"], "song energy")
-    song_danceability = _validate_numeric_preference(song["danceability"], "song danceability")
-
-    favorite_genre = str(user_prefs["favorite_genre"]).strip().lower()
-    favorite_mood = str(user_prefs["favorite_mood"]).strip().lower()
-    song_genre = str(song["genre"]).strip().lower()
-    song_mood = str(song["mood"]).strip().lower()
-
-    reasons: List[str] = []
-    score = 0.0
-
-    if song_genre == favorite_genre:
-        score += GENRE_WEIGHT
-        reasons.append(f"genre match (+{GENRE_WEIGHT:.1f})")
-    else:
-        reasons.append("genre did not match (+0.0)")
-
-    if song_mood == favorite_mood:
-        score += MOOD_WEIGHT
-        reasons.append(f"mood match (+{MOOD_WEIGHT:.1f})")
-    else:
-        reasons.append("mood did not match (+0.0)")
-
-    energy_points, energy_reason = _calculate_similarity_points(preferred_energy, song_energy, ENERGY_WEIGHT)
-    score += energy_points
-    reasons.append(f"energy similarity (+{energy_points:.2f})")
-
-    danceability_points, danceability_reason = _calculate_similarity_points(preferred_danceability, song_danceability, DANCEABILITY_WEIGHT)
-    score += danceability_points
-    reasons.append(f"danceability similarity (+{danceability_points:.2f})")
-
-    if score > MAX_SCORE:
-        score = MAX_SCORE
-
-    if score < 0.0:
-        score = 0.0
-
-    return round(score, 6), reasons
+    breakdown = score_candidate(candidate, profile)
+    reasons = [component.reason for component in breakdown.components]
+    return breakdown.total_score, reasons
 
 
 def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Dict]:
-    """Rank songs by a simple content-based scoring rule and return the top k results."""
+    """Rank songs by the current content-based scoring rule and return the top k results.
+
+    Delegates to canonical ranking (src/intentune/domain/ranking.py) after
+    converting to MusicCandidate/UserProfile, then converts back to the
+    historical {"song", "score", "reasons"} shape using the exact original
+    song dict objects the caller passed in.
+    """
     if not isinstance(k, int):
         raise TypeError("k must be an integer")
     if k < 0:
@@ -215,27 +248,17 @@ def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Dic
     if not songs:
         return []
 
-    recommendations = []
-    for song in songs:
-        score, reasons = score_song(user_prefs, song)
-        explanation = " | ".join(reasons)
-        recommendations.append({
-            "song": song,
-            "score": score,
-            "reasons": reasons,
-        })
+    profile = legacy_profile_to_user_profile(user_prefs)
+    candidates = [song_dict_to_music_candidate(song) for song in songs]
+    original_song_by_candidate_identity = {id(candidate): song for candidate, song in zip(candidates, songs)}
 
-    ranked_recommendations = sorted(
-        recommendations,
-        key=lambda item: (-item["score"], str(item["song"]["title"]).lower(), str(item["song"]["artist"]).lower()),
-    )
+    recommendations = rank_candidates(candidates, profile, limit=k)
 
-    top_recommendations = ranked_recommendations[:k]
     return [
         {
-            "song": item["song"],
-            "score": item["score"],
-            "reasons": item["reasons"],
+            "song": original_song_by_candidate_identity[id(recommendation.candidate)],
+            "score": recommendation.score_breakdown.total_score,
+            "reasons": [component.reason for component in recommendation.score_breakdown.components],
         }
-        for item in top_recommendations
+        for recommendation in recommendations
     ]

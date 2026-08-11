@@ -30,6 +30,14 @@ The uploaded project already tests areas including:
 
 The existing suite becomes the regression baseline.
 
+**Current (added this phase):**
+
+- `tests/test_canonical_scoring.py` and `tests/test_canonical_ranking.py` exercise typed domain objects without CSV or legacy dictionary inputs.
+- `tests/test_csv_catalog.py` verifies CSV-row dictionaries, numeric conversion, optional metadata, catalog loading, and the adapter's lack of printing side effects.
+- `tests/test_recommendation_service.py` verifies application-level orchestration and type boundaries.
+- `tests/test_legacy_compatibility.py` covers legacy-to-canonical conversion, the documented top-five baseline, and behavioral equivalence between legacy and canonical results across all 20 songs.
+- The full local suite currently contains 119 passing tests and makes no network calls.
+
 ## Test Layers
 
 ### Unit Tests

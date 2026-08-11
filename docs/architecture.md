@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planned with Draft Details**
+**Current and Planned**
 
 ## Architectural Style
 
@@ -23,6 +23,10 @@ The product requirements and domain rules are still evolving. A modular monolith
 Microservices would add network calls, service discovery, distributed logging, authentication between services, deployment coordination, and more failure modes. Those costs are not justified for the current team and expected early usage.
 
 ## High-Level Components
+
+The diagram below is the planned modular-monolith direction. The current
+implementation has a domain layer, a minimal application service, and a CSV
+adapter, but it does not yet define a catalog port or an API/UI boundary.
 
 ```text
 Client or browser
@@ -60,7 +64,7 @@ Validated recommendation request
 
 Contains business rules that should not depend on HTTP, databases, Streamlit, AI providers, or YouTube.
 
-**Current:** `src/intentune/domain/models.py` defines the first concrete piece of this layer: typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). They hold no CSV, HTTP, database, or provider-specific knowledge. Scoring and ranking still live in `src/recommender.py` and have not been rewritten to use these models yet -- see docs/development-phases.md, Phase 3.
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` now implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring -- see docs/development-phases.md, Phase 3.
 
 Responsibilities:
 
@@ -89,6 +93,13 @@ recommend_music(request)
   -> diversify results
   -> build response
 ```
+
+**Current:** `src/intentune/application/recommendation_service.py` implements a first, minimal `recommend_music(candidates, profile, limit)` that validates its inputs and delegates to canonical ranking. It has no request/response concept yet (no diversification, no HTTP request object) -- those arrive with Phase 4's FastAPI layer.
+
+**Dependency direction (Current):** the application layer may import the
+domain, and adapters may construct domain models. The domain does not import
+the application layer, adapters, legacy compatibility code, or external
+frameworks.
 
 ### API Layer
 
@@ -122,6 +133,13 @@ Implements ports using specific technology:
 - PostgreSQL repository
 - AI provider client
 - YouTube Data API client
+
+**Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. The legacy `load_songs()` in `src/recommender.py` calls it and converts the result back into the historical dictionary shape for compatibility. SQLite/PostgreSQL repositories, an AI provider client, and a YouTube client remain future adapters.
+
+**Temporary limitation:** there is no formal catalog port or protocol yet.
+The legacy compatibility layer calls the CSV adapter directly. Introducing a
+catalog abstraction remains pending work; no placeholder port module has been
+created.
 
 ### UI Layer
 

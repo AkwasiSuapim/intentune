@@ -48,6 +48,10 @@ Create a shared understanding of the product, architecture, boundaries, and road
 
 ## Phase 2: Core Domain Refactor
 
+**Status:** Partially complete. The current four-feature baseline milestone is
+complete and verified; the listed formal catalog interface/port has not been
+implemented.
+
 ### Goal
 
 Separate pure recommendation logic from CLI and storage concerns.
@@ -70,8 +74,14 @@ Separate pure recommendation logic from CLI and storage concerns.
 
 - Unified typed models introduced in `src/intentune/domain/models.py` (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`).
 - Hard-coded `preferred_danceability` bug fixed in the legacy `Recommender` wrapper.
-- Regression tests confirmed: all 21 original tests plus new domain-model tests pass; CLI output is unchanged.
-- Not yet done: pure scoring module, pure ranking module, and a catalog interface/CSV adapter that produces `MusicCandidate` -- `load_songs()`, `score_song()`, and `recommend_songs()` still work exactly as before, on CSV-shaped dictionaries. This is deliberate: this increment preserved existing behavior rather than rewriting scoring and ranking.
+- Pure scoring module (`src/intentune/domain/scoring.py`) and pure ranking module (`src/intentune/domain/ranking.py`) added, implementing the current four-feature rule and tie-breaking as the single source of truth.
+- CSV adapter added (`src/intentune/adapters/csv_catalog.py`), converting raw CSV rows into `MusicCandidate`; `load_songs()` now delegates to it instead of parsing CSV itself.
+- A first application-service orchestrator added (`src/intentune/application/recommendation_service.py`, `recommend_music()`).
+- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` now convert to canonical models and delegate to the canonical scorer/ranker, rather than containing a second copy of the scoring math; the now-dead `_calculate_similarity_points()`/`_validate_numeric_preference()` helpers were removed.
+- Regression tests confirmed: 119 tests pass; CLI output matches the documented baseline; legacy and canonical outputs are behaviorally equivalent across the full 20-song catalog, not only the top five.
+- Completion criteria for the current four-feature scoring path are met: the domain layer is independent of FastAPI/Streamlit/AI/YouTube/databases, and current and new tests pass. `score_candidate()` already matches a candidate's genre/mood against *any* of a profile's `preferred_genres`/`preferred_moods` (still an exact, case-insensitive match, not partial similarity) -- the legacy dict converter simply never supplies more than one of each, since the legacy dict profile only ever carries a single favorite genre and mood.
+- Remaining Phase 2 item: define a catalog interface/port when a second catalog implementation or application-level injection requirement makes the abstraction concrete. No empty placeholder module has been added.
+- Deferred to Phase 3: configurable weights, partial similarity, missing-feature handling, and diversity re-ranking.
 
 ## Phase 3: Recommendation Logic Improvements
 

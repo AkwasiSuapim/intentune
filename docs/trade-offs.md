@@ -111,21 +111,34 @@ Structured output, validation, timeouts, fallback behavior, and provider abstrac
 
 Use official APIs, normalize metadata, avoid unsupported claims, and keep the internal catalog available.
 
-## Canonical Domain Models Before Rewiring Scoring and Adapters
+## Canonical Domain Internals with Legacy Boundary Compatibility
+
+**Status:** Implemented; owner approval pending for the expanded rewiring scope
+
+**Approval note:** Preserving the existing dictionary, dataclass, scoring,
+ranking, and CLI behavior was explicitly approved. Moving scoring/ranking
+into canonical modules and adding application/adapter modules went beyond the
+earlier model-only/minimal-structure boundary. That part must be reviewed
+before this trade-off is treated as accepted.
 
 ### Gain
 
 - A single typed, source-independent vocabulary (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`) exists for future FastAPI, AI, YouTube, and database work to target.
-- Existing scoring, ranking, CLI output, and all 21 original tests are provably unchanged.
+- Existing scoring, ranking, CLI output, and all original tests are provably unchanged.
+- **Update (this phase):** scoring and ranking have since been rewired onto the canonical models (`src/intentune/domain/scoring.py`, `src/intentune/domain/ranking.py`) as the single source of truth, resolving the "not yet unified" cost below for scoring/ranking specifically.
 
 ### Cost
 
-- Three shapes now coexist during the transition: the historical dictionary API, the historical dataclass API (`Song`, `UserProfile` in `src/recommender.py`), and the new canonical domain models in `src/intentune/domain/models.py`. They are not yet unified.
+- Two dict/dataclass *shapes* still coexist at the legacy boundary (the historical dictionary API and the historical dataclass API in `src/recommender.py`) alongside the canonical domain models -- but they are now thin conversions at the boundary, not separate implementations of the scoring/ranking math.
 - The legacy `UserProfile` dataclass still carries a deprecated, inert `likes_acoustic` field for backward compatibility.
+- `load_songs()`'s legacy dict shape assumes every candidate field is present (`int(candidate.tempo_bpm)` would fail on a `None` value); this remains true for the current CSV catalog but would need to change before a source with genuinely missing fields could flow through the legacy dict path.
+- The CLI path performs an extra `MusicCandidate -> legacy dict -> MusicCandidate`
+  conversion so the historical `load_songs()` and `recommend_songs()` shapes
+  remain unchanged.
 
 ### Revisit When
 
-Scoring and ranking are rewritten to consume `MusicCandidate`/`UserProfile`/`ScoreBreakdown` directly (see docs/development-phases.md, Phase 3's Expanded and Configurable Scoring Engine milestone), at which point the historical dict and dataclass shapes can be retired or reduced to thin compatibility wrappers.
+The "Expanded and Configurable Scoring Engine" milestone (see docs/development-phases.md, Phase 3) extends scoring to tempo/valence/acousticness and missing-feature normalization -- at that point the legacy dict API's fixed four-field shape will need a documented limitation notice or a wider replacement, since it cannot express per-feature weights or partial data.
 
 ## Trade-off Entry Template
 

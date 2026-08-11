@@ -8,10 +8,13 @@
 
 ```text
 intentune/
+├── .gitignore
 ├── README.md
 ├── model_card.md
 ├── ai_interactions.md
 ├── requirements.txt
+├── docs/
+│   └── project documentation
 ├── data/
 │   └── songs.csv
 ├── src/
@@ -20,15 +23,31 @@ intentune/
 │   ├── recommender.py
 │   └── intentune/
 │       ├── __init__.py
-│       └── domain/
+│       ├── domain/
+│       │   ├── __init__.py
+│       │   ├── models.py
+│       │   ├── scoring.py
+│       │   └── ranking.py
+│       ├── application/
+│       │   ├── __init__.py
+│       │   └── recommendation_service.py
+│       └── adapters/
 │           ├── __init__.py
-│           └── models.py
+│           └── csv_catalog.py
 └── tests/
     ├── test_recommender.py
-    └── test_domain_models.py
+    ├── test_domain_models.py
+    ├── test_csv_catalog.py
+    ├── test_canonical_scoring.py
+    ├── test_canonical_ranking.py
+    ├── test_recommendation_service.py
+    └── test_legacy_compatibility.py
 ```
 
-`src/intentune/domain/models.py` is the first piece of the proposed `domain/` directory below. It was introduced deliberately small: only typed models and their validation, no scoring, ranking, or adapters yet. Empty placeholder folders (`api/`, `adapters/`, `application/`, `ports/`, `ui/`) are intentionally not created until working code needs them, per the Migration Rule below.
+`domain/scoring.py` and `domain/ranking.py` implement the current four-feature scoring rule and ranking/tie-breaking as the single source of truth; `application/recommendation_service.py` is a first, minimal use-case orchestrator; `adapters/csv_catalog.py` is the first adapter, converting raw CSV rows into `MusicCandidate` objects. `src/recommender.py`'s legacy dict/dataclass functions now call into these rather than containing their own copy of the logic. Placeholder folders (`api/`, `ports/`, `ui/`, `database_catalog.py`, `youtube_catalog.py`, `ai_intent_parser.py`) are still intentionally not created until working code needs them, per the Migration Rule below.
+
+No catalog interface or `ports/` module exists yet. The CSV adapter is working
+code, but the compatibility layer currently calls it directly.
 
 ## Proposed Incremental Structure
 

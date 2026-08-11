@@ -6,27 +6,50 @@
 
 ## Current Workflow
 
+The public functions the CLI calls (`load_songs()`, `recommend_songs()`) still have their historical signatures and dictionary shapes, but internally they now delegate to the canonical domain flow:
+
 ```text
 songs.csv
    |
    v
-load_songs()
-   |
-   v
-hard-coded user profile
-   |
-   v
-score_song() for every song
-   |
-   v
-sort by score, title, and artist
-   |
-   v
-return top k
-   |
-   v
-print recommendations and reasons
+load_songs()  --delegates to-->  CSV adapter (src/intentune/adapters/csv_catalog.py)
+                                       |
+                                       v
+                                 MusicCandidate list
+                                       |
+                                       v
+        load_songs() converts candidates to the historical song dict list
+                                       |
+hard-coded user profile                |
+   |                                   |
+   v                                   v
+legacy_profile_to_user_profile()   recommend_songs() converts song dicts
+   |                               back to MusicCandidate objects
+   v                                   |
+        canonical UserProfile + MusicCandidate list
+                        |
+                        v
+        rank_candidates() (src/intentune/domain/ranking.py)
+          -- calls score_candidate() (src/intentune/domain/scoring.py)
+             for every candidate --
+                        |
+                        v
+              list[Recommendation], ranked and assigned ranks
+                        |
+                        v
+        recommend_songs() converts back to the historical
+        {"song", "score", "reasons"} dict shape
+                        |
+                        v
+              print recommendations and reasons
 ```
+
+`score_song()` follows the same conversion pattern for a single song: legacy dict in, `MusicCandidate`/`UserProfile` built, `score_candidate()` called, `(score, reasons)` returned.
+
+The `MusicCandidate -> historical dict -> MusicCandidate` conversion in the
+CLI path is intentional legacy compatibility, not the desired path for new
+callers. New internal callers can pass canonical candidates directly to
+`recommend_music()`.
 
 ## First Backend Workflow
 
