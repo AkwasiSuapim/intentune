@@ -25,8 +25,8 @@ Microservices would add network calls, service discovery, distributed logging, a
 ## High-Level Components
 
 The diagram below is the planned modular-monolith direction. The current
-implementation has a domain layer, a minimal application service, and a CSV
-adapter, but it does not yet define a catalog port or an API/UI boundary.
+implementation has a domain layer, an application service, a catalog port,
+and a CSV adapter; it does not yet define an API/UI boundary.
 
 ```text
 Client or browser
@@ -94,7 +94,7 @@ recommend_music(request)
   -> build response
 ```
 
-**Current:** `src/intentune/application/recommendation_service.py` implements a first, minimal `recommend_music(candidates, profile, limit)` that validates its inputs and delegates to canonical ranking. It has no request/response concept yet (no diversification, no HTTP request object) -- those arrive with Phase 4's FastAPI layer.
+**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept yet (no diversification, no HTTP request object) -- those arrive with Phase 4's FastAPI layer.
 
 **Dependency direction (Current):** the application layer may import the
 domain, and adapters may construct domain models. The domain does not import
@@ -124,6 +124,8 @@ Examples:
 - Intent parser
 - External video provider
 
+**Current:** `src/intentune/ports/catalog.py` defines `Catalog`, a `Protocol` with one method, `list_candidates() -> Sequence[MusicCandidate]`. It names no CSV, database, or YouTube concept -- any adapter that returns `MusicCandidate` objects satisfies it. `src/intentune/application/recommendation_service.py`'s `recommend_from_catalog()` depends on this port, not on `CsvCatalog` or any other concrete adapter. User repository, feedback repository, and intent parser ports remain future work.
+
 ### Adapter Layer
 
 Implements ports using specific technology:
@@ -134,12 +136,7 @@ Implements ports using specific technology:
 - AI provider client
 - YouTube Data API client
 
-**Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. The legacy `load_songs()` in `src/recommender.py` calls it and converts the result back into the historical dictionary shape for compatibility. SQLite/PostgreSQL repositories, an AI provider client, and a YouTube client remain future adapters.
-
-**Temporary limitation:** there is no formal catalog port or protocol yet.
-The legacy compatibility layer calls the CSV adapter directly. Introducing a
-catalog abstraction remains pending work; no placeholder port module has been
-created.
+**Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. It exposes both the functional `load_music_candidates()` loader and `CsvCatalog`, a small class implementing the `Catalog` port around that loader. The legacy `load_songs()` in `src/recommender.py` calls `load_music_candidates()` directly and converts the result back into the historical dictionary shape for compatibility -- the legacy path predates the port and was not rewired onto it, since that would change nothing observable and adds risk for no behavioral benefit. SQLite/PostgreSQL repositories, an AI provider client, and a YouTube client remain future adapters.
 
 ### UI Layer
 

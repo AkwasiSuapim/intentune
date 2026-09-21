@@ -113,19 +113,20 @@ Use official APIs, normalize metadata, avoid unsupported claims, and keep the in
 
 ## Canonical Domain Internals with Legacy Boundary Compatibility
 
-**Status:** Implemented; owner approval pending for the expanded rewiring scope
+**Status:** Implemented and accepted (TD-009)
 
 **Approval note:** Preserving the existing dictionary, dataclass, scoring,
 ranking, and CLI behavior was explicitly approved. Moving scoring/ranking
-into canonical modules and adding application/adapter modules went beyond the
-earlier model-only/minimal-structure boundary. That part must be reviewed
-before this trade-off is treated as accepted.
+into canonical modules and adding application/port/adapter modules went
+beyond the earlier model-only/minimal-structure boundary; the owner has since
+approved continuing with this canonical modular architecture.
 
 ### Gain
 
 - A single typed, source-independent vocabulary (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`) exists for future FastAPI, AI, YouTube, and database work to target.
 - Existing scoring, ranking, CLI output, and all original tests are provably unchanged.
 - **Update (this phase):** scoring and ranking have since been rewired onto the canonical models (`src/intentune/domain/scoring.py`, `src/intentune/domain/ranking.py`) as the single source of truth, resolving the "not yet unified" cost below for scoring/ranking specifically.
+- **Update (this phase):** a formal `Catalog` port (`src/intentune/ports/catalog.py`) and application-level catalog dependency injection (`recommend_from_catalog()`) now exist, so the application layer depends on an abstraction rather than the concrete CSV adapter.
 
 ### Cost
 

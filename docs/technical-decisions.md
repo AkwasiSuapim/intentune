@@ -96,19 +96,21 @@ This file records important architectural and implementation decisions. Each dec
 
 ## TD-009: Canonical Domain Objects Are the Internal Source of Truth
 
-**Status:** Pending owner approval
+**Status:** Accepted
 
 **Approval note:** Phase 2 explicitly approved source-independent domain
 models, boundary conversion, and preservation of the legacy public
 interfaces. The completed implementation also moved scoring and ranking into
-canonical modules and added an application service and CSV adapter. That
-expanded module-boundary decision is implemented and tested, but it exceeded
-the earlier model-only/minimal-structure boundary and requires owner review
-before this decision is marked accepted.
+canonical modules and added an application service and CSV adapter. The
+owner has approved continuing with this canonical modular architecture,
+including the module-boundary expansion beyond the earlier
+model-only/minimal-structure scope.
 
 **Decision:** Canonical domain objects are the internal source of truth. Storage formats, HTTP schemas, provider responses, and legacy dictionaries must be converted at system boundaries.
 
 **Detail:** `src/intentune/domain/scoring.py` (`score_candidate`) and `src/intentune/domain/ranking.py` (`rank_candidates`) now contain the only implementation of the current four-feature scoring and ranking rules. `src/recommender.py`'s legacy `score_song()` and `recommend_songs()` convert their dict inputs into `MusicCandidate`/`UserProfile` at the top of the function, delegate to the canonical modules, and convert the result back into the historical `{"song", "score", "reasons"}` shape. `src/intentune/adapters/csv_catalog.py` is the only module that knows about CSV column names or file paths; `load_songs()` calls it and converts `MusicCandidate` objects back into the historical dict shape.
+
+**Update (this phase):** a formal `Catalog` port (`src/intentune/ports/catalog.py`, a `Protocol` with `list_candidates()`) now sits between the application layer and any catalog implementation. `CsvCatalog` (`src/intentune/adapters/csv_catalog.py`) implements the port around the existing `load_music_candidates()` loader. `recommend_from_catalog()` (`src/intentune/application/recommendation_service.py`) depends on the `Catalog` port rather than the concrete CSV adapter, so it can be tested with an in-memory fake catalog and is ready to accept a future database or YouTube catalog without a rewrite. `recommend_music()` is unchanged and still accepts a candidate list directly.
 
 **Reason:** TD-008 introduced the canonical models but left scoring and ranking duplicated between the legacy dict/dataclass path and the (until now, unused) canonical models. Keeping two implementations of the same scoring math in sync by hand is exactly the kind of drift the canonical models were meant to prevent.
 

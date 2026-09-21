@@ -14,6 +14,10 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - A first application-service orchestrator (`src/intentune/application/recommendation_service.py`, `recommend_music()`) coordinating canonical scoring and ranking for one use case.
 - Legacy boundary converters in `src/recommender.py`: `legacy_profile_to_user_profile()` and `song_dict_to_music_candidate()`.
 - `tests/test_csv_catalog.py`, `tests/test_canonical_scoring.py`, `tests/test_canonical_ranking.py`, `tests/test_recommendation_service.py`, `tests/test_legacy_compatibility.py`.
+- A formal catalog port, `Catalog` (`src/intentune/ports/catalog.py`), a `Protocol` with one method, `list_candidates() -> Sequence[MusicCandidate]`. Contains no CSV/database/YouTube-specific language.
+- `CsvCatalog` (`src/intentune/adapters/csv_catalog.py`), a small class implementing the `Catalog` port around the existing `load_music_candidates()` loader.
+- `recommend_from_catalog(catalog, profile, limit)` (`src/intentune/application/recommendation_service.py`), an application-level orchestrator that depends on the `Catalog` port rather than a concrete adapter, so a fake in-memory catalog can be injected for tests.
+- `tests/test_catalog_port.py`, plus new tests in `tests/test_csv_catalog.py` and `tests/test_recommendation_service.py` covering `CsvCatalog` and `recommend_from_catalog()`.
 
 ### Changed
 
@@ -41,8 +45,8 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - The scoring algorithm, its 10-point maximum, and its sharp similarity cutoff are unchanged; it still only uses genre, mood, energy, and danceability.
 - `score_candidate()` requires genre, mood, energy, and danceability to be present -- missing-feature normalization for partial YouTube-style metadata is not implemented yet.
 - The legacy dict shape (`load_songs()`'s output) assumes every candidate field is present; a `MusicCandidate` with a `None` audio feature would fail converting back to that shape. Not an issue for the current CSV catalog, where every field is always populated.
-- The compatibility CLI path performs an extra `MusicCandidate -> legacy dict -> MusicCandidate` conversion.
-- A formal catalog interface/port has not been introduced; the legacy compatibility layer calls the CSV adapter directly.
+- The compatibility CLI path performs an extra `MusicCandidate -> legacy dict -> MusicCandidate` conversion; it calls `load_music_candidates()` directly rather than through `CsvCatalog`/`Catalog`, since the legacy dict shape predates the port and rewiring it would change nothing observable.
+- The CLI (`src/main.py`) does not yet use `recommend_from_catalog()` -- it still runs the legacy `load_songs()`/`recommend_songs()` path. Wiring a catalog-backed entry point into the CLI is a future decision, not required for Phase 2.
 
 ### Current Baseline
 
@@ -50,7 +54,9 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Content-based scoring using genre, mood, energy, and danceability
 - Command-line recommendation display
 - Human-readable scoring reasons
-- Pytest regression suite
+- Formal `Catalog` port with a `CsvCatalog` implementation
+- Catalog-backed application orchestration (`recommend_from_catalog()`)
+- Pytest regression suite (131 tests)
 
 ## Version Template
 

@@ -11,6 +11,7 @@ from typing import List, Sequence
 
 from src.intentune.domain.models import MusicCandidate, Recommendation, UserProfile
 from src.intentune.domain.ranking import rank_candidates
+from src.intentune.ports.catalog import Catalog
 
 
 def recommend_music(
@@ -26,3 +27,21 @@ def recommend_music(
             raise TypeError("candidates must contain only MusicCandidate instances")
 
     return rank_candidates(candidates, profile, limit=limit)
+
+
+def recommend_from_catalog(
+    catalog: Catalog,
+    profile: UserProfile,
+    limit: int = 5,
+) -> List[Recommendation]:
+    """Produce recommendations for one profile using candidates from a catalog port.
+
+    Depends only on the Catalog port, not any concrete adapter -- callers can
+    inject a CsvCatalog, a future database or YouTube catalog, or an
+    in-memory fake catalog for tests.
+    """
+    if not isinstance(catalog, Catalog):
+        raise TypeError("catalog must implement the Catalog port (a list_candidates() method)")
+
+    candidates = catalog.list_candidates()
+    return recommend_music(candidates, profile, limit=limit)

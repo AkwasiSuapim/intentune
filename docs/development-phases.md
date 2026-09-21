@@ -48,9 +48,9 @@ Create a shared understanding of the product, architecture, boundaries, and road
 
 ## Phase 2: Core Domain Refactor
 
-**Status:** Partially complete. The current four-feature baseline milestone is
-complete and verified; the listed formal catalog interface/port has not been
-implemented.
+**Status:** Complete. The current four-feature baseline milestone, the formal
+catalog port, and catalog-backed application orchestration are all
+implemented and verified.
 
 ### Goal
 
@@ -78,9 +78,9 @@ Separate pure recommendation logic from CLI and storage concerns.
 - CSV adapter added (`src/intentune/adapters/csv_catalog.py`), converting raw CSV rows into `MusicCandidate`; `load_songs()` now delegates to it instead of parsing CSV itself.
 - A first application-service orchestrator added (`src/intentune/application/recommendation_service.py`, `recommend_music()`).
 - `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` now convert to canonical models and delegate to the canonical scorer/ranker, rather than containing a second copy of the scoring math; the now-dead `_calculate_similarity_points()`/`_validate_numeric_preference()` helpers were removed.
-- Regression tests confirmed: 119 tests pass; CLI output matches the documented baseline; legacy and canonical outputs are behaviorally equivalent across the full 20-song catalog, not only the top five.
+- Regression tests confirmed: 119 tests passed before this phase's catalog-port work; 131 tests pass now. CLI output matches the documented baseline; legacy and canonical outputs are behaviorally equivalent across the full 20-song catalog, not only the top five.
 - Completion criteria for the current four-feature scoring path are met: the domain layer is independent of FastAPI/Streamlit/AI/YouTube/databases, and current and new tests pass. `score_candidate()` already matches a candidate's genre/mood against *any* of a profile's `preferred_genres`/`preferred_moods` (still an exact, case-insensitive match, not partial similarity) -- the legacy dict converter simply never supplies more than one of each, since the legacy dict profile only ever carries a single favorite genre and mood.
-- Remaining Phase 2 item: define a catalog interface/port when a second catalog implementation or application-level injection requirement makes the abstraction concrete. No empty placeholder module has been added.
+- A formal catalog port is implemented: `src/intentune/ports/catalog.py` defines `Catalog`, a `Protocol` with a single `list_candidates() -> Sequence[MusicCandidate]` method. `src/intentune/adapters/csv_catalog.py` adds `CsvCatalog`, a thin class binding a CSV path to `list_candidates()` around the existing `load_music_candidates()` loader. `src/intentune/application/recommendation_service.py` adds `recommend_from_catalog(catalog, profile, limit)`, which depends on the `Catalog` port rather than the concrete CSV adapter and is tested with an in-memory fake catalog. `recommend_music(candidates, profile, limit)` is unchanged.
 - Deferred to Phase 3: configurable weights, partial similarity, missing-feature handling, and diversity re-ranking.
 
 ## Phase 3: Recommendation Logic Improvements

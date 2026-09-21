@@ -49,7 +49,22 @@ legacy_profile_to_user_profile()   recommend_songs() converts song dicts
 The `MusicCandidate -> historical dict -> MusicCandidate` conversion in the
 CLI path is intentional legacy compatibility, not the desired path for new
 callers. New internal callers can pass canonical candidates directly to
-`recommend_music()`.
+`recommend_music()`, or use `recommend_from_catalog(catalog, profile, limit)`
+to request candidates from a `Catalog` port implementation (currently
+`CsvCatalog`) instead of assembling the candidate list themselves:
+
+```text
+catalog.list_candidates() (src/intentune/ports/catalog.py Catalog protocol)
+   |
+   v
+recommend_from_catalog() (src/intentune/application/recommendation_service.py)
+   |
+   v
+recommend_music() -> rank_candidates() -> score_candidate()
+```
+
+The CLI does not use `recommend_from_catalog()` yet -- it still runs through
+the legacy `load_songs()`/`recommend_songs()` path shown above, unchanged.
 
 ## First Backend Workflow
 
