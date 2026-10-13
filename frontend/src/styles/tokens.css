@@ -1,0 +1,130 @@
+/*
+ * Intentune design tokens.
+ * Values come from the approved design (docs/frontend/design/approved/Main.dc.html).
+ */
+
+:root {
+  /* Foundation: ground, surfaces and text never shift with context. */
+  --color-ground: #0f0d16;
+  --color-surface-low: #161320; /* cards, chips, panels */
+  --color-surface: #181423; /* composer, sheets */
+  --color-raised: #211b2d; /* open / selected surfaces */
+  --color-control-idle: #2a2338; /* filled controls at rest */
+
+  --color-text: #f8f7fb;
+  --color-text-soft: #e4deee;
+  --color-text-icon: #cfc7dd;
+  --color-text-muted: #a79fb8;
+  --color-text-subtle: #8f86a3;
+  --color-on-accent: #ffffff;
+
+  --color-violet: #7c3aed;
+  --color-violet-high: #a855f7;
+  --color-mauve: #c084fc;
+  --color-lavender: #e9d5ff;
+
+  --border-hairline: rgb(255 255 255 / 0.04);
+  --border-subtle: rgb(255 255 255 / 0.06);
+  --border-default: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.1);
+
+  /* Contextual accent: the only tokens that move with listening context. */
+  --accent: #8b47f0;
+  --accent-high: #c084fc;
+  --accent-soft: rgb(168 85 247 / 0.16);
+  --accent-ring: rgb(192 132 252 / 0.55);
+  --accent-glow: rgb(139 71 240 / 0.24);
+  --accent-label: #d8b4fe;
+
+  /* Typography */
+  --font-display:
+    'Bricolage Grotesque', 'Helvetica Neue', system-ui, -apple-system,
+    'Segoe UI', Roboto, Arial, sans-serif;
+  --font-ui:
+    'Instrument Sans', 'Helvetica Neue', system-ui, -apple-system, 'Segoe UI',
+    Roboto, Arial, sans-serif;
+
+  --text-display: 2.0625rem; /* 33px */
+  --text-heading: 1.25rem; /* 20px */
+  --text-title: 1.0625rem; /* 17px */
+  --text-body-lg: 0.96875rem; /* 15.5px */
+  --text-body: 0.9375rem; /* 15px */
+  --text-body-sm: 0.875rem; /* 14px */
+  --text-note: 0.84375rem; /* 13.5px */
+  --text-control: 0.8125rem; /* 13px */
+  --text-caption: 0.78125rem; /* 12.5px */
+  --text-label: 0.6875rem; /* 11px */
+
+  --leading-display: 1.12;
+  --leading-title: 1.3;
+  --leading-body: 1.45;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --tracking-display: -0.025em;
+  --tracking-title: -0.01em;
+  --tracking-label: 0.09em;
+
+  /* Spacing: named by pixel value. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-28: 28px;
+
+  /* Radius: shrinks as surfaces get smaller or more nested. */
+  --radius-sheet: 28px;
+  --radius-hero: 24px;
+  --radius-card: 20px;
+  --radius-panel: 16px;
+  --radius-control: 14px;
+  --radius-control-sm: 12px;
+  --radius-thumb: 10px;
+  --radius-pill: 999px;
+
+  /* Layout */
+  --gutter: var(--space-16);
+  --column-max: 600px;
+  --touch-target: 44px;
+  --header-height: 56px;
+  --composer-height: 58px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --duration-color: 220ms;
+}
+
+[data-accent='focused'] {
+  --accent: #6a4fd0;
+  --accent-high: #b9a8f0;
+  --accent-soft: rgb(124 58 237 / 0.13);
+  --accent-ring: rgb(185 168 240 / 0.5);
+  --accent-glow: rgb(106 79 208 / 0.13);
+  --accent-label: #c9bdf5;
+}
+
+[data-accent='calm'] {
+  --accent: #9a62d6;
+  --accent-high: #e9d5ff;
+  --accent-soft: rgb(192 132 252 / 0.13);
+  --accent-ring: rgb(233 213 255 / 0.5);
+  --accent-glow: rgb(192 132 252 / 0.15);
+  --accent-label: #e9d5ff;
+}
+
+[data-accent='driven'] {
+  --accent: #7c3aed;
+  --accent-high: #a855f7;
+  --accent-soft: rgb(124 58 237 / 0.24);
+  --accent-ring: rgb(168 85 247 / 0.75);
+  --accent-glow: rgb(124 58 237 / 0.34);
+  --accent-label: #c084fc;
+}

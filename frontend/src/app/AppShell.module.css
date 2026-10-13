@@ -1,0 +1,49 @@
+.shell {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0
+    env(safe-area-inset-left);
+  background:
+    radial-gradient(
+      130% 40% at 50% -8%,
+      var(--accent-glow) 0%,
+      rgb(15 13 22 / 0) 72%
+    ),
+    var(--color-ground);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--column-max);
+  height: 100%;
+  margin-inline: auto;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding: var(--space-8) var(--gutter) var(--space-14);
+}
+
+.content::-webkit-scrollbar {
+  display: none;
+}
+
+.dock {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-10) 0
+    max(var(--space-14), env(safe-area-inset-bottom));
+  background: var(--color-ground);
+  border-top: 1px solid var(--border-hairline);
+}
