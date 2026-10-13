@@ -1,0 +1,60 @@
+/*
+ * Labels are never truncated: when two actions do not fit, the row scrolls
+ * sideways instead. The 4px padding / negative margin leaves room for focus rings.
+ */
+.actions {
+  scrollbar-width: none;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: var(--space-8);
+  overflow-x: auto;
+  margin: calc(-1 * var(--space-4));
+  padding: var(--space-4);
+}
+
+.actions::-webkit-scrollbar {
+  display: none;
+}
+
+.action {
+  position: relative;
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 var(--space-14);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-low);
+  color: var(--color-text-soft);
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+/* Extends the 40px pill to a 44px touch target. */
+.action::before {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+
+/* Inside a narrow TuneBar the pills tighten so two actions still fit beside Tune. */
+@container tunebar (width < 346px) {
+  .actions {
+    gap: var(--space-6);
+  }
+
+  .action {
+    padding: 0 var(--space-12);
+  }
+}
+
+@container tunebar (width < 332px) {
+  .actions {
+    gap: var(--space-4);
+  }
+
+  .action {
+    padding: 0 9px;
+  }
+}

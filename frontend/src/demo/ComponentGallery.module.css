@@ -1,0 +1,112 @@
+.page {
+  height: 100vh;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.column {
+  width: 100%;
+  max-width: var(--column-max);
+  margin-inline: auto;
+  padding-bottom: 48px;
+}
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-20) var(--gutter) var(--space-8);
+}
+
+.pageTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-heading);
+  line-height: var(--leading-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-heading);
+}
+
+.pageNote {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm);
+}
+
+.sceneLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding-top: var(--space-4);
+}
+
+.sceneLink {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-14);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-soft);
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.section {
+  padding-top: var(--space-28);
+}
+
+.sectionTitle {
+  margin: 0 var(--gutter);
+  padding-bottom: var(--space-8);
+  border-bottom: 1px solid var(--border-default);
+  font-family: var(--font-display);
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+}
+
+.variant {
+  padding-top: var(--space-16);
+}
+
+.variantLabel {
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  margin: 0 var(--gutter) var(--space-10);
+  color: var(--color-text-subtle);
+}
+
+.inset {
+  padding: 0 var(--gutter);
+}
+
+.edge {
+  min-width: 0;
+}
+
+/* Stands in for the app shell around components that fill or overlay it. */
+.frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 640px;
+  overflow: hidden;
+  margin: 0 var(--gutter);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--color-ground);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+}

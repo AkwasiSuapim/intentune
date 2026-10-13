@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <defs>
+    <radialGradient id="v" cx=".5" cy=".6" r=".72"><stop offset=".18" stop-color="#0F0D16" stop-opacity="0"/><stop offset=".72" stop-color="#0F0D16" stop-opacity=".78"/></radialGradient>
+    <filter id="f" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="40"/></filter>
+  </defs>
+  <rect width="400" height="400" fill="#7C3AED"/>
+  <g filter="url(#f)">
+    <path d="M200 240 L-200 240 L-200 -200 L200 -200 Z" fill="#E7895B"/>
+    <path d="M200 240 L200 -200 L600 -200 L600 240 Z" fill="#A855F7"/>
+    <path d="M200 240 L600 240 L600 640 L-200 640 L-200 240 Z" fill="#7C3AED"/>
+  </g>
+  <rect width="400" height="400" fill="url(#v)"/>
+</svg>

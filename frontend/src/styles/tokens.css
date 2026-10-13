@@ -10,9 +10,13 @@
   --color-surface: #181423; /* composer, sheets */
   --color-raised: #211b2d; /* open / selected surfaces */
   --color-control-idle: #2a2338; /* filled controls at rest */
+  --color-surface-sunken: #141120; /* history rows, drawer, summaries */
+  --color-track: #2e2640; /* progress track */
+  --color-control-muted: #3a3150; /* unfilled meters, grabbers */
 
   --color-text: #f8f7fb;
   --color-text-soft: #e4deee;
+  --color-text-dim: #d9d2e6;
   --color-text-icon: #cfc7dd;
   --color-text-muted: #a79fb8;
   --color-text-subtle: #8f86a3;
@@ -27,6 +31,35 @@
   --border-subtle: rgb(255 255 255 / 0.06);
   --border-default: rgb(255 255 255 / 0.08);
   --border-strong: rgb(255 255 255 / 0.1);
+  --border-emphasis: rgb(255 255 255 / 0.3);
+  --border-dashed: #5b4f73;
+
+  --fill-quiet: rgb(255 255 255 / 0.03);
+  --scrim: rgb(8 6 12 / 0.66);
+  --scrim-strong: rgb(8 6 12 / 0.72);
+
+  /* Artwork: fallback when a song has no artwork, and the contrast treatment for text over it. */
+  --artwork-fallback:
+    radial-gradient(
+      80% 70% at 28% 22%,
+      rgb(139 71 240 / 0.42) 0%,
+      rgb(139 71 240 / 0) 62%
+    ),
+    radial-gradient(
+      60% 60% at 85% 90%,
+      rgb(192 132 252 / 0.18) 0%,
+      rgb(192 132 252 / 0) 70%
+    ),
+    #1a1526;
+  --artwork-glyph: rgb(233 213 255 / 0.7);
+  --artwork-scrim: linear-gradient(
+    180deg,
+    rgb(15 13 22 / 0) 32%,
+    rgb(15 13 22 / 0.62) 60%,
+    rgb(15 13 22 / 0.94) 100%
+  );
+  --artwork-text-shadow: 0 1px 14px rgb(15 13 22 / 0.5);
+  --artwork-veil: rgb(15 13 22 / 0.45);
 
   /* Contextual accent: the only tokens that move with listening context. */
   --accent: #8b47f0;
@@ -45,19 +78,29 @@
     Roboto, Arial, sans-serif;
 
   --text-display: 2.0625rem; /* 33px */
+  --text-hero: 2rem; /* 32px */
+  --text-wordmark: 1.3125rem; /* 21px */
   --text-heading: 1.25rem; /* 20px */
   --text-title: 1.0625rem; /* 17px */
+  --text-input: 1rem; /* 16px: keeps iOS from zooming on focus */
+  --text-subtitle: 1rem; /* 16px */
   --text-body-lg: 0.96875rem; /* 15.5px */
   --text-body: 0.9375rem; /* 15px */
+  --text-row: 0.90625rem; /* 14.5px */
   --text-body-sm: 0.875rem; /* 14px */
   --text-note: 0.84375rem; /* 13.5px */
   --text-control: 0.8125rem; /* 13px */
   --text-caption: 0.78125rem; /* 12.5px */
+  --text-micro: 0.75rem; /* 12px */
   --text-label: 0.6875rem; /* 11px */
 
-  --leading-display: 1.12;
+  --leading-hero: 1.0625;
+  --leading-display: 1.121;
   --leading-title: 1.3;
-  --leading-body: 1.45;
+  --leading-heading: 1.2;
+  --leading-ui: 1.22; /* default: the natural line height of Instrument Sans */
+  --leading-body: 1.467;
+  --leading-snug: 1.4;
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -65,8 +108,11 @@
   --weight-bold: 700;
 
   --tracking-display: -0.025em;
+  --tracking-wordmark: -0.02em;
+  --tracking-heading: -0.015em;
   --tracking-title: -0.01em;
   --tracking-label: 0.09em;
+  --tracking-eyebrow: 0.12em;
 
   /* Spacing: named by pixel value. */
   --space-2: 2px;
@@ -96,6 +142,9 @@
   --touch-target: 44px;
   --header-height: 56px;
   --composer-height: 58px;
+  --hero-art-height: 236px;
+  --sheet-max: 560px;
+  --drawer-width: 304px;
 
   /* Motion */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);

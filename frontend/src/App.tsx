@@ -1,14 +1,7 @@
-import AppShell from './app/AppShell.tsx'
-import ComposerPlaceholder from './app/ComposerPlaceholder.tsx'
-import MobileHeader from './app/MobileHeader.tsx'
+import Demo from './demo/Demo.tsx'
 
 function App() {
-  return (
-    <AppShell
-      header={<MobileHeader title="New session" />}
-      composer={<ComposerPlaceholder />}
-    />
-  )
+  return <Demo />
 }
 
 export default App

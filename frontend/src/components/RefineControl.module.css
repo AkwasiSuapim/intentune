@@ -1,0 +1,180 @@
+.control {
+  container: refine / inline-size;
+  margin: 0 var(--gutter);
+  padding: var(--space-4) var(--space-4) var(--space-8);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-low);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+}
+
+.tabs {
+  flex: 1;
+  display: flex;
+  gap: var(--space-2);
+  padding-left: var(--space-4);
+}
+
+.tab {
+  position: relative;
+  height: 40px;
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-control-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-control);
+  font-weight: var(--weight-semibold);
+  transition:
+    background-color var(--duration-color) ease,
+    color var(--duration-color) ease;
+}
+
+/* Extends the 40px tabs and choices to a 44px touch target. */
+.tab::before,
+.choice::before {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+
+.tab[aria-selected='true'] {
+  background: var(--color-control-idle);
+  color: var(--color-text);
+}
+
+.close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  border-radius: var(--radius-control-sm);
+  color: var(--color-text-muted);
+}
+
+.energy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-2) var(--space-8) 0 var(--space-12);
+}
+
+/* The label column narrows before the energy buttons ever do. */
+.energyLabel {
+  flex: 0 1 92px;
+  min-width: 70px;
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.bars {
+  flex: 1 0 216px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.barButton {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  position: relative;
+  flex: 0 0 40px;
+  height: 48px;
+  padding: 0 0 var(--space-6);
+}
+
+/* Extends the 40px energy button to a 44px touch target. */
+.barButton::before {
+  content: '';
+  position: absolute;
+  inset: 0 -2px;
+}
+
+/*
+ * Too narrow for the label and five 44px targets side by side: the label
+ * moves above the bars, which then share the full width.
+ */
+@container refine (width < 314px) {
+  .energy {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .energyLabel {
+    flex: none;
+    min-width: 0;
+  }
+
+  .bars {
+    flex: none;
+  }
+
+  .barButton {
+    flex: 1 1 var(--touch-target);
+  }
+
+  .barButton::before {
+    inset: 0;
+  }
+}
+
+.bar {
+  width: 10px;
+  border-radius: 4px;
+  background: var(--color-control-muted);
+  transition: background-color var(--duration-color) ease;
+}
+
+.barButton[data-filled] .bar {
+  background: var(--accent-high);
+}
+
+/* The selected level also gets a ring, so the state is not colour-only. */
+.barButton[aria-checked='true'] .bar {
+  outline: 1.5px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+.choices {
+  scrollbar-width: none;
+  display: flex;
+  gap: var(--space-6);
+  overflow-x: auto;
+  /* Extra padding, cancelled by the margin, leaves room for focus rings. */
+  margin: calc(-1 * var(--space-2)) 0 calc(-1 * var(--space-4));
+  padding: var(--space-4) var(--space-12);
+}
+
+.choices::-webkit-scrollbar {
+  display: none;
+}
+
+.choice {
+  position: relative;
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 var(--space-14);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+  color: var(--color-text-dim);
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-color) ease,
+    border-color var(--duration-color) ease,
+    color var(--duration-color) ease;
+}
+
+.choice[aria-checked='true'] {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--color-text);
+}

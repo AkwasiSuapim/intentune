@@ -1,4 +1,5 @@
 .shell {
+  position: relative;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -22,19 +23,14 @@
   margin-inline: auto;
 }
 
+/* The content child (timeline or Tune in prompt) owns its padding and scrolling. */
 .content {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  padding: var(--space-8) var(--gutter) var(--space-14);
-}
-
-.content::-webkit-scrollbar {
-  display: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .dock {

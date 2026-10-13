@@ -1,0 +1,124 @@
+.composer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: var(--composer-height);
+  margin: 0 var(--gutter);
+  padding: 0 var(--space-6);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+}
+
+/* Leading slot: the Intentune glyph, or compact now-playing in its place. */
+.lead {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--touch-target);
+  height: var(--touch-target);
+}
+
+.glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-mauve);
+  transition: opacity var(--duration-color) ease;
+}
+
+.lead[data-mode='playing'] .glyph {
+  opacity: 0;
+}
+
+.mini {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+}
+
+.miniArt {
+  position: absolute;
+  inset: 0;
+}
+
+.equalizer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  padding-bottom: 13px;
+  background: var(--artwork-veil);
+}
+
+.equalizer > span {
+  width: 3px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--color-text);
+}
+
+.equalizer[data-playing] > span:nth-child(1) {
+  height: 9px;
+}
+
+.equalizer[data-playing] > span:nth-child(2) {
+  height: 15px;
+}
+
+.equalizer[data-playing] > span:nth-child(3) {
+  height: 11px;
+}
+
+.label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: var(--touch-target);
+  padding: 0 var(--space-2);
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-input);
+  text-overflow: ellipsis;
+}
+
+.input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+/* The field itself has no outline; the whole composer shows focus instead. */
+.composer:has(.input:focus-visible) {
+  border-color: var(--accent-ring);
+}
+
+.send {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  border-radius: var(--radius-pill);
+  background: var(--color-control-idle);
+  color: var(--color-on-accent);
+  transition: background-color var(--duration-color) ease;
+}
+
+.send[data-ready] {
+  background: var(--accent);
+}
