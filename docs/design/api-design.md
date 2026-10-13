@@ -159,6 +159,5 @@ Proposed standard response:
 
 - Whether recommendations are represented as created resources or calculated responses
 - Whether session identifiers are anonymous or attached to accounts
-- Whether the initial UI calls the application layer directly or always goes through FastAPI
 - Maximum allowed recommendation limit
 - Authentication requirements for the first public beta

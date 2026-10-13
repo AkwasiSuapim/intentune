@@ -13,23 +13,23 @@ The uploaded repository began as the CodePath Music Recommender Simulation start
 - `README.md`
 - `model_card.md`
 - `ai_interactions.md`
-- `requirements.txt`
-- `data/songs.csv`
-- `src/main.py`
-- `src/recommender.py`
-- `src/__init__.py`
-- `src/intentune/domain/models.py`
-- `src/intentune/domain/scoring.py`
-- `src/intentune/domain/ranking.py`
-- `src/intentune/application/recommendation_service.py`
-- `src/intentune/adapters/csv_catalog.py`
-- `tests/test_recommender.py`
-- `tests/test_domain_models.py`
-- `tests/test_canonical_scoring.py`
-- `tests/test_canonical_ranking.py`
-- `tests/test_csv_catalog.py`
-- `tests/test_recommendation_service.py`
-- `tests/test_legacy_compatibility.py`
+- `backend/requirements.txt`
+- `backend/data/songs.csv`
+- `backend/src/main.py`
+- `backend/src/recommender.py`
+- `backend/src/__init__.py`
+- `backend/src/intentune/domain/models.py`
+- `backend/src/intentune/domain/scoring.py`
+- `backend/src/intentune/domain/ranking.py`
+- `backend/src/intentune/application/recommendation_service.py`
+- `backend/src/intentune/adapters/csv_catalog.py`
+- `backend/tests/test_recommender.py`
+- `backend/tests/test_domain_models.py`
+- `backend/tests/test_canonical_scoring.py`
+- `backend/tests/test_canonical_ranking.py`
+- `backend/tests/test_csv_catalog.py`
+- `backend/tests/test_recommendation_service.py`
+- `backend/tests/test_legacy_compatibility.py`
 
 The archive also contains generated or local artifacts such as screenshots, Python caches, pytest caches, Graphify output, Git metadata, and macOS archive metadata.
 
@@ -95,7 +95,7 @@ The file still contains both dictionaries and dataclasses -- their public shapes
 
 ### Hard-Coded Adaptation
 
-**Resolved (Phase 2):** The object-oriented `Recommender` previously hard-coded preferred danceability to `0.5` regardless of what the caller supplied. The legacy `UserProfile` dataclass now has a real `preferred_danceability` field (defaulting to `0.5` to preserve historical behavior for existing call sites); the wrapper reads that field instead of a literal constant, so an explicit value now actually reaches scoring. See docs/technical-decisions.md, TD-008.
+**Resolved (Phase 2):** The object-oriented `Recommender` previously hard-coded preferred danceability to `0.5` regardless of what the caller supplied. The legacy `UserProfile` dataclass now has a real `preferred_danceability` field (defaulting to `0.5` to preserve historical behavior for existing call sites); the wrapper reads that field instead of a literal constant, so an explicit value now actually reaches scoring. See docs/decisions/technical-decisions.md, TD-008.
 
 ### Side Effects in Data Loading
 
@@ -109,7 +109,7 @@ The current interaction is terminal-only and the sample profile is hard-coded.
 
 The engine assumes all candidates have CSV-style genre, mood, energy, and danceability fields. Future YouTube candidates may not have all those values.
 
-**Partially addressed (this phase):** `load_songs()`, `score_song()`, and `recommend_songs()` are now internally wired through `MusicCandidate` (via `src/intentune/adapters/csv_catalog.py` and the boundary converters in `src/recommender.py`), and the canonical scorer (`src/intentune/domain/scoring.py`) raises a clear `ValueError` if a candidate is missing a required scoring field rather than inventing a value. What remains unaddressed: the scorer still *requires* genre, mood, energy, and danceability to be present -- it does not yet skip missing features and renormalize the active weight. That is the "Expanded and Configurable Scoring Engine" future milestone's missing-feature-handling principle (see docs/development-phases.md), needed before a YouTube candidate with partial metadata could be scored at all.
+**Partially addressed (this phase):** `load_songs()`, `score_song()`, and `recommend_songs()` are now internally wired through `MusicCandidate` (via `src/intentune/adapters/csv_catalog.py` and the boundary converters in `src/recommender.py`), and the canonical scorer (`src/intentune/domain/scoring.py`) raises a clear `ValueError` if a candidate is missing a required scoring field rather than inventing a value. What remains unaddressed: the scorer still *requires* genre, mood, energy, and danceability to be present -- it does not yet skip missing features and renormalize the active weight. That is the "Expanded and Configurable Scoring Engine" future milestone's missing-feature-handling principle (see docs/planning/development-phases.md), needed before a YouTube candidate with partial metadata could be scored at all.
 
 ### Compatibility Conversion Overhead
 
