@@ -102,7 +102,7 @@ A browser interface should provide:
 - New catalog providers should not require rewriting the recommendation domain.
 - Core logic must be covered by unit tests.
 
-**Current:** `src/intentune/domain/models.py` provides the canonical, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`) that a future FastAPI request schema, database repository, or YouTube adapter can target directly instead of inventing its own shape. See docs/technical-decisions.md, TD-008.
+**Current:** `src/intentune/domain/models.py` provides the canonical, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`) that a future FastAPI request schema, database repository, or YouTube adapter can target directly instead of inventing its own shape. See docs/decisions/technical-decisions.md, TD-008.
 
 ### Explainability
 

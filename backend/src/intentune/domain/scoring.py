@@ -8,7 +8,7 @@ separately maintained scoring implementation.
 
 The weights, the 0.5 similarity cutoff, and the reason wording are unchanged
 from the original CodePath baseline. Tempo, valence, and acousticness are not
-scored yet -- see docs/development-phases.md, "Expanded and Configurable
+scored yet -- see docs/planning/development-phases.md, "Expanded and Configurable
 Scoring Engine" for that future milestone.
 """
 
@@ -38,7 +38,7 @@ def score_candidate(candidate: MusicCandidate, profile: UserProfile) -> ScoreBre
 
     Requires preferred genre(s)/mood(s)/energy/danceability on the profile and
     genre/mood/energy/danceability on the candidate. This phase does not
-    implement missing-feature normalization (see docs/development-phases.md),
+    implement missing-feature normalization (see docs/planning/development-phases.md),
     so a missing required value raises ValueError instead of inventing a
     score.
     """

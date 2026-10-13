@@ -35,8 +35,8 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Defined the product direction from CodePath prototype to modular backend application.
 - Recorded the proposed modular-monolith architecture.
 - Documented planned AI and YouTube integrations as future adapters.
-- Recorded TD-008 (canonical domain models) and TD-009 (canonical domain objects as internal source of truth) in docs/technical-decisions.md.
-- Documented two future milestones in docs/development-phases.md: Expanded and Configurable Scoring Engine, and Context-Aware and User-Configurable Weighting.
+- Recorded TD-008 (canonical domain models) and TD-009 (canonical domain objects as internal source of truth) in docs/decisions/technical-decisions.md.
+- Documented two future milestones in docs/planning/development-phases.md: Expanded and Configurable Scoring Engine, and Context-Aware and User-Configurable Weighting.
 - Marked `likes_acoustic` on the legacy `UserProfile` dataclass as deprecated and inert.
 
 ### Known Limitations

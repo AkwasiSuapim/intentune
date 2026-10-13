@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-Intentune began as a CodePath Music Recommender Simulation and is being developed into a larger personalized music recommendation platform. The current application is a command-line content-based music recommendation simulator. It loads a catalog of songs from `data/songs.csv`, compares each song with an individual user profile, assigns a personalized score out of 10, and ranks the strongest matches. The scoring system uses genre, mood, energy, and danceability. Each recommendation also includes human-readable reasons explaining how the final score was calculated.
+Intentune began as a CodePath Music Recommender Simulation and is being developed into a larger personalized music recommendation platform. The current application is a command-line content-based music recommendation simulator. It loads a catalog of songs from `backend/data/songs.csv`, compares each song with an individual user profile, assigns a personalized score out of 10, and ranks the strongest matches. The scoring system uses genre, mood, energy, and danceability. Each recommendation also includes human-readable reasons explaining how the final score was calculated.
 
 ---
 
@@ -12,7 +12,7 @@ This project uses a simple content-based recommender. Each song is described by 
 
 ### Recommendation Workflow
 
-1. Load the song catalog from `data/songs.csv`.
+1. Load the song catalog from `backend/data/songs.csv`.
 2. Convert numerical fields such as energy and danceability into floats.
 3. Load or define an individual user profile.
 4. Use every song in the small catalog as a recommendation candidate.
@@ -71,9 +71,12 @@ The project uses pytest to cover CSV loading and type conversion, perfect and pa
 
 ### Setup
 
+The Python backend lives in `backend/`. Run the commands below from that directory.
+
 1. Create a virtual environment:
 
    ```bash
+   cd backend
    python -m venv .venv
    source .venv/bin/activate
    ```
@@ -92,19 +95,19 @@ The project uses pytest to cover CSV loading and type conversion, perfect and pa
 
 ### Running Tests
 
-Run the starter tests with:
+Run the starter tests from the `backend/` directory with:
 
 ```bash
 pytest
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+You can add more tests in `backend/tests/test_recommender.py`.
 
 ---
 
 ## Sample Recommendation Output
 
-Run the recommender with:
+Run the recommender from the `backend/` directory with:
 
 ```bash
 python -m src.main

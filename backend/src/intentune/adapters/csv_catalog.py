@@ -3,7 +3,7 @@
 This is the only module that knows about the CSV column names, file paths,
 and string-to-number conversion for the song catalog. The domain layer
 (src/intentune/domain/) has no knowledge of CSV at all -- see
-docs/architecture.md.
+docs/architecture/architecture.md.
 
 `id`, `title`, and `artist` are the only columns this adapter treats as
 strictly required, matching MusicCandidate's own required fields. Genre,
@@ -89,7 +89,7 @@ def music_candidate_from_csv_row(row: Dict) -> MusicCandidate:
 def load_music_candidates(csv_path: str) -> List[MusicCandidate]:
     """Read a CSV catalog file and return canonical MusicCandidate objects.
 
-    A relative path is resolved against the repository root, matching the
+    A relative path is resolved against the backend root (backend/), matching the
     historical behavior of src.recommender.load_songs().
     """
     csv_file = Path(csv_path)

@@ -15,27 +15,55 @@ The documents use these labels:
 
 ## Documentation Index
 
-1. [Project Description](project-description.md)
-2. [Product Requirements](product-requirements.md)
-3. [Current System Audit](current-system-audit.md)
-4. [Architecture](architecture.md)
-5. [System Workflow](system-workflow.md)
-6. [API Design](api-design.md)
-7. [Database Design](database-design.md)
-8. [Folder Structure](folder-structure.md)
-9. [Features](features.md)
-10. [Development Phases](development-phases.md)
-11. [Technical Decisions](technical-decisions.md)
-12. [Trade-offs](trade-offs.md)
-13. [Testing Strategy](testing-strategy.md)
-14. [Security and Privacy](security-and-privacy.md)
-15. [External Services](external-services.md)
-16. [Deployment](deployment.md)
-17. [Observability](observability.md)
-18. [Risks and Open Questions](risks-and-open-questions.md)
-19. [Decision Log Template](decision-log-template.md)
-20. [Phase Review Template](phase-review-template.md)
-21. [Changelog](changelog.md)
+The documents are grouped into folders by purpose.
+
+### `product/` — what Intentune is and what it must do
+
+- [Project Description](product/project-description.md)
+- [Product Requirements](product/product-requirements.md)
+- [Features](product/features.md)
+
+### `architecture/` — how the system is structured today and where it is heading
+
+- [Architecture](architecture/architecture.md)
+- [System Workflow](architecture/system-workflow.md)
+- [Folder Structure](architecture/folder-structure.md)
+- [Current System Audit](architecture/current-system-audit.md)
+
+### `design/` — interface, data, and integration designs
+
+- [API Design](design/api-design.md)
+- [Database Design](design/database-design.md)
+- [External Services](design/external-services.md)
+
+### `planning/` — roadmap and unresolved questions
+
+- [Development Phases](planning/development-phases.md)
+- [Risks and Open Questions](planning/risks-and-open-questions.md)
+
+### `decisions/` — why the system is built the way it is
+
+- [Technical Decisions](decisions/technical-decisions.md)
+- [Trade-offs](decisions/trade-offs.md)
+
+### `quality/` — testing and security
+
+- [Testing Strategy](quality/testing-strategy.md)
+- [Security and Privacy](quality/security-and-privacy.md)
+
+### `operations/` — running the system
+
+- [Deployment](operations/deployment.md)
+- [Observability](operations/observability.md)
+
+### `templates/` — reusable document templates
+
+- [Decision Log Template](templates/decision-log-template.md)
+- [Phase Review Template](templates/phase-review-template.md)
+
+### Project history
+
+- [Changelog](changelog.md)
 
 ## Documentation Rules
 

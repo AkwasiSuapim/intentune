@@ -5,7 +5,7 @@ Describes the one capability the application needs from a candidate source
 database tables, or the YouTube API. A CSV catalog, a future database
 catalog, and a future YouTube catalog can each satisfy this port by
 implementing list_candidates(); the application layer depends on this
-Protocol, not on any one of them. See docs/architecture.md.
+Protocol, not on any one of them. See docs/architecture/architecture.md.
 """
 
 from typing import Protocol, Sequence, runtime_checkable

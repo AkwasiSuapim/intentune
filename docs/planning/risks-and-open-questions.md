@@ -28,7 +28,6 @@
 
 ## Open Product Questions
 
-- Should the first browser version use Streamlit or a separate frontend?
 - Should users select both current mood and desired mood manually?
 - Which recommendation modes should exist first?
 - How many results should be shown by default?

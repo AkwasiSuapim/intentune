@@ -3,8 +3,8 @@
 These types describe music candidates, listener preferences, session intent,
 feature importance, and scoring results without depending on any particular
 data source (CSV, database, YouTube, Spotify) or delivery framework (FastAPI,
-Streamlit, HTTP, an ORM). See docs/architecture.md for the full boundary rules
-and docs/technical-decisions.md for the decision record behind this module.
+Streamlit, HTTP, an ORM). See docs/architecture/architecture.md for the full boundary rules
+and docs/decisions/technical-decisions.md for the decision record behind this module.
 
 This milestone only introduces the models and their validation. Nothing here
 changes the existing scoring algorithm in src/recommender.py.
@@ -133,7 +133,7 @@ class UserProfile:
     Every preference is optional: a user is not required to specify every
     field, and a missing preference must not be replaced with an invented
     default anywhere in the domain -- that decision is left to the future
-    scoring engine (see docs/development-phases.md).
+    scoring engine (see docs/planning/development-phases.md).
     """
 
     preferred_genres: Tuple[str, ...] = field(default_factory=tuple)

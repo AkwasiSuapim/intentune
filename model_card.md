@@ -10,7 +10,7 @@ This recommender compares songs with an individual user profile and suggests the
 
 ## Data Used
 
-The recommender uses the catalog in data/songs.csv. The file contains 20 songs and includes each song's ID, title, artist, genre, mood, energy, tempo, valence, danceability, and acousticness. The first recommendation algorithm only uses genre, mood, energy, and danceability. The dataset is small, so it may not represent every genre, artist, culture, or musical preference fairly.
+The recommender uses the catalog in backend/data/songs.csv. The file contains 20 songs and includes each song's ID, title, artist, genre, mood, energy, tempo, valence, danceability, and acousticness. The first recommendation algorithm only uses genre, mood, energy, and danceability. The dataset is small, so it may not represent every genre, artist, culture, or musical preference fairly.
 
 ## Algorithm Summary
 

@@ -64,7 +64,7 @@ Validated recommendation request
 
 Contains business rules that should not depend on HTTP, databases, Streamlit, AI providers, or YouTube.
 
-**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` now implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring -- see docs/development-phases.md, Phase 3.
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` now implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring -- see docs/planning/development-phases.md, Phase 3.
 
 Responsibilities:
 

@@ -59,22 +59,23 @@ The product stores profiles, feedback, or recommendation history.
 
 Enough quality feedback data exists to evaluate a learned model responsibly.
 
-## Streamlit Before a Separate Frontend
+## Separate React Frontend Instead of Streamlit
 
 ### Gain
 
-- Faster browser MVP
-- Python-only development
-- Easy result visualization
+- Full control over the interface and interaction
+- Backend stays a plain HTTP API that any client can use
+- Frontend and backend can be developed and deployed independently
 
 ### Cost
 
-- Less UI flexibility
-- Tighter coupling to Python application execution
+- Slower first browser MVP than a Python-only Streamlit page
+- Two languages and two toolchains (Python and TypeScript)
+- The API must exist before the interface can be built
 
 ### Revisit When
 
-The application needs polished custom interaction, a mobile client, or a separately deployed frontend.
+Maintaining a separate frontend is slowing delivery of the core recommendation features.
 
 ## External AI Provider
 
@@ -139,7 +140,7 @@ approved continuing with this canonical modular architecture.
 
 ### Revisit When
 
-The "Expanded and Configurable Scoring Engine" milestone (see docs/development-phases.md, Phase 3) extends scoring to tempo/valence/acousticness and missing-feature normalization -- at that point the legacy dict API's fixed four-field shape will need a documented limitation notice or a wider replacement, since it cannot express per-feature weights or partial data.
+The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/development-phases.md, Phase 3) extends scoring to tempo/valence/acousticness and missing-feature normalization -- at that point the legacy dict API's fixed four-field shape will need a documented limitation notice or a wider replacement, since it cannot express per-feature weights or partial data.
 
 ## Trade-off Entry Template
 

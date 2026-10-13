@@ -69,7 +69,7 @@ Before public deployment, document:
 Not yet selected. The decision should consider:
 
 - Python and FastAPI support
-- Streamlit support if used
+- Static hosting for the frontend build
 - Secret management
 - PostgreSQL availability
 - Cost

@@ -62,15 +62,13 @@ This file records important architectural and implementation decisions. Each dec
 
 ## TD-006: Use FastAPI for the Backend
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Reason:** The project is Python-based, the user is learning FastAPI, and typed request validation fits the architecture.
 
-**Must Be Confirmed Before Implementation:** Yes.
-
 ## TD-007: Use Streamlit for the First Browser Interface
 
-**Status:** Proposed
+**Status:** Superseded by TD-010
 
 **Reason:** Fast Python delivery and current dependency availability.
 
@@ -90,7 +88,7 @@ This file records important architectural and implementation decisions. Each dec
 
 **Alternative:** Keep extending the existing dictionaries and dataclasses ad hoc as new candidate sources are added.
 
-**Consequence:** Three co-existing shapes exist during the transition: the historical dict API, the historical dataclass API, and the new canonical domain models. This is intentional duplication, tracked in docs/trade-offs.md, and will shrink as scoring and ranking are migrated onto the canonical models in a later phase.
+**Consequence:** Three co-existing shapes exist during the transition: the historical dict API, the historical dataclass API, and the new canonical domain models. This is intentional duplication, tracked in docs/decisions/trade-offs.md, and will shrink as scoring and ranking are migrated onto the canonical models in a later phase.
 
 **Also fixed as part of this decision:** the OOP `Recommender` wrapper no longer hard-codes `preferred_danceability` to `0.5` -- the legacy `UserProfile` dataclass gained a real `preferred_danceability` field (default `0.5`, matching the old hard-coded value exactly so existing call sites are unaffected) that the wrapper now actually reads.
 
@@ -123,7 +121,19 @@ causes an extra canonical-to-legacy-to-canonical conversion in the CLI path.
 The compatibility requirement was explicitly approved; retiring that path is
 a future decision.
 
-**Revisit When:** The "Expanded and Configurable Scoring Engine" milestone (see docs/development-phases.md) extends `score_candidate()` to tempo/valence/acousticness and missing-feature normalization; at that point the legacy dict API's four-field shape may need its own documented limitation notice, since it cannot express the wider feature set.
+**Revisit When:** The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/development-phases.md) extends `score_candidate()` to tempo/valence/acousticness and missing-feature normalization; at that point the legacy dict API's four-field shape may need its own documented limitation notice, since it cannot express the wider feature set.
+
+## TD-010: Use React, Vite, and TypeScript for the Frontend
+
+**Status:** Accepted
+
+**Decision:** The browser interface is a separate React application built with Vite and TypeScript in `frontend/`. It communicates with the backend only through the FastAPI HTTP API (TD-006). Streamlit is not used.
+
+**Reason:** A separate frontend gives full control over the interface and keeps the Python backend a plain API with no UI concerns.
+
+**Alternative:** Streamlit for the first browser interface (TD-007).
+
+**Consequence:** The repository is split into `backend/` (Python) and `frontend/` (TypeScript). `streamlit` was removed from `backend/requirements.txt`. The browser interface cannot be built until the API exists, so the backend API phase comes first.
 
 ## New Decision Template
 

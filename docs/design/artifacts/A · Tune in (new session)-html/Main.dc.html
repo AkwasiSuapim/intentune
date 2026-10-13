@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Intentune · SessionView</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&amp;family=Instrument+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: {{fw}}px; height: {{fh}}px; position: relative; overflow: hidden; box-sizing: border-box; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; color: #F8F7FB; background: radial-gradient(130% 40% at 50% -8%, {{glow}} 0%, rgba(15,13,22,0) 72%), #0F0D16">
+<div style="width: 100%; max-width: {{colMax}}px; height: 100%; margin: 0 auto; display: flex; flex-direction: column">
+
+  <!-- ===== MobileHeader · stable ===== -->
+  <header style="display: flex; align-items: center; gap: 4px; height: 56px; padding: 6px 6px 0; box-sizing: border-box; flex-shrink: 0">
+    <button aria-label="Open listening sessions" onClick="{{openDrawer}}" style="width: 44px; height: 44px; border: 0; padding: 0; border-radius: 14px; background: transparent; color: #CFC7DD; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h11M4 17h16"></path></svg>
+    </button>
+    <div style="flex: 1; min-width: 0; display: flex; justify-content: center">
+      <h1 style="margin: 0; max-width: 100%; font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{title}}</h1>
+    </div>
+    <button aria-label="New listening session" onClick="{{newSession}}" style="width: 44px; height: 44px; border: 0; padding: 0; border-radius: 14px; background: transparent; color: #CFC7DD; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>
+  </header>
+
+  <!-- ===== IntentSummary · stable slot, live contents ===== -->
+  <sc-if value="{{hasIntent}}" hint-placeholder-val="{{ true }}">
+    <div style="display: flex; align-items: center; gap: 8px; padding: 2px 0 12px 16px; flex-shrink: 0">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: #8F86A3; flex-shrink: 0">Intent</span>
+      <div style="flex: 1; min-width: 0; position: relative">
+        <div aria-label="Current intent" style="display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-right: {{stripPad}}px">
+          <sc-for list="{{chips}}" as="chip" hint-placeholder-count="3">
+            <button onClick="{{chip.pick}}" aria-label="Tune {{chip.label}}" aria-expanded="{{chip.open}}" style="flex-shrink: 0; height: 40px; padding: 0 12px; border-radius: 999px; border: 1px solid {{chip.border}}; background: {{chip.bg}}; color: {{chip.color}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 7px; white-space: nowrap; cursor: pointer; transition: {{mo.color}}">
+              <sc-if value="{{chip.changed}}" hint-placeholder-val="{{ false }}">
+                <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 999px; background: {{chip.dot}}"></span>
+              </sc-if>
+              {{chip.label}}
+            </button>
+          </sc-for>
+        </div>
+        <sc-if value="{{stripOverflow}}" hint-placeholder-val="{{ false }}">
+          <span aria-hidden="true" style="position: absolute; top: 0; right: 0; bottom: 0; width: 40px; pointer-events: none; background: linear-gradient(90deg, rgba(15,13,22,0) 0%, #0F0D16 85%)"></span>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== DiscoveryPrompt · "Tune in" ===== -->
+  <sc-if value="{{isNew}}" hint-placeholder-val="{{ false }}">
+    <main style="flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 28px; padding: 0 20px 20px">
+      <svg aria-hidden="true" width="300" height="300" viewBox="0 0 300 300" fill="none" style="position: absolute; left: 50%; top: 24px; margin-left: -150px">
+        <circle cx="150" cy="150" r="52" stroke="rgba(192,132,252,0.20)" stroke-width="1"></circle>
+        <circle cx="150" cy="150" r="92" stroke="rgba(192,132,252,0.12)" stroke-width="1"></circle>
+        <circle cx="150" cy="150" r="134" stroke="rgba(192,132,252,0.06)" stroke-width="1"></circle>
+        <path d="M110 150c6 0 6-16 12-16s6 32 12 32 6-46 14-46 8 46 14 46 6-32 12-32 6 16 12 16" stroke="#C084FC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <div style="position: relative; display: flex; flex-direction: column; gap: 10px">
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{accLabel}}">Tune in</span>
+        <h2 style="margin: 0; font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 33px; line-height: 37px; font-weight: 600; letter-spacing: -0.025em; text-wrap: balance">What do you need from your music right now?</h2>
+        <p style="margin: 0; font-size: 15px; line-height: 22px; color: #A79FB8; text-wrap: pretty">Say it however it comes to you. You can change direction anytime.</p>
+      </div>
+      <div style="position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+        <sc-for list="{{starters}}" as="st" hint-placeholder-count="4">
+          <button onClick="{{st.pick}}" aria-label="{{st.label}}: {{st.phrase}}" style="min-height: 92px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.08); background: #161320; padding: 14px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 10px; text-align: left; cursor: pointer; color: #F8F7FB; font-family: 'Instrument Sans', system-ui, sans-serif">
+            <span aria-hidden="true" style="width: 26px; height: 26px; border-radius: 8px; background: {{st.art}}"></span>
+            <span style="display: flex; flex-direction: column; gap: 2px">
+              <span style="font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 17px; font-weight: 600">{{st.label}}</span>
+              <span style="font-size: 13px; color: #A79FB8">“{{st.phrase}}”</span>
+            </span>
+          </button>
+        </sc-for>
+      </div>
+    </main>
+  </sc-if>
+
+  <!-- ===== SessionTimeline · generative region ===== -->
+  <sc-if value="{{notNew}}" hint-placeholder-val="{{ true }}">
+    <main aria-label="Session timeline" ref="{{tlRef}}" onScroll="{{onScroll}}" style="flex: 1; min-height: 0; display: flex; flex-direction: column-reverse; overflow-y: auto; scrollbar-width: none">
+      <div style="display: flex; flex-direction: column; gap: 14px; padding: 8px 16px 14px">
+
+        <sc-for list="{{items}}" as="item" hint-placeholder-count="2">
+          <div style="display: flex; flex-direction: column; opacity: {{item.op}}; transform: {{item.tf}}; transform-origin: 50% 100%; transition: {{mo.enter}}">
+
+            <!-- UserMessage -->
+            <sc-if value="{{item.isUser}}" hint-placeholder-val="{{ false }}">
+              <p style="margin: 0; padding-left: 64px; text-align: right; font-size: 15px; line-height: 21px; color: #E4DEEE; text-wrap: pretty">{{item.text}}</p>
+            </sc-if>
+
+            <!-- Ack -->
+            <sc-if value="{{item.isAck}}" hint-placeholder-val="{{ false }}">
+              <div role="status" style="display: flex; align-items: flex-start; gap: 10px">
+                <span aria-hidden="true" style="width: 20px; height: 20px; margin-top: 1px; border-radius: 999px; background: {{item.iconBg}}; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+                  <sc-if value="{{item.isCheck}}" hint-placeholder-val="{{ true }}">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+                  </sc-if>
+                  <sc-if value="{{item.isSkip}}" hint-placeholder-val="{{ false }}">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#CFC7DD" stroke-width="2.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+                  </sc-if>
+                </span>
+                <div style="display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; min-width: 0; padding-top: 1px">
+                  <span style="font-size: 13.5px; font-weight: 600">{{item.label}}</span>
+                  <sc-if value="{{item.hasDetail}}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size: 13.5px; color: #A79FB8">{{item.detail}}</span>
+                  </sc-if>
+                  <sc-for list="{{item.deltas}}" as="d" hint-placeholder-count="1">
+                    <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; color: #A79FB8; white-space: nowrap">
+                      <span>{{d.dim}}</span><span>{{d.from}}</span>
+                      <svg aria-label="to" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+                      <span style="color: {{d.toColor}}; font-weight: 600">{{d.to}}</span>
+                    </span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- SessionSummary -->
+            <sc-if value="{{item.isSummary}}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 16px; background: #151220">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C084FC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"></path></svg>
+                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+                  <span style="font-size: 13.5px; font-weight: 600">{{item.label}}</span>
+                  <span style="font-size: 13.5px; color: #A79FB8">{{item.detail}}</span>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- RecommendationCard · compact (history) -->
+            <sc-if value="{{item.isPast}}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{item.restore}}" aria-label="Play {{item.title}} by {{item.artist}} again. {{item.status}}" style="display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 6px 12px 6px 6px; box-sizing: border-box; border: 0; border-radius: 14px; background: #141120; color: #F8F7FB; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif; opacity: {{item.dim}}">
+                <span aria-hidden="true" style="width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; background: {{item.art}}; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center">
+                  <sc-if value="{{item.noArt}}" hint-placeholder-val="{{ false }}">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(233,213,255,0.7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c1.5 0 1.5-3 3-3s1.5 6 3 6 1.5-9 3-9 1.5 9 3 9 1.5-6 3-6 1.5 3 3 3"></path></svg>
+                  </sc-if>
+                </span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+                  <span style="font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{item.title}}</span>
+                  <span style="font-size: 13px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{item.artist}}</span>
+                </span>
+                <span style="display: flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 12.5px; font-weight: 500; color: {{item.statusColor}}">
+                  <sc-if value="{{item.isLiked}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10z"></path></svg></sc-if>
+                  <sc-if value="{{item.isSaved}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg></sc-if>
+                  {{item.status}}
+                </span>
+              </button>
+            </sc-if>
+
+          </div>
+        </sc-for>
+
+        <!-- RecommendationCard · hero (exactly one) -->
+        <sc-if value="{{hasCur}}" hint-placeholder-val="{{ true }}">
+          <article aria-label="Now playing: {{hero.title}} by {{hero.artist}}" style="border-radius: 24px; overflow: hidden; background: #181423; border: 1px solid rgba(255,255,255,0.06); opacity: {{hero.op}}; transform: {{hero.tf}}; transition: {{mo.enter}}">
+            <div style="height: {{artH}}px; position: relative; background: {{hero.art}}; background-size: cover; background-position: center 35%">
+              <sc-if value="{{hero.noArt}}" hint-placeholder-val="{{ false }}">
+                <svg aria-hidden="true" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(233,213,255,0.55)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" style="position: absolute; left: 50%; top: 30%; margin: -32px 0 0 -32px"><path d="M3 12c1.5 0 1.5-3 3-3s1.5 6 3 6 1.5-9 3-9 1.5 9 3 9 1.5-6 3-6 1.5 3 3 3"></path></svg>
+              </sc-if>
+              <div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,13,22,0) 32%, rgba(15,13,22,0.62) 60%, rgba(15,13,22,0.94) 100%)"></div>
+              <div style="position: absolute; left: 20px; right: 20px; bottom: 16px; display: flex; flex-direction: column; gap: 4px; text-shadow: 0 1px 14px rgba(15,13,22,0.5)">
+                <span style="font-size: 12.5px; font-weight: 500; color: #E9D5FF; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{hero.tags}}</span>
+                <h2 style="margin: 0; font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 32px; line-height: 34px; font-weight: 700; letter-spacing: -0.025em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: break-word">{{hero.title}}</h2>
+                <span style="font-size: 15.5px; color: #DCD5E8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{hero.artist}}</span>
+              </div>
+            </div>
+            <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+              <sc-if value="{{hero.hasEcho}}" hint-placeholder-val="{{ false }}">
+                <p style="margin: 0; font-size: 13.5px; color: #A79FB8">You said “{{hero.echo}}”</p>
+              </sc-if>
+              <!-- playback: the loudest control on the card -->
+              <div style="display: flex; align-items: center; gap: 12px">
+                <button aria-label="{{hero.playLabel}}" onClick="{{togglePlay}}" style="width: 52px; height: 52px; border-radius: 999px; border: 0; padding: 0; background: {{acc}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: {{mo.color}}">
+                  <sc-if value="{{playing}}" hint-placeholder-val="{{ true }}">
+                    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"></path></svg>
+                  </sc-if>
+                  <sc-if value="{{paused}}" hint-placeholder-val="{{ false }}">
+                    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"></path></svg>
+                  </sc-if>
+                </button>
+                <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px">
+                  <div role="progressbar" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{hero.pct}}" style="height: 4px; border-radius: 999px; background: #2E2640; overflow: hidden">
+                    <div style="height: 4px; border-radius: 999px; width: {{hero.pct}}%; background: {{accHi}}"></div>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; font-size: 12px; color: #8F86A3; font-variant-numeric: tabular-nums">
+                    <span>{{hero.elapsed}}</span><span>{{hero.remaining}}</span>
+                  </div>
+                </div>
+                <button aria-label="Next recommendation" onClick="{{goNext}}" style="width: 44px; height: 44px; border-radius: 999px; border: 0; padding: 0; background: transparent; color: #E4DEEE; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0">
+                  <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6l9 6-9 6z"></path><path d="M17.5 6v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                </button>
+              </div>
+              <!-- Why this fits: one line, expandable -->
+              <button onClick="{{toggleWhy}}" aria-expanded="{{hero.whyOpen}}" style="width: 100%; min-height: 48px; padding: 6px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.05); background: transparent; color: #F8F7FB; text-align: left; display: flex; align-items: center; gap: 12px; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif">
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+                  <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: {{accLabel}}">Why this fits</span>
+                  <sc-if value="{{hero.whyClosed}}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size: 14px; line-height: 20px; color: #CFC7DD; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{hero.fit}}</span>
+                  </sc-if>
+                </span>
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; transform: rotate({{hero.chev}}deg); transition: {{mo.fast}}"><path d="M9 6l6 6-6 6"></path></svg>
+              </button>
+              <sc-if value="{{hero.whyOpen}}" hint-placeholder-val="{{ false }}">
+                <ul style="margin: -2px 0 4px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px">
+                  <sc-for list="{{hero.reasons}}" as="r" hint-placeholder-count="2">
+                    <li style="display: flex; gap: 10px; align-items: baseline">
+                      <span aria-hidden="true" style="width: 4px; height: 4px; border-radius: 999px; background: {{accHi}}; flex-shrink: 0; transform: translateY(-3px)"></span>
+                      <span style="font-size: 14px; line-height: 20px; color: #D9D2E6">{{r.t}}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+              </sc-if>
+              <!-- song reactions: quieter than playback -->
+              <div style="display: flex; gap: 8px">
+                <button onClick="{{like}}" aria-pressed="{{hero.liked}}" style="flex: 1; height: 44px; border-radius: 14px; border: 1px solid {{hero.likeBorder}}; background: {{hero.likeBg}}; color: {{hero.likeColor}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; transition: {{mo.color}}">
+                  <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="{{hero.heartFill}}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10z"></path></svg>
+                  {{hero.likeText}}
+                </button>
+                <button onClick="{{skip}}" style="flex: 1; height: 44px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.03); color: #CFC7DD; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer">
+                  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+                  Not for me
+                </button>
+                <button onClick="{{openSave}}" aria-label="{{hero.saveAria}}" style="flex: 1; height: 44px; border-radius: 14px; border: 1px solid {{hero.saveBorder}}; background: {{hero.saveBg}}; color: {{hero.saveColor}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; transition: {{mo.color}}">
+                  <sc-if value="{{hero.saved}}" hint-placeholder-val="{{ false }}">
+                    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+                  </sc-if>
+                  <sc-if value="{{hero.notSaved}}" hint-placeholder-val="{{ true }}">
+                    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                  </sc-if>
+                  {{hero.saveText}}
+                </button>
+              </div>
+            </div>
+          </article>
+        </sc-if>
+
+        <!-- UpNext · one peek row, never a queue -->
+        <sc-if value="{{showNext}}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{goNext}}" aria-label="Up next: {{nextTitle}} by {{nextArtist}}. Play now" style="display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 4px 6px 4px 4px; box-sizing: border-box; border: 0; border-radius: 14px; background: transparent; color: #F8F7FB; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif">
+            <span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; background: {{nextArt}}; background-size: cover; background-position: center"></span>
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+              <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: #8F86A3">Up next</span>
+              <span style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{nextTitle}} <span style="font-weight: 400; color: #A79FB8">· {{nextArtist}}</span></span>
+            </span>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+          </button>
+        </sc-if>
+
+      </div>
+    </main>
+  </sc-if>
+
+  <!-- ===== Dock: one generative slot + Composer (stable) ===== -->
+  <footer style="flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 0 14px; background: #0F0D16; border-top: 1px solid rgba(255,255,255,0.04)">
+
+    <!-- TuneBar: max two typed-style actions + Tune -->
+    <sc-if value="{{slotActions}}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px">
+        <div aria-label="Suggested refinements" style="flex: 1; min-width: 0; display: flex; gap: 8px">
+          <sc-for list="{{acts}}" as="a" hint-placeholder-count="2">
+            <button onClick="{{a.pick}}" style="flex: 0 1 auto; min-width: 0; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: #161320; color: #E4DEEE; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer">{{a.label}}</button>
+          </sc-for>
+        </div>
+        <button onClick="{{openTune}}" aria-label="Tune energy, mood or genre" aria-expanded="false" style="flex-shrink: 0; height: 44px; padding: 0 10px; border: 0; border-radius: 12px; background: transparent; color: {{accLabel}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">
+          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"></path><circle cx="15" cy="7" r="2"></circle><circle cx="9" cy="17" r="2"></circle></svg>
+          Tune
+        </button>
+      </div>
+    </sc-if>
+
+    <!-- RefineControl · energy / mood / genre -->
+    <sc-if value="{{slotTune}}" hint-placeholder-val="{{ false }}">
+      <div role="group" aria-label="Tune the session" style="margin: 0 16px; border-radius: 20px; background: #161320; border: 1px solid rgba(255,255,255,0.08); padding: 4px 4px 8px">
+        <div style="display: flex; align-items: center">
+          <div role="tablist" aria-label="What to tune" style="flex: 1; display: flex; gap: 2px; padding-left: 4px">
+            <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+              <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 40px; padding: 0 12px; border: 0; border-radius: 12px; background: {{t.bg}}; color: {{t.color}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: {{mo.color}}">{{t.label}}</button>
+            </sc-for>
+          </div>
+          <button aria-label="Close tuning" onClick="{{closeTune}}" style="width: 44px; height: 44px; border: 0; padding: 0; border-radius: 12px; background: transparent; color: #A79FB8; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+        <sc-if value="{{tabEnergy}}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 2px 8px 0 12px">
+            <span style="width: 92px; flex-shrink: 0; font-size: 14px; font-weight: 600">{{energyLabel}}</span>
+            <div role="radiogroup" aria-label="Energy level" style="flex: 1; display: flex; align-items: flex-end; justify-content: space-between">
+              <sc-for list="{{bars}}" as="b" hint-placeholder-count="5">
+                <button role="radio" aria-checked="{{b.cur}}" aria-label="{{b.name}} energy" onClick="{{b.pick}}" style="width: 40px; height: 48px; border: 0; padding: 0 0 6px; background: transparent; display: flex; align-items: flex-end; justify-content: center; cursor: pointer">
+                  <span style="width: 10px; height: {{b.h}}px; border-radius: 4px; background: {{b.color}}; outline: {{b.ring}}; outline-offset: 2px; transition: {{mo.color}}"></span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{tabChoice}}" hint-placeholder-val="{{ false }}">
+          <div role="radiogroup" aria-label="{{choiceTitle}}" style="display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 12px 0">
+            <sc-for list="{{choices}}" as="c" hint-placeholder-count="4">
+              <button role="radio" aria-checked="{{c.on}}" onClick="{{c.pick}}" style="flex-shrink: 0; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{c.color}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: {{mo.color}}">{{c.label}}</button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- Composer · stable; leading slot becomes the mini-player when the hero scrolls away -->
+    <form onSubmit="{{submit}}" style="margin: 0 16px; height: 58px; padding: 0 6px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; border-radius: 29px; background: #181423; border: 1px solid rgba(255,255,255,0.10)">
+      <span style="position: relative; width: 44px; height: 44px; flex-shrink: 0">
+        <span aria-hidden="true" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: {{lead.glyphOp}}; transition: {{mo.fade}}">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C084FC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c1.5 0 1.5-3 3-3s1.5 6 3 6 1.5-9 3-9 1.5 9 3 9 1.5-6 3-6 1.5 3 3 3"></path></svg>
+        </span>
+        <sc-if value="{{hasCur}}" hint-placeholder-val="{{ true }}">
+          <button type="button" aria-label="{{hero.playLabel}}" tabIndex="{{lead.miniTab}}" onClick="{{togglePlay}}" style="position: absolute; inset: 0; border-radius: 22px; border: 0; padding: 0; overflow: hidden; cursor: pointer; background: {{hero.art}}; background-size: cover; background-position: center; opacity: {{lead.miniOp}}; transform: scale({{lead.miniScale}}); pointer-events: {{lead.miniPe}}; transition: {{mo.fade}}">
+            <span style="position: absolute; inset: 0; background: rgba(15,13,22,0.45); display: flex; align-items: flex-end; justify-content: center; gap: 3px; padding-bottom: 13px; box-sizing: border-box">
+              <span style="width: 3px; height: {{eq1}}px; border-radius: 2px; background: #F8F7FB"></span>
+              <span style="width: 3px; height: {{eq2}}px; border-radius: 2px; background: #F8F7FB"></span>
+              <span style="width: 3px; height: {{eq3}}px; border-radius: 2px; background: #F8F7FB"></span>
+            </span>
+          </button>
+        </sc-if>
+      </span>
+      <label for="intentune-composer" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Tell Intentune what you want</label>
+      <input id="intentune-composer" type="text" autocomplete="off" value="{{draft}}" onChange="{{onDraft}}" placeholder="{{placeholder}}" style="flex: 1; min-width: 0; height: 44px; border: 0; outline: none; background: transparent; color: #F8F7FB; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 15px; text-overflow: ellipsis">
+      <button type="submit" aria-label="Send to Intentune" style="width: 44px; height: 44px; border-radius: 999px; border: 0; padding: 0; background: {{sendBg}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: {{mo.color}}">
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
+      </button>
+    </form>
+  </footer>
+</div>
+
+  <!-- ===== PlaylistPicker · bottom sheet ===== -->
+  <sc-if value="{{sheet}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; inset: 0; z-index: 15; display: flex; flex-direction: column; justify-content: flex-end; align-items: center">
+      <button aria-label="Close playlist picker" onClick="{{closeSheet}}" style="position: absolute; inset: 0; border: 0; padding: 0; background: rgba(8,6,12,0.66); cursor: pointer; opacity: {{scrimOp}}; transition: {{mo.scrim}}"></button>
+      <section role="dialog" aria-modal="true" aria-label="Add to playlist" style="position: relative; width: 100%; max-width: {{sheetMax}}px; box-sizing: border-box; background: #181423; border-radius: 28px 28px 0 0; border-top: 1px solid rgba(255,255,255,0.08); padding: 10px 20px 22px; display: flex; flex-direction: column; transform: translateY({{sheetY}}); transition: {{mo.sheet}}">
+        <span aria-hidden="true" style="align-self: center; width: 36px; height: 4px; border-radius: 999px; background: #3A3150; margin-bottom: 14px"></span>
+        <div style="display: flex; align-items: center; gap: 14px; padding-bottom: 12px">
+          <span aria-hidden="true" style="width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; background: {{hero.art}}; background-size: cover; background-position: center"></span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <h2 style="margin: 0; font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Add to playlist</h2>
+            <span style="font-size: 14px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{hero.title}} · {{hero.artist}}</span>
+          </div>
+        </div>
+        <sc-for list="{{pls}}" as="p" hint-placeholder-count="4">
+          <button role="checkbox" aria-checked="{{p.on}}" onClick="{{p.pick}}" style="display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 0 4px 0 0; border: 0; background: transparent; color: #F8F7FB; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif">
+            <span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; background: {{p.tint}}"></span>
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+              <span style="font-size: 15.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span>
+              <sc-if value="{{p.suggested}}" hint-placeholder-val="{{ false }}">
+                <span style="font-size: 12.5px; color: {{accLabel}}">Fits this session</span>
+              </sc-if>
+            </span>
+            <span aria-hidden="true" style="width: 24px; height: 24px; border-radius: 999px; box-sizing: border-box; border: 1.5px solid {{p.checkBorder}}; background: {{p.checkBg}}; display: flex; align-items: center; justify-content: center; transition: {{mo.color}}">
+              <sc-if value="{{p.on}}" hint-placeholder-val="{{ false }}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+              </sc-if>
+            </span>
+          </button>
+        </sc-for>
+        <button onClick="{{createPl}}" style="display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 0; border: 0; background: transparent; color: #E9D5FF; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 15.5px; font-weight: 500">
+          <span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 10px; box-sizing: border-box; border: 1.5px dashed #5B4F73; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          </span>
+          Create playlist
+        </button>
+        <button onClick="{{donePl}}" disabled="{{ctaDisabled}}" aria-disabled="{{ctaDisabled}}" style="margin-top: 14px; height: 52px; border-radius: 16px; border: 0; background: {{ctaBg}}; color: {{ctaColor}}; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 15.5px; font-weight: 600; cursor: {{ctaCursor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 16px; transition: {{mo.color}}">{{ctaLabel}}</button>
+      </section>
+    </div>
+  </sc-if>
+
+  <!-- ===== SessionDrawer ===== -->
+  <sc-if value="{{drawer}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; inset: 0; z-index: 20">
+      <button aria-label="Close menu" onClick="{{closeDrawer}}" style="position: absolute; inset: 0; border: 0; padding: 0; background: rgba(8,6,12,0.72); cursor: pointer; opacity: {{drawerScrimOp}}; transition: {{mo.scrim}}"></button>
+      <nav aria-label="Listening sessions and playlists" style="position: absolute; left: 0; top: 0; bottom: 0; width: 304px; max-width: 86%; box-sizing: border-box; background: #141120; border-right: 1px solid rgba(255,255,255,0.06); padding: 10px 12px 24px; display: flex; flex-direction: column; overflow-y: auto; transform: translateX({{drawerX}}); transition: {{mo.sheet}}">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 0 12px 10px">
+          <span style="display: flex; align-items: center; gap: 8px">
+            <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C084FC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c1.5 0 1.5-3 3-3s1.5 6 3 6 1.5-9 3-9 1.5 9 3 9 1.5-6 3-6 1.5 3 3 3"></path></svg>
+            <span style="font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 21px; font-weight: 700; letter-spacing: -0.02em">intentune</span>
+          </span>
+          <button aria-label="Close menu" onClick="{{closeDrawer}}" style="width: 44px; height: 44px; border: 0; padding: 0; border-radius: 12px; background: transparent; color: #A79FB8; display: flex; align-items: center; justify-content: center; cursor: pointer">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+          </button>
+        </div>
+        <button onClick="{{newSession}}" style="height: 48px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); background: transparent; color: #F8F7FB; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 15px; font-weight: 600; cursor: pointer">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          New session
+        </button>
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: #8F86A3; padding: 22px 12px 8px">Listening sessions</span>
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <sc-for list="{{sessions}}" as="se" hint-placeholder-count="5">
+            <button onClick="{{se.pick}}" aria-current="{{se.current}}" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; padding: 9px 12px; box-sizing: border-box; border-radius: 14px; border: 0; background: {{se.bg}}; color: #F8F7FB; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif">
+              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+                <span style="font-family: 'Bricolage Grotesque', 'Helvetica Neue', sans-serif; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{se.title}}</span>
+                <span style="font-size: 12.5px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{se.sub}}</span>
+              </span>
+              <sc-if value="{{se.active}}" hint-placeholder-val="{{ false }}">
+                <span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 14px; flex-shrink: 0">
+                  <span style="width: 3px; height: 8px; border-radius: 2px; background: {{accHi}}"></span>
+                  <span style="width: 3px; height: 14px; border-radius: 2px; background: {{accHi}}"></span>
+                  <span style="width: 3px; height: 10px; border-radius: 2px; background: {{accHi}}"></span>
+                </span>
+              </sc-if>
+            </button>
+          </sc-for>
+        </div>
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: #8F86A3; padding: 26px 12px 6px">Playlists</span>
+        <sc-for list="{{drawerPls}}" as="dp" hint-placeholder-count="4">
+          <button style="display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 0 12px; border-radius: 12px; border: 0; background: transparent; color: #CFC7DD; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif; font-size: 14px">
+            <span aria-hidden="true" style="width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0; background: {{dp.tint}}"></span>
+            {{dp.name}}
+          </button>
+        </sc-for>
+      </nav>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"scene":{"editor":"enum","options":["new","initial","change","save","discovery","refine","drawer"],"default":"initial","section":"Prototype"},"still":{"editor":null},"fw":{"editor":null},"fh":{"editor":null},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  /* ---------- lifecycle ---------- */
+  componentDidMount() {
+    if (this.props.still) return;
+    this.timer = setInterval(() => this.tick(), 1000);
+  }
+  componentDidUpdate(prev) {
+    if (prev.scene !== this.props.scene) this.setState({ sheetShown: true, drawerShown: true, heroOff: false });
+  }
+  componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
+  tick() {
+    const s = this.cur();
+    if (!s.playing || !s.current || s.sheet || s.drawer) return;
+    const len = this.songs()[s.current].len;
+    if (s.pos + 1 >= len) { this.commit(Object.assign(this.advance(s, null), { actions: 'continue' })); return; }
+    this.commit(Object.assign({}, s, { pos: s.pos + 1 }));
+  }
+
+  /* ---------- state plumbing ---------- */
+  key() { return this.props.scene || 'initial'; }
+  cur() {
+    const st = this.state || {};
+    if (st.s && st.key === this.key()) return st.s;
+    return this.scene(this.key());
+  }
+  commit(s) {
+    const prevTurn = this.cur().turn || 0;
+    this.setState({ s: s, key: this.key() });
+    if ((s.turn || 0) !== prevTurn) {
+      const t = s.turn;
+      setTimeout(() => this.setState({ settled: t }), 40);
+      if (this.tlEl) this.tlEl.scrollTop = 0;
+      if ((this.state || {}).heroOff) this.setState({ heroOff: false });
+    }
+  }
+  edit(patch) { this.commit(Object.assign({}, this.cur(), patch)); }
+  reduced() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
+  }
+  later(fn, ms) { if (this.props.still || this.reduced()) fn(); else setTimeout(fn, ms); }
+
+  /* ---------- mock catalog (local only; real artwork later) ---------- */
+  fallbackArt() { return 'radial-gradient(80% 70% at 28% 22%, rgba(139,71,240,0.42) 0%, rgba(139,71,240,0) 62%), radial-gradient(60% 60% at 85% 90%, rgba(192,132,252,0.18) 0%, rgba(192,132,252,0) 70%), #1A1526'; }
+  songs() {
+    return {
+      calmdown: { title: 'Calm Down', artist: 'Rema', genre: 'Afrobeats', e: 2, len: 239, tags: 'Afrobeats · Emotional · Gentle',
+        art: 'radial-gradient(circle at 68% 34%, #F4B183 0, #F4B183 13%, rgba(244,177,131,0) 13.5%), radial-gradient(140% 80% at 10% 110%, #7A2E86 0%, rgba(122,46,134,0) 60%), linear-gradient(165deg, #3A1B5C 0%, #1B1029 72%)' },
+      essence: { title: 'Essence', artist: 'Wizkid ft. Tems', genre: 'Afrobeats', e: 2, len: 248, tags: 'Afrobeats · Warm · Slow groove',
+        art: 'radial-gradient(circle at 34% 58%, rgba(233,213,255,0) 0 24%, #E9D5FF 24.5% 25.5%, rgba(233,213,255,0) 26%), radial-gradient(circle at 34% 58%, #C084FC 0 11%, rgba(192,132,252,0) 11.5%), linear-gradient(200deg, #3A1D52 0%, #120E1B 82%)' },
+      soso: { title: 'Soso', artist: 'Omah Lay', genre: 'Afrobeats', e: 2, len: 190, tags: 'Afrobeats · Mellow · Tender',
+        art: 'repeating-linear-gradient(180deg, rgba(255,255,255,0.06) 0 2px, rgba(255,255,255,0) 2px 14px), radial-gradient(circle at 50% 42%, #B678E8 0, rgba(182,120,232,0) 46%), linear-gradient(180deg, #24183A, #100C18)' },
+      kulosa: { title: 'Ku Lo Sa – A COLORS SHOW', artist: 'Oxlade', genre: 'Afrobeats', e: 2, len: 151, tags: 'Afro-soul · Intimate · Hushed', art: null },
+      freemind: { title: 'Free Mind', artist: 'Tems', genre: 'Alté', e: 2, len: 247, tags: 'Alté · Reflective · Spacious',
+        art: 'radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0 28%, rgba(233,213,255,0.55) 28.5% 29.3%, rgba(0,0,0,0) 29.8%), radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0 42%, rgba(233,213,255,0.25) 42.5% 43.2%, rgba(0,0,0,0) 43.7%), linear-gradient(180deg, #2A2040, #0F0D16)' },
+      lastlast: { title: 'Last Last', artist: 'Burna Boy', genre: 'Afrobeats', e: 3, len: 172, tags: 'Afrobeats · Bittersweet · Steady groove',
+        art: 'radial-gradient(circle at 26% 30%, #E7895B 0, #E7895B 15%, rgba(231,137,91,0) 15.5%), radial-gradient(circle at 72% 70%, #8B47F0 0, #8B47F0 22%, rgba(139,71,240,0) 22.5%), linear-gradient(140deg, #321443 0%, #160F22 100%)' },
+      rush: { title: 'Rush', artist: 'Ayra Starr', genre: 'Afrobeats', e: 3, len: 185, tags: 'Afrobeats · Bright · Mid-tempo',
+        art: 'linear-gradient(115deg, rgba(0,0,0,0) 0 40%, #F0A35E 40% 46%, rgba(0,0,0,0) 46%), linear-gradient(115deg, rgba(0,0,0,0) 0 52%, #C084FC 52% 55%, rgba(0,0,0,0) 55%), linear-gradient(180deg, #3B1A4F, #150E1F)' },
+      lovenwantiti: { title: 'Love Nwantiti', artist: 'CKay', genre: 'Afrobeats', e: 3, len: 145, tags: 'Afro-pop · Romantic · Swaying',
+        art: 'radial-gradient(circle at 50% 118%, #D86A8C 0, #D86A8C 38%, rgba(216,106,140,0) 38.5%), radial-gradient(circle at 50% 118%, #9B4FD8 0, #9B4FD8 56%, rgba(155,79,216,0) 56.5%), linear-gradient(180deg, #1E1230, #2E1646)' },
+      monalisa: { title: 'Monalisa', artist: 'Lojay & Sarz', genre: 'Afrobeats', e: 3, len: 177, tags: 'Afrobeats · Smooth · Steady pulse',
+        art: 'repeating-radial-gradient(circle at 50% 50%, rgba(233,213,255,0.08) 0 1px, rgba(0,0,0,0) 1px 16px), radial-gradient(ellipse 60% 42% at 50% 50%, #6A4FD0 0, rgba(106,79,208,0) 72%), linear-gradient(180deg, #17122A, #0F0D16)' },
+      water: { title: 'Water', artist: 'Tyla', genre: 'Amapiano', e: 3, len: 200, tags: 'Amapiano · Sultry · Rolling',
+        art: 'radial-gradient(circle at 50% 34%, #C084FC 0, #C084FC 9%, rgba(192,132,252,0) 9.5%), radial-gradient(120% 60% at 50% 100%, #5468D0 0%, rgba(84,104,208,0) 62%), linear-gradient(180deg, #1B1233, #101021)' },
+      peru: { title: 'Peru', artist: 'Fireboy DML', genre: 'Afrobeats', e: 4, len: 187, tags: 'Afrobeats · Playful · Upbeat',
+        art: 'radial-gradient(circle at 72% 28%, #FFFFFF 0, #FFF6DC 26%, rgba(255,246,220,0) 60%), linear-gradient(160deg, #F8D98A 0%, #F2B880 55%, #E59AA8 100%)' },
+      joha: { title: 'Joha', artist: 'Asake', genre: 'Afrobeats', e: 4, len: 161, tags: 'Afrobeats · Fuji-tinged · Driving',
+        art: 'linear-gradient(180deg, rgba(15,13,22,0.05) 0%, #0F0D16 92%), repeating-linear-gradient(90deg, #7C3AED 0 6px, rgba(0,0,0,0) 6px 18px), #2E1450' },
+      mnike: { title: 'Mnike', artist: 'Tyler ICU & Tumela_za', genre: 'Amapiano', e: 4, len: 380, tags: 'Amapiano · Festive · Log-drum heavy',
+        art: 'radial-gradient(circle at 50% 60%, rgba(15,13,22,0) 0 18%, rgba(15,13,22,0.78) 72%), conic-gradient(from 200deg at 50% 60%, #7C3AED, #E7895B, #A855F7, #7C3AED)' }
+    };
+  }
+  pls() { return [{ k: 'fav', name: 'Favorites' }, { k: 'study', name: 'Study' }, { k: 'workout', name: 'Workout' }, { k: 'afro', name: 'Afrobeats' }]; }
+  plTint(k) {
+    const t = { fav: 'linear-gradient(135deg, #C084FC, #7C3AED)', study: 'linear-gradient(135deg, #6A4FD0, #241C38)', workout: 'linear-gradient(135deg, #A855F7, #E7895B)', afro: 'linear-gradient(135deg, #E7895B, #6B2A7A)' };
+    return t[k] || 'linear-gradient(135deg, #E9D5FF, #9A62D6)';
+  }
+  /* Only these tokens move with context. Ground, surfaces, text, type never do. */
+  themes() {
+    return {
+      emotional: { acc: '#8B47F0', accHi: '#C084FC', soft: 'rgba(168,85,247,0.16)', ring: 'rgba(192,132,252,0.55)', glow: 'rgba(139,71,240,0.24)', label: '#D8B4FE' },
+      focused: { acc: '#6A4FD0', accHi: '#B9A8F0', soft: 'rgba(124,58,237,0.13)', ring: 'rgba(185,168,240,0.50)', glow: 'rgba(106,79,208,0.13)', label: '#C9BDF5' },
+      calm: { acc: '#9A62D6', accHi: '#E9D5FF', soft: 'rgba(192,132,252,0.13)', ring: 'rgba(233,213,255,0.50)', glow: 'rgba(192,132,252,0.15)', label: '#E9D5FF' },
+      driven: { acc: '#7C3AED', accHi: '#A855F7', soft: 'rgba(124,58,237,0.24)', ring: 'rgba(168,85,247,0.75)', glow: 'rgba(124,58,237,0.34)', label: '#C084FC' }
+    };
+  }
+  themeKey(s) {
+    const m = s.intent ? s.intent.mood : '';
+    return { Focused: 'focused', Calm: 'calm', Joyful: 'calm', Driven: 'driven' }[m] || 'emotional';
+  }
+  /* TuneBar sets: max two, written as things you could type, ordered by relevance. */
+  actionSets() {
+    return {
+      none: [],
+      initial: ['More like this', 'A bit calmer'],
+      energyUp: ['Keep this energy', 'More energetic'],
+      calm: ['Keep this mood', 'Even calmer'],
+      continue: ['More like this', 'Something new'],
+      liked: ['More like this', 'Save this'],
+      skipped: ['Different artist', 'Keep this mood'],
+      saved: ['More like this', 'Keep this energy'],
+      focus: ['Fewer vocals', 'Keep this energy'],
+      gym: ['Push it harder', 'Switch genre'],
+      generic: ['More like this', 'Something new']
+    };
+  }
+
+  /* ---------- helpers ---------- */
+  el(e) { return ['', 'Very low', 'Low', 'Medium', 'High', 'Very high'][e]; }
+  moodName(m) { return m === 'Open' ? 'Open mood' : m; }
+  itext(I) {
+    const p = [this.moodName(I.mood), I.genre, this.el(I.e) + ' energy'];
+    if (I.extra) p.push(I.extra);
+    return p.join(' · ');
+  }
+  fmt(t) { const m = Math.floor(t / 60); const s = Math.max(0, Math.floor(t % 60)); return m + ':' + (s < 10 ? '0' : '') + s; }
+  U(text) { return { kind: 'user', text: text, t: 0 }; }
+  A(label, detail, deltas, skip) { return { kind: 'ack', label: label, detail: detail || '', deltas: deltas || [], skip: !!skip, t: 0 }; }
+  P(song, status) { return { kind: 'past', song: song, status: status, t: 0 }; }
+  statusOf(s) { return s.saved ? 'Saved' : (s.liked ? 'Liked' : 'Played'); }
+  nextGenre(g) { return { Afrobeats: 'Amapiano', Amapiano: 'Alté', 'Alté': 'Afrobeats' }[g] || 'Afrobeats'; }
+  autoTitle(I) {
+    if (I.genre === 'Any genre') return { Focused: 'Focus', Calm: 'Unwind', Driven: 'Move', Emotional: 'Emotional', Joyful: 'Bright', Open: 'Discovery' }[I.mood] || 'Discovery';
+    const adj = { Focused: 'Focus', Calm: 'Calm', Driven: 'High-energy', Emotional: 'Emotional', Joyful: 'Bright', Open: '' }[I.mood] || '';
+    return (adj + ' ' + I.genre).trim();
+  }
+  pick(I, played, exclude) {
+    const songs = this.songs();
+    const ids = Object.keys(songs);
+    const score = (id) => {
+      const so = songs[id];
+      let sc = Math.abs(so.e - I.e) * 10;
+      if (I.genre !== 'Any genre' && so.genre !== I.genre) sc += 25;
+      return sc;
+    };
+    let best = null, bestSc = 1e9;
+    ids.forEach((id) => { if (played.indexOf(id) >= 0 || id === exclude) return; const sc = score(id); if (sc < bestSc) { bestSc = sc; best = id; } });
+    if (!best) ids.forEach((id) => { if (id === exclude) return; const sc = score(id); if (sc < bestSc) { bestSc = sc; best = id; } });
+    return best;
+  }
+  /* new items in this turn get the turn stamp, which drives their enter motion */
+  stamp(prev, n) {
+    n.turn = (prev.turn || 0) + 1;
+    const from = prev.history.length;
+    n.history = n.history.map((h, i) => (i >= from ? Object.assign({}, h, { t: n.turn }) : h));
+    if (n.current !== prev.current) n.heroTurn = n.turn;
+    return n;
+  }
+
+  /* ---------- representative states ---------- */
+  scene(n) {
+    const base = {
+      sessionId: 'emo', title: 'Emotional Afrobeats', intent: { mood: 'Emotional', genre: 'Afrobeats', e: 2, note: '', extra: '' }, changed: {},
+      history: [], current: 'calmdown', played: ['calmdown'], liked: false, saved: '', echo: '', playing: true, pos: 72,
+      actions: 'initial', slot: 'actions', tuneTab: 'energy', whyOpen: false, sheet: false, sel: {}, pls: this.pls(),
+      drawer: false, draft: '', isNew: false, streak: 0, turn: 0, heroTurn: 0
+    };
+    const h1 = [this.U('I want emotional Afrobeats.'), this.A('Intent set', 'Emotional · Afrobeats · Low energy')];
+    const h2 = h1.concat([this.P('calmdown', 'Liked'), this.U('Make it more energetic.'), this.A('Intent updated', '', [{ dim: 'Energy', from: 'Low', to: 'Medium' }])]);
+    const mid = { intent: { mood: 'Emotional', genre: 'Afrobeats', e: 3, note: '', extra: '' }, changed: { e: true }, current: 'lastlast', played: ['calmdown', 'lastlast'], pos: 41, actions: 'energyUp' };
+    if (n === 'new') return Object.assign(base, { sessionId: 'new', title: 'New session', intent: null, current: null, played: [], playing: false, pos: 0, actions: 'none', isNew: true });
+    if (n === 'initial') return Object.assign(base, { history: h1 });
+    if (n === 'drawer') return Object.assign(base, { history: h1, drawer: true });
+    if (n === 'change') return Object.assign(base, mid, { history: h2 });
+    if (n === 'save') return Object.assign(base, mid, { history: h2, changed: {}, pos: 88, sheet: true, echo: 'Save this.', sel: {} });
+    if (n === 'discovery') return Object.assign(base, mid, {
+      history: h2.concat([this.P('lastlast', 'Saved'), this.P('rush', 'Skipped'), this.A('Not for me', 'Intent unchanged', [], true)]),
+      changed: {}, current: 'lovenwantiti', played: ['calmdown', 'lastlast', 'rush', 'lovenwantiti'], pos: 23, actions: 'continue', streak: 2
+    });
+    if (n === 'refine') return Object.assign(base, {
+      sessionId: 'study', title: 'Late Night Study',
+      intent: { mood: 'Focused', genre: 'Afrobeats', e: 3, note: 'awake', extra: '' }, changed: { mood: true, e: true },
+      history: [this.U('Soft Afrobeats for studying.'), this.A('Intent set', 'Calm · Afrobeats · Low energy'), this.P('soso', 'Played'), this.P('essence', 'Played'),
+        this.U('I’m getting sleepy but still need to study.'), this.A('Intent updated', '', [{ dim: 'Mood', from: 'Calm', to: 'Focused' }, { dim: 'Energy', from: 'Low', to: 'Medium' }])],
+      current: 'monalisa', played: ['soso', 'essence', 'monalisa'], pos: 64, actions: 'focus', slot: 'tune', tuneTab: 'energy'
+    });
+    if (n === 'gym') return Object.assign(base, {
+      sessionId: 'gym', title: 'Gym Energy', intent: { mood: 'Driven', genre: 'Amapiano', e: 4, note: '', extra: '' },
+      history: [this.U('Hard-hitting Amapiano for the gym.'), this.A('Intent set', 'Driven · Amapiano · High energy')], current: 'mnike', played: ['mnike'], pos: 30, actions: 'gym'
+    });
+    if (n === 'coding') return Object.assign(base, {
+      sessionId: 'coding', title: 'Coding', intent: { mood: 'Focused', genre: 'Alté', e: 2, note: '', extra: '' },
+      history: [this.U('Something spacious to code to.'), this.A('Intent set', 'Focused · Alté · Low energy')], current: 'freemind', played: ['freemind'], pos: 95, actions: 'focus'
+    });
+    if (n === 'morning') return Object.assign(base, {
+      sessionId: 'morning', title: 'Morning Focus', intent: { mood: 'Calm', genre: 'Afrobeats', e: 2, note: '', extra: '' },
+      history: [this.U('Easy Afrobeats to start the day.'), this.A('Intent set', 'Calm · Afrobeats · Low energy')], current: 'essence', played: ['essence'], pos: 12, actions: 'calm'
+    });
+    return Object.assign(base, { history: h1 });
+  }
+
+  /* ---------- orchestration policy (mock) ---------- */
+  advance(s, statusOverride) {
+    const n = Object.assign({}, s, { history: s.history.slice(), echo: '', draft: '', whyOpen: false });
+    if (s.current) n.history.push(this.P(s.current, statusOverride || this.statusOf(s)));
+    const next = this.pick(s.intent, s.played, s.current);
+    n.current = next; n.played = s.played.concat(next ? [next] : []);
+    n.liked = false; n.saved = ''; n.pos = 0; n.playing = true; n.changed = {};
+    n.streak = (s.streak || 0) + 1;
+    return this.stamp(s, n);
+  }
+  applyIntent(s, I, userText, label) {
+    const before = s.intent;
+    const deltas = [];
+    const changed = {};
+    if (before) {
+      if (before.mood !== I.mood) { deltas.push({ dim: 'Mood', from: this.moodName(before.mood), to: this.moodName(I.mood) }); changed.mood = true; }
+      if (before.genre !== I.genre) { deltas.push({ dim: 'Genre', from: before.genre, to: I.genre }); changed.genre = true; }
+      if (before.e !== I.e) { deltas.push({ dim: 'Energy', from: this.el(before.e), to: this.el(I.e) }); changed.e = true; }
+      if ((before.extra || '') !== (I.extra || '')) { deltas.push({ dim: 'Vocals', from: before.extra ? 'Fewer' : 'Any', to: I.extra ? 'Fewer' : 'Any' }); changed.extra = true; }
+    }
+    const n = Object.assign({}, s, { history: s.history.slice(), draft: '', slot: 'actions', echo: '', sheet: false, drawer: false, whyOpen: false });
+    if (s.current) n.history.push(this.P(s.current, this.statusOf(s)));
+    if (userText) n.history.push(this.U(userText));
+    if (!before) n.history.push(this.A('Intent set', this.itext(I)));
+    else if (deltas.length) n.history.push(this.A(label || 'Intent updated', '', deltas));
+    else n.history.push(this.A(label || 'Kept current intent', this.itext(I)));
+    if (!deltas.length && before) I.note = before.note;
+    n.intent = I; n.changed = changed;
+    const next = this.pick(I, s.played, s.current);
+    n.current = next; n.played = s.played.concat(next ? [next] : []);
+    n.liked = false; n.saved = ''; n.pos = 0; n.playing = true;
+    n.streak = (deltas.length || !before) ? 0 : (s.streak || 0) + 1;
+    if (s.isNew || !before) { n.isNew = false; n.title = this.autoTitle(I); }
+    if (!before) n.actions = I.mood === 'Focused' ? 'focus' : I.mood === 'Driven' ? 'gym' : I.mood === 'Calm' ? 'calm' : 'initial';
+    else if (changed.e && I.e > before.e) n.actions = 'energyUp';
+    else if (changed.e) n.actions = 'calm';
+    else if (I.mood === 'Focused') n.actions = 'focus';
+    else n.actions = n.streak >= 2 ? 'continue' : 'generic';
+    return this.stamp(s, n);
+  }
+  send(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    const low = ' ' + t.toLowerCase() + ' ';
+    const has = function () { for (let i = 0; i < arguments.length; i++) { if (low.indexOf(arguments[i]) >= 0) return true; } return false; };
+    const s = this.cur();
+    if (s.current && has('save')) { this.openSheet({ draft: '', echo: t }); return; }
+    if (s.current && has('not for me', 'not this song', 'skip', 'don’t like', "don't like")) { this.skip(t); return; }
+    if (s.current && has('love this', 'i like this') && !has('more like', 'not this')) { this.edit({ draft: '', liked: true, echo: t, actions: 'liked' }); return; }
+    const I = s.intent ? Object.assign({}, s.intent) : { mood: 'Open', genre: 'Any genre', e: 3, note: '', extra: '' };
+    I.note = '';
+    let label = '';
+    let moodSet = false, eSet = false;
+    if (has('emotional', ' sad', 'heartbreak', 'in my feelings')) { I.mood = 'Emotional'; moodSet = true; }
+    if (has('happy', ' joy', 'sunny')) { I.mood = 'Joyful'; moodSet = true; }
+    if (has('relax', 'chill', 'unwind')) { I.mood = 'Calm'; moodSet = true; }
+    if (has('study', 'focus', 'coding', 'concentrate')) { I.mood = 'Focused'; moodSet = true; }
+    if (has('workout', ' gym', 'running', 'lifting', 'moving', ' move ')) { I.mood = 'Driven'; moodSet = true; if (I.e < 4) { I.e = 4; eSet = true; } }
+    if (has('discover', 'surprise me')) { I.mood = 'Open'; I.genre = 'Any genre'; moodSet = true; }
+    if (has('afrobeat', 'afro-beat')) I.genre = 'Afrobeats';
+    if (has('amapiano')) I.genre = 'Amapiano';
+    if (has('alté', ' alte ')) I.genre = 'Alté';
+    if (has('switch genre', 'change genre', 'change the genre', 'different genre', 'something different', 'something new', 'completely different')) I.genre = this.nextGenre(I.genre);
+    if (has('keep this energy', 'keep the energy')) label = 'Holding ' + this.el(I.e).toLowerCase() + ' energy';
+    else if (has('more energ', 'energetic', 'hype', 'upbeat', 'faster', 'wake me', 'harder', 'push it')) { I.e = Math.min(5, I.e + 1); eSet = true; }
+    else if (has('calmer', 'slower', 'less energ', 'softer', 'quieter')) { I.e = Math.max(1, I.e - 1); eSet = true; }
+    const sleepy = has('sleepy', 'tired', 'drowsy');
+    if (sleepy) { if (I.e < 3) I.e = 3; eSet = true; if (has('study', 'focus', 'work')) I.mood = 'Focused'; I.note = 'awake'; }
+    if (has('instrumental', 'fewer vocals', 'no vocals')) I.extra = 'Fewer vocals';
+    if (has('keep this mood', 'keep the mood')) label = 'Holding the ' + this.moodName(I.mood).toLowerCase() + ' mood';
+    if (has('more like this', 'more like that')) label = 'Keeping this direction';
+    if (has('different artist')) label = 'Trying a different artist';
+    if (!s.intent) {
+      if (!eSet) I.e = { Calm: 2, Emotional: 2, Driven: 4 }[I.mood] || 3;
+      if (!moodSet) I.mood = 'Open';
+    }
+    const n = this.applyIntent(s, I, t, label);
+    if (sleepy) { n.slot = 'tune'; n.tuneTab = 'energy'; }
+    this.commit(n);
+  }
+  skip(userText) {
+    const s = this.cur();
+    if (!s.current) return;
+    const n = this.advance(s, 'Skipped');
+    if (userText) n.history.push(Object.assign(this.U(userText), { t: n.turn }));
+    n.history.push(Object.assign(this.A('Not for me', 'Intent unchanged', [], true), { t: n.turn }));
+    n.actions = 'skipped'; n.slot = 'actions';
+    this.commit(n);
+  }
+  refine(patch, label, tab) {
+    const s = this.cur();
+    if (!s.intent) return;
+    const I = Object.assign({}, s.intent, patch, { note: '' });
+    const n = this.applyIntent(s, I, '', label);
+    n.slot = 'tune'; n.tuneTab = tab;
+    this.commit(n);
+  }
+  restore(id) {
+    const s = this.cur();
+    if (id === s.current) return;
+    const n = Object.assign({}, s, { history: s.history.slice(), echo: '', whyOpen: false });
+    if (s.current) n.history.push(this.P(s.current, this.statusOf(s)));
+    n.current = id; n.liked = false; n.saved = ''; n.pos = 0; n.playing = true; n.changed = {};
+    this.commit(this.stamp(s, n));
+  }
+  openSheet(patch) {
+    this.setState({ sheetShown: false });
+    this.edit(Object.assign({ sheet: true, sel: {} }, patch || {}));
+    this.later(() => this.setState({ sheetShown: true }), 30);
+  }
+  closeSheet(patch) {
+    this.setState({ sheetShown: false });
+    this.later(() => this.edit(Object.assign({ sheet: false }, patch || {})), 300);
+  }
+  openDrawer() {
+    this.setState({ drawerShown: false });
+    this.edit({ drawer: true });
+    this.later(() => this.setState({ drawerShown: true }), 30);
+  }
+  closeDrawer(then) {
+    this.setState({ drawerShown: false });
+    this.later(() => { if (then) then(); else this.edit({ drawer: false }); }, 300);
+  }
+  openSession(x) {
+    const s = this.cur();
+    if (x.id === s.sessionId) { this.closeDrawer(); return; }
+    this.closeDrawer(() => {
+      const n = this.scene(x.scene);
+      n.history = n.history.concat([{ kind: 'summary', label: 'Picking up where you left off', detail: this.itext(n.intent), t: 0 }]);
+      this.commit(n);
+    });
+  }
+
+  /* "Why this fits": one human line, two reasons on demand. Built only from the intent and the song's own tags. */
+  fit(I, cur, s) {
+    const g = I.genre === 'Any genre' ? '' : I.genre;
+    if (g && cur.genre !== g) {
+      return { line: 'The closest match while ' + g + ' picks run thin.', reasons: [{ t: 'Few unplayed ' + g + ' songs fit right now.' }, { t: 'Keeps the ' + this.moodName(I.mood).toLowerCase() + ' direction you set.' }] };
+    }
+    const lead = { Emotional: 'Keeps the emotional ' + (g ? g + ' ' : '') + 'feel', Focused: 'A steady ' + (g ? g + ' ' : '') + 'pulse', Calm: 'Soft, unhurried ' + (g || 'sound'), Driven: 'Driving ' + (g ? g + ' ' : '') + 'momentum', Joyful: 'Bright, easy ' + (g || 'warmth'), Open: 'A wide-open pick' }[I.mood];
+    let clause, eReason;
+    if (cur.e === I.e) {
+      if (I.note === 'awake') { clause = ' with a lift to keep you awake'; eReason = 'A step more energy, so you stay alert without losing focus.'; }
+      else {
+        clause = { 1: ', kept very low', 2: ' while staying relaxed', 3: ' with enough lift to keep things moving', 4: ' at a strong pace', 5: ' at full energy' }[I.e];
+        eReason = s.changed.e ? (s.actions === 'energyUp' ? 'Raises the energy without losing the feel.' : 'Brings the energy down, as you asked.') : { 1: 'Sits right at the very low energy you set.', 2: 'Keeps the energy relaxed.', 3: 'Medium energy, so the session keeps moving.', 4: 'High energy, matching the pace you set.', 5: 'Full energy, as you set it.' }[I.e];
+      }
+    } else {
+      clause = cur.e > I.e ? ', a touch livelier than you set' : ', a touch softer than you set';
+      eReason = cur.e > I.e ? 'Slightly livelier than your energy setting.' : 'Slightly softer than your energy setting.';
+    }
+    const parts = cur.tags.split(' · ');
+    const tail = { Emotional: 'keeps the emotional tone you asked for.', Focused: 'stays steady enough to hold your focus.', Calm: 'keeps things soft and unhurried.', Driven: 'keeps the momentum up.', Joyful: 'keeps things bright.', Open: 'gives the session a fresh starting point.' }[I.mood];
+    const charReason = (parts[1] || '') + ', ' + (parts[2] || '').toLowerCase() + ' — ' + tail;
+    const reasons = s.changed.genre ? [{ t: 'Moves into ' + g + ', as you asked.' }, { t: eReason }] : [{ t: charReason }, { t: eReason }];
+    return { line: lead + clause + '.', reasons: reasons };
+  }
+
+  /* ---------- render ---------- */
+  renderVals() {
+    const self = this;
+    const st = this.state || {};
+    const s = this.cur();
+    const still = !!this.props.still;
+    const R = still || this.reduced();
+    const songs = this.songs();
+    const th = this.themes()[this.themeKey(s)];
+    const I = s.intent;
+    const cur = s.current ? songs[s.current] : null;
+    const artOf = (so) => (so && so.art) || this.fallbackArt();
+
+    const fw = Number(this.props.fw) || 390;
+    const fh = Number(this.props.fh) || 844;
+    const wide = fw >= 700;
+    const colMax = wide ? 600 : fw;
+    const artH = wide ? 300 : 236;
+
+    const mo = {
+      enter: R ? 'none' : 'opacity 320ms cubic-bezier(0.2,0.8,0.2,1), transform 420ms cubic-bezier(0.2,0.8,0.2,1)',
+      color: R ? 'none' : 'background-color 220ms ease, border-color 220ms ease, color 220ms ease',
+      fast: R ? 'none' : 'transform 200ms cubic-bezier(0.2,0.8,0.2,1)',
+      fade: R ? 'none' : 'opacity 220ms ease, transform 220ms cubic-bezier(0.2,0.8,0.2,1)',
+      sheet: R ? 'none' : 'transform 380ms cubic-bezier(0.32,0.72,0,1)',
+      scrim: R ? 'none' : 'opacity 260ms ease'
+    };
+    const fresh = (t) => !R && (s.turn || 0) > 0 && t === s.turn && st.settled !== s.turn;
+
+    /* IntentSummary chips */
+    const chips = [];
+    if (I) {
+      const tuneOpen = s.slot === 'tune';
+      const mk = (label, on, tab) => {
+        const open = tuneOpen && s.tuneTab === tab;
+        return {
+          label: label, changed: !!on, dot: th.accHi, open: open,
+          border: on ? th.ring : (open ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.10)'),
+          bg: on ? th.soft : (open ? '#211B2D' : '#161320'), color: (on || open) ? '#F8F7FB' : '#D9D2E6',
+          pick: () => self.edit({ slot: open ? 'actions' : 'tune', tuneTab: tab })
+        };
+      };
+      chips.push(mk(this.moodName(I.mood), s.changed.mood, 'mood'));
+      chips.push(mk(I.genre, s.changed.genre, 'genre'));
+      chips.push(mk(this.el(I.e) + ' energy', s.changed.e, 'energy'));
+      if (I.extra) chips.push(mk(I.extra, s.changed.extra, 'energy'));
+    }
+    const estW = chips.reduce((w, c) => w + c.label.length * 6.7 + 26 + (c.changed ? 13 : 0), 0) + Math.max(0, chips.length - 1) * 6;
+    const stripAvail = colMax - 16 - 46 - 8;
+    const stripOverflow = estW > stripAvail - 4;
+
+    /* timeline */
+    const items = s.history.map((h) => {
+      const f = fresh(h.t);
+      const o = {
+        isUser: h.kind === 'user', isAck: h.kind === 'ack', isPast: h.kind === 'past', isSummary: h.kind === 'summary',
+        text: h.text || '', label: h.label || '', detail: h.detail || '', hasDetail: !!h.detail,
+        isSkip: !!h.skip, isCheck: !h.skip, iconBg: h.skip ? '#2A2338' : th.acc,
+        deltas: (h.deltas || []).map((d) => ({ dim: d.dim, from: d.from, to: d.to, toColor: th.label })),
+        op: f ? (h.kind === 'past' ? '0.2' : '0') : '1',
+        tf: f ? (h.kind === 'past' ? 'scale(1.04)' : 'translateY(8px)') : 'none'
+      };
+      if (h.kind === 'past') {
+        const so = songs[h.song];
+        o.title = so.title; o.artist = so.artist; o.art = artOf(so); o.noArt = !so.art; o.status = h.status;
+        o.isLiked = h.status === 'Liked'; o.isSaved = h.status === 'Saved';
+        o.statusColor = (o.isLiked || o.isSaved) ? th.label : '#8F86A3';
+        o.dim = h.status === 'Skipped' ? '0.72' : '1';
+        o.restore = () => self.restore(h.song);
+      }
+      return o;
+    });
+
+    /* hero */
+    let hero = { title: '', artist: '', art: '#211B2D', playLabel: 'Play', op: '1', tf: 'none' };
+    if (cur) {
+      const fx = this.fit(I, cur, s);
+      const hf = fresh(s.heroTurn);
+      hero = {
+        title: cur.title, artist: cur.artist, tags: cur.tags, art: artOf(cur), noArt: !cur.art,
+        op: hf ? '0' : '1', tf: hf ? 'translateY(18px) scale(0.985)' : 'none',
+        fit: fx.line, reasons: fx.reasons, whyOpen: !!s.whyOpen, whyClosed: !s.whyOpen, chev: s.whyOpen ? 90 : 0,
+        pct: Math.min(100, Math.round(s.pos / cur.len * 1000) / 10), elapsed: this.fmt(s.pos), remaining: '-' + this.fmt(cur.len - s.pos),
+        liked: !!s.liked, likeText: s.liked ? 'Liked' : 'Like', heartFill: s.liked ? 'currentColor' : 'none',
+        likeColor: s.liked ? '#F8F7FB' : '#CFC7DD', likeBg: s.liked ? th.soft : 'rgba(255,255,255,0.03)', likeBorder: s.liked ? th.ring : 'rgba(255,255,255,0.06)',
+        saved: !!s.saved, notSaved: !s.saved, saveText: s.saved ? 'Saved' : 'Save', saveAria: s.saved ? 'Saved to ' + s.saved + '. Change playlists' : 'Save to a playlist',
+        saveColor: s.saved ? '#F8F7FB' : '#CFC7DD', saveBg: s.saved ? th.soft : 'rgba(255,255,255,0.03)', saveBorder: s.saved ? th.ring : 'rgba(255,255,255,0.06)',
+        echo: s.echo, hasEcho: !!s.echo && !s.sheet, playLabel: (s.playing ? 'Pause ' : 'Play ') + cur.title
+      };
+    }
+
+    const nextId = cur && (s.streak || 0) >= 2 && s.slot === 'actions' ? this.pick(I, s.played, s.current) : null;
+    const nx = nextId ? songs[nextId] : null;
+    this.offThreshold = artH * 0.75 + (nx ? 66 : 0);
+
+    const acts = (this.actionSets()[s.actions] || []).slice(0, 2).map((a) => ({ label: a, pick: () => self.send(a) }));
+
+    const tabs = [['energy', 'Energy'], ['mood', 'Mood'], ['genre', 'Genre']].map((p) => {
+      const on = s.tuneTab === p[0];
+      return { label: p[1], on: on, bg: on ? '#2A2338' : 'transparent', color: on ? '#F8F7FB' : '#A79FB8', pick: () => self.edit({ tuneTab: p[0] }) };
+    });
+    const bars = [1, 2, 3, 4, 5].map((v) => ({
+      name: this.el(v), h: 8 + v * 6, cur: !!I && v === I.e,
+      color: I && v <= I.e ? th.accHi : '#3A3150', ring: I && v === I.e ? '1.5px solid ' + th.ring : '0 solid transparent',
+      pick: () => self.refine({ e: v }, 'Energy adjusted', 'energy')
+    }));
+    const isMood = s.tuneTab === 'mood';
+    const opts = isMood ? ['Emotional', 'Focused', 'Calm', 'Joyful', 'Driven'] : ['Afrobeats', 'Amapiano', 'Alté', 'Any genre'];
+    const choices = opts.map((o) => {
+      const on = !!I && (isMood ? I.mood === o : I.genre === o);
+      return {
+        label: o, on: on, bg: on ? th.soft : '#211B2D', border: on ? th.ring : 'rgba(255,255,255,0.06)', color: on ? '#F8F7FB' : '#D9D2E6',
+        pick: () => (isMood ? self.refine({ mood: o }, 'Mood adjusted', 'mood') : self.refine({ genre: o }, 'Genre switched', 'genre'))
+      };
+    });
+
+    /* playlist sheet: nothing preselected; CTA activates on a choice */
+    const sel = s.sel || {};
+    const plList = s.pls || this.pls();
+    const pls = plList.map((p) => {
+      const on = !!sel[p.k];
+      return {
+        name: p.name, on: on, suggested: !!I && p.name === I.genre, tint: this.plTint(p.k),
+        checkBg: on ? th.acc : 'transparent', checkBorder: on ? th.acc : 'rgba(255,255,255,0.30)',
+        pick: () => { const c = self.cur(); const ns = Object.assign({}, c.sel || {}); ns[p.k] = !ns[p.k]; self.edit({ sel: ns }); }
+      };
+    });
+    const chosen = plList.filter((p) => sel[p.k]);
+    const ctaDisabled = chosen.length === 0;
+    const ctaLabel = ctaDisabled ? 'Choose a playlist' : (chosen.length === 1 ? 'Save to ' + chosen[0].name : 'Save to ' + chosen.length + ' playlists');
+
+    /* drawer */
+    const list = [
+      { id: 'emo', title: 'Emotional Afrobeats', scene: 'initial' },
+      { id: 'study', title: 'Late Night Study', scene: 'refine' },
+      { id: 'gym', title: 'Gym Energy', scene: 'gym' },
+      { id: 'coding', title: 'Coding', scene: 'coding' },
+      { id: 'morning', title: 'Morning Focus', scene: 'morning' }
+    ];
+    const sessions = list.map((x) => {
+      const active = x.id === s.sessionId;
+      const sc = active ? s : this.scene(x.scene);
+      return { title: x.title, sub: sc.intent ? this.itext(sc.intent) : 'No intent yet', active: active, current: active ? 'page' : 'false', bg: active ? '#211B2D' : 'transparent', pick: () => self.openSession(x) };
+    });
+    if (s.sessionId === 'new') sessions.unshift({ title: s.title, sub: I ? this.itext(I) : 'No intent yet', active: true, current: 'page', bg: '#211B2D', pick: () => self.closeDrawer() });
+
+    /* composer leading slot: glyph while the hero is in view, mini-player once it scrolls away */
+    const playing = !!s.playing && !!cur;
+    const off = !!cur && !!st.heroOff;
+    const eq = (i) => (playing ? 5 + ((s.pos * (i + 3) * 7 + i * 5) % 12) : 5);
+    const sheetShown = R || st.sheetShown !== false;
+    const drawerShown = R || st.drawerShown !== false;
+
+    if (!this.tlRef) this.tlRef = (el) => { self.tlEl = el; };
+
+    return {
+      fw: fw, fh: fh, colMax: colMax, artH: artH, sheetMax: wide ? 560 : fw,
+      title: s.title, mo: mo,
+      glow: th.glow, acc: th.acc, accHi: th.accHi, accLabel: th.label,
+      hasIntent: !!I, chips: chips, stripOverflow: stripOverflow, stripPad: stripOverflow ? 40 : 16,
+      isNew: !!s.isNew, notNew: !s.isNew,
+      starters: [
+        { label: 'Focus', phrase: 'Help me focus', art: songs.monalisa.art, pick: () => self.send('Help me focus') },
+        { label: 'Unwind', phrase: 'Something to unwind to', art: songs.essence.art, pick: () => self.send('Something to unwind to') },
+        { label: 'Move', phrase: 'Get me moving', art: songs.mnike.art, pick: () => self.send('Get me moving') },
+        { label: 'Discover', phrase: 'Surprise me', art: songs.rush.art, pick: () => self.send('Surprise me') }
+      ],
+      items: items, tlRef: this.tlRef,
+      onScroll: (e) => { const el = e && e.currentTarget; if (!el) return; const o = Math.abs(el.scrollTop) > self.offThreshold; if (o !== !!(self.state || {}).heroOff) self.setState({ heroOff: o }); },
+      hasCur: !!cur, hero: hero,
+      playing: playing, paused: !playing,
+      togglePlay: () => { const c = self.cur(); if (c.current) self.edit({ playing: !c.playing }); },
+      toggleWhy: () => { const c = self.cur(); self.edit({ whyOpen: !c.whyOpen }); },
+      goNext: () => self.commit(Object.assign(self.advance(self.cur(), null), { actions: 'continue', slot: 'actions' })),
+      like: () => { const c = self.cur(); self.edit({ liked: !c.liked, actions: !c.liked ? 'liked' : c.actions }); },
+      skip: () => self.skip(''),
+      openSave: () => self.openSheet({ sel: {} }),
+      showNext: !!nx, nextTitle: nx ? nx.title : '', nextArtist: nx ? nx.artist : '', nextArt: nx ? artOf(nx) : '#211B2D',
+      slotActions: !s.isNew && s.slot === 'actions' && acts.length > 0, acts: acts,
+      openTune: () => self.edit({ slot: 'tune' }),
+      slotTune: !!I && s.slot === 'tune', tabs: tabs,
+      tabEnergy: s.tuneTab === 'energy', tabChoice: s.tuneTab !== 'energy',
+      energyLabel: I ? this.el(I.e) + ' energy' : '', bars: bars,
+      choiceTitle: isMood ? 'Mood' : 'Genre', choices: choices,
+      closeTune: () => self.edit({ slot: 'actions' }),
+      lead: { glyphOp: off ? '0' : '1', miniOp: off ? '1' : '0', miniScale: off ? '1' : '0.7', miniPe: off ? 'auto' : 'none', miniTab: off ? 0 : -1 },
+      eq1: eq(0), eq2: eq(1), eq3: eq(2),
+      draft: s.draft || '',
+      placeholder: s.isNew ? 'Tell Intentune what you want…' : 'Tell Intentune what you want next…',
+      sendBg: s.draft ? th.acc : '#2A2338',
+      onDraft: (e) => self.edit({ draft: e && e.target ? e.target.value : '' }),
+      submit: (e) => { if (e && e.preventDefault) e.preventDefault(); self.send(self.cur().draft); },
+      sheet: !!s.sheet && !!cur, pls: pls, sheetY: sheetShown ? '0' : '100%', scrimOp: sheetShown ? '1' : '0',
+      ctaLabel: ctaLabel, ctaDisabled: ctaDisabled, ctaBg: ctaDisabled ? '#2A2338' : '#7C3AED', ctaColor: ctaDisabled ? '#A79FB8' : '#FFFFFF', ctaCursor: ctaDisabled ? 'default' : 'pointer',
+      closeSheet: () => self.closeSheet(),
+      createPl: () => {
+        const c = self.cur();
+        const cl = (c.pls || self.pls()).slice();
+        const k = 'c' + cl.length;
+        cl.push({ k: k, name: c.title === 'New session' ? 'New playlist' : c.title });
+        const ns = Object.assign({}, c.sel || {}); ns[k] = true;
+        self.edit({ pls: cl, sel: ns });
+      },
+      donePl: () => {
+        const c = self.cur();
+        const names = (c.pls || self.pls()).filter((p) => (c.sel || {})[p.k]).map((p) => p.name);
+        if (!names.length) return;
+        self.closeSheet({ saved: names.join(', '), actions: 'saved', sel: {}, echo: '' });
+      },
+      drawer: !!s.drawer, drawerX: drawerShown ? '0' : '-100%', drawerScrimOp: drawerShown ? '1' : '0',
+      openDrawer: () => self.openDrawer(),
+      closeDrawer: () => self.closeDrawer(),
+      newSession: () => { if (self.cur().drawer) self.closeDrawer(() => self.commit(self.scene('new'))); else self.commit(self.scene('new')); },
+      sessions: sessions,
+      drawerPls: plList.map((p) => ({ name: p.name, tint: self.plTint(p.k) }))
+    };
+  }
+}
+</script>
+</body>
+</html>
