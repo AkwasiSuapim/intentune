@@ -98,6 +98,7 @@ The approved frontend stack is:
 - TypeScript
 - Vite
 - responsive CSS / CSS Modules
+- oxlint for linting (the scaffold's existing setup)
 
 Do not replace or add major frontend technologies without explicit approval.
 
@@ -115,6 +116,7 @@ Do not introduce by default:
 - Axios
 - a global state library
 - a routing library
+- ESLint or another linter in place of oxlint
 
 A dependency may be added only when the current phase has a concrete need that cannot be handled cleanly with the existing stack. Explain the need before adding it.
 

@@ -36,7 +36,8 @@ Use:
 - **React** for component-based interactive UI;
 - **TypeScript** for typed props, state, controlled UI schemas, and future API contracts;
 - **Vite** for development/build tooling;
-- **CSS Modules plus a small global token/reset layer** for styling and responsive layout.
+- **CSS Modules plus a small global token/reset layer** for styling and responsive layout;
+- **oxlint** as the frontend linter (the scaffold's existing setup).
 
 Do not use by default:
 
@@ -45,7 +46,8 @@ Do not use by default:
 - React Native / Expo,
 - Redux,
 - Tailwind,
-- a heavy component framework.
+- a heavy component framework,
+- ESLint or another linter in place of oxlint.
 
 These may be reconsidered only when a real requirement justifies the cost.
 
