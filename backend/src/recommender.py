@@ -127,7 +127,7 @@ def legacy_profile_to_user_profile(user_prefs: Dict) -> CanonicalUserProfile:
 
     ListeningContext and FeatureWeights are not populated here -- the legacy
     dictionary profile has no session-context or per-feature-weight concept
-    yet. They remain future inputs (see docs/development-phases.md).
+    yet. They remain future inputs (see docs/planning/development-phases.md).
     """
     for key in _REQUIRED_LEGACY_PROFILE_KEYS:
         if key not in user_prefs:
