@@ -6,8 +6,13 @@ import type { PlaylistOption } from '../components/PlaylistPicker.tsx'
 import type { QuickAction } from '../components/QuickActions.tsx'
 import type { DrawerSession } from '../components/SessionDrawer.tsx'
 import { mockEnvironment } from '../mocks/environment.ts'
+import portraitArt from './artwork/portrait.svg'
+import whiteArt from './artwork/white.svg'
 
 export { songs } from '../mocks/songs.ts'
+
+/** Artwork chosen to work against the text laid over it. */
+export const testArtwork = { white: whiteArt, portrait: portraitArt }
 
 export const intents = {
   emotionalLow: [

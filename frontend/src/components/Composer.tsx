@@ -15,8 +15,13 @@ type ComposerProps = {
   placeholder: string
   onValueChange?: (value: string) => void
   onSubmit?: () => void
-  /** Shown in the leading slot once the hero recommendation is out of view. */
-  nowPlaying?: ComposerNowPlaying
+  /** The song that is playing, when there is one. */
+  nowPlaying?: ComposerNowPlaying | null
+  /**
+   * Shows compact now-playing in the leading slot. Meant for when the hero
+   * recommendation's own controls are out of view.
+   */
+  showNowPlaying?: boolean
   onTogglePlay?: () => void
 }
 
@@ -26,9 +31,11 @@ function Composer({
   onValueChange,
   onSubmit,
   nowPlaying,
+  showNowPlaying = false,
   onTogglePlay,
 }: ComposerProps) {
   const inputId = useId()
+  const compact = showNowPlaying && !!nowPlaying
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -37,15 +44,18 @@ function Composer({
 
   return (
     <form className={styles.composer} onSubmit={handleSubmit}>
-      <span className={styles.lead} data-mode={nowPlaying ? 'playing' : 'idle'}>
+      <span className={styles.lead} data-mode={compact ? 'playing' : 'idle'}>
         <span className={styles.glyph} aria-hidden="true">
           <WaveformIcon size={22} />
         </span>
+        {/* Stays mounted while there is a song, so it can fade in and out. */}
         {nowPlaying && (
           <button
             type="button"
             className={styles.mini}
             aria-label={`${nowPlaying.playing ? 'Pause' : 'Play'} ${nowPlaying.title}`}
+            aria-hidden={!compact}
+            tabIndex={compact ? 0 : -1}
             onClick={onTogglePlay}
           >
             <Artwork src={nowPlaying.artworkUrl} className={styles.miniArt} />

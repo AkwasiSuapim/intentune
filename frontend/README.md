@@ -24,7 +24,14 @@ The app root is an interactive listening session on mock data. Nothing is persis
 `?demo=…` opens the development demo instead:
 
 - `/?demo=gallery` shows the component gallery: every component in its representative states, from prop fixtures in `src/demo/`.
-- `/?demo=<scene>` renders one fixed mock session state with inert controls: `new`, `initial`, `change`, `save`, `discovery`, `refine` or `drawer`. These match the scenes of the approved design.
+- `/?demo=<scene>` renders one fixed session state with inert controls. `new`, `initial`, `change`, `save`, `discovery`, `refine` and `drawer` match the scenes of the approved design. `stress`, `stress-tune`, `stress-save` and `stress-drawer` use deliberately long content to check that nothing clips or overflows.
+
+## Layout and motion
+
+- Phone first. From 700px the session keeps a centred 600px column and the artwork grows taller, as in the approved design. From 1024px the session navigation stands as a rail beside the session instead of opening as a drawer.
+- Motion explains a state change and then stops: new stream items rise in, a new recommendation is revealed, the previous one settles into history, and sheets and the drawer slide in and out. Everything is cut to nothing under `prefers-reduced-motion`.
+- While a sheet or the drawer is open the rest of the screen is inert, focus moves into the overlay, and Escape closes it.
+- When the hero's playback controls scroll out of view, the composer's leading slot shows compact now-playing.
 
 ## How a session works
 

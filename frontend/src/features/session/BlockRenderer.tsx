@@ -17,10 +17,17 @@ import UnknownBlock from './UnknownBlock.tsx'
 
 type CommandHandler = (command: SessionCommand) => void
 
+/** Lets a block that has been taken away play its exit before it is removed. */
+export type BlockPresence = {
+  leaving: boolean
+  onExited: () => void
+}
+
 type BlockProps<T extends SessionBlockType> = {
   block: BlockOf<T>
   /** Reports what the user did. Blocks never change state themselves. */
   onCommand: CommandHandler
+  presence?: BlockPresence
 }
 
 function IntentSummaryBlock({
@@ -165,6 +172,7 @@ function RefineControlBlock({
 function PlaylistPickerBlock({
   block,
   onCommand,
+  presence,
 }: BlockProps<'playlist_picker'>) {
   return (
     <PlaylistPicker
@@ -173,6 +181,8 @@ function PlaylistPickerBlock({
       artworkUrl={block.artworkUrl}
       playlists={block.playlists}
       selectedIds={block.selectedIds}
+      leaving={presence?.leaving}
+      onExited={presence?.onExited}
       onToggle={(playlistId) =>
         onCommand({ type: 'toggle_playlist', playlistId })
       }
@@ -209,6 +219,7 @@ type BlockRendererProps = {
   block: SessionBlock
   /** Left out for a static rendering: the block's controls then do nothing. */
   onCommand?: CommandHandler
+  presence?: BlockPresence
 }
 
 // Renders one block through the registry. Data that reaches here at runtime
@@ -218,6 +229,7 @@ type BlockRendererProps = {
 function BlockRenderer({
   block,
   onCommand = ignoreCommand,
+  presence,
 }: BlockRendererProps) {
   const type: unknown = (block as { type?: unknown } | null | undefined)?.type
 
@@ -225,7 +237,7 @@ function BlockRenderer({
     return <UnknownBlock type={typeof type === 'string' ? type : 'untyped'} />
   }
   const Component = REGISTRY[type] as ComponentType<BlockProps<SessionBlockType>>
-  return <Component block={block} onCommand={onCommand} />
+  return <Component block={block} onCommand={onCommand} presence={presence} />
 }
 
 export default BlockRenderer

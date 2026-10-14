@@ -6,12 +6,49 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
+  /* On desktop the shell sets this so the sheet centres beside the rail. */
+  padding-left: var(--overlay-inset-left, 0px);
 }
 
 .scrim {
   position: absolute;
   inset: 0;
   background: var(--scrim);
+  animation: scrim-in var(--duration-scrim) ease both;
+  /* A scrim should not brighten under the pointer. */
+  filter: none;
+}
+
+.layer[data-leaving] {
+  pointer-events: none;
+}
+
+.layer[data-leaving] .scrim {
+  animation: scrim-out var(--duration-exit) ease both;
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    transform: translateY(100%);
+  }
 }
 
 .sheet {
@@ -28,6 +65,13 @@
   border-top: 1px solid var(--border-default);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--color-surface);
+  /* Focus lands here when the sheet opens; the sheet itself needs no ring. */
+  outline: none;
+  animation: sheet-in var(--duration-sheet) var(--ease-sheet) both;
+}
+
+.layer[data-leaving] .sheet {
+  animation: sheet-out var(--duration-exit) var(--ease-sheet) both;
 }
 
 .sheet::-webkit-scrollbar {

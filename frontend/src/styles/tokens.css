@@ -52,14 +52,19 @@
     ),
     #1a1526;
   --artwork-glyph: rgb(233 213 255 / 0.7);
+  /*
+   * Rises from the top edge of the text block, so the text is covered however
+   * many lines it takes. 0.72 keeps small text above 4.5:1 on pure white art.
+   */
+  --artwork-scrim-rise: 64px;
   --artwork-scrim: linear-gradient(
     180deg,
-    rgb(15 13 22 / 0) 32%,
-    rgb(15 13 22 / 0.62) 60%,
+    rgb(15 13 22 / 0) 0,
+    rgb(15 13 22 / 0.72) var(--artwork-scrim-rise),
     rgb(15 13 22 / 0.94) 100%
   );
   --artwork-text-shadow: 0 1px 14px rgb(15 13 22 / 0.5);
-  --artwork-veil: rgb(15 13 22 / 0.45);
+  --artwork-veil: rgb(15 13 22 / 0.55);
 
   /* Contextual accent: the only tokens that move with listening context. */
   --accent: #8b47f0;
@@ -146,9 +151,22 @@
   --sheet-max: 560px;
   --drawer-width: 304px;
 
-  /* Motion */
+  /* Motion: explains a state change, then gets out of the way. */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 200ms;
   --duration-color: 220ms;
+  --duration-scrim: 260ms;
+  --duration-exit: 300ms;
+  --duration-sheet: 380ms;
+  --duration-enter: 420ms;
+}
+
+/* Tablet and wider: the session keeps its column; the artwork gets more room. */
+@media (min-width: 700px) {
+  :root {
+    --hero-art-height: 300px;
+  }
 }
 
 [data-accent='focused'] {

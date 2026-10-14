@@ -135,6 +135,10 @@ The exported Claude Design HTML is stored as a **reference specification**, not 
 
 A recommendation card may display a recommendation. It must not calculate why that recommendation should rank above another song.
 
+### Intent interpretation boundary
+
+React components, reducers, and UI composition must not perform natural-language phrase matching. Typed text, starters, and quick actions are passed to the session service unread. Any temporary phrase interpretation belongs only behind the session-service boundary (today, the mock implementation), so a real intent parser or API can replace it without rewriting UI components.
+
 ---
 
 ## 6. Data Flow
@@ -617,6 +621,10 @@ FastAPI implementation later
 ```
 
 Do not scatter `fetch()` across visual components.
+
+### Playback authority boundary
+
+The current frontend playback clock is mock/prototype behavior: a timer that advances a position, with no audio behind it. When real media or provider playback is introduced, the real playback state becomes authoritative, and the mock tick mechanism must be replaced rather than run alongside it.
 
 ---
 

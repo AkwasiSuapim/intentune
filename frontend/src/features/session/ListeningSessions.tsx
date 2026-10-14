@@ -11,14 +11,8 @@ type ListeningSessionsProps = {
 function ListeningSessions({ service }: ListeningSessionsProps) {
   const { session, environment, run } = useListeningSessions(service)
 
-  // Keyed by session so per-view input state starts clean on each switch.
   return (
-    <SessionView
-      key={session.id}
-      state={session}
-      environment={environment}
-      onCommand={run}
-    />
+    <SessionView state={session} environment={environment} onCommand={run} />
   )
 }
 

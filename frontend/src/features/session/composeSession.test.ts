@@ -201,7 +201,7 @@ describe('intent', () => {
     expect(chips.map((chip) => chip.label).join(' · ')).toBe(
       describeIntent(intent),
     )
-    expect(view.drawer?.sessions.find((session) => session.active)?.subtitle).toBe(
+    expect(view.navigation.sessions.find((session) => session.active)?.subtitle).toBe(
       describeIntent(intent),
     )
   })
@@ -340,27 +340,41 @@ describe('overlays', () => {
     ).toBeNull()
   })
 
-  it('lists sessions in the drawer with the open one active', () => {
-    const drawer = compose(mockSessions.drawer).drawer
+  it('lists sessions in the navigation with the open one active', () => {
+    const drawer = compose(mockSessions.drawer).navigation
 
-    expect(drawer?.sessions.map((session) => session.title)).toEqual([
+    expect(drawer.sessions.map((session) => session.title)).toEqual([
       'Emotional Afrobeats',
       'Late Night Study',
       'Gym Energy',
       'Coding',
       'Morning Focus',
     ])
-    expect(drawer?.sessions.filter((session) => session.active)).toHaveLength(1)
-    expect(compose(mockSessions.initial).drawer).toBeNull()
+    expect(drawer.sessions.filter((session) => session.active)).toHaveLength(1)
+  })
+
+  it('opens the drawer only on request, with the navigation always at hand', () => {
+    expect(compose(mockSessions.drawer).drawerOpen).toBe(true)
+    expect(compose(mockSessions.initial).drawerOpen).toBe(false)
+    expect(compose(mockSessions.initial).navigation.sessions).toHaveLength(5)
+  })
+
+  it('offers the playing song to the composer, and nothing when no song is current', () => {
+    expect(compose(mockSessions.change).nowPlaying).toEqual({
+      title: 'Last Last',
+      artworkUrl: mockSessions.change.recommendations['last-last'].artworkUrl,
+      playing: true,
+    })
+    expect(compose(mockSessions.new).nowPlaying).toBeNull()
   })
 
   it('adds an unlisted open session to the top of the drawer', () => {
     const drawer = compose({
       ...mockSessions.new,
       overlay: { type: 'session_drawer' },
-    }).drawer
+    }).navigation
 
-    expect(drawer?.sessions[0]).toEqual({
+    expect(drawer.sessions[0]).toEqual({
       id: 'new',
       title: 'New session',
       subtitle: 'No intent yet',

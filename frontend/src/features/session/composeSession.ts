@@ -27,8 +27,15 @@ export type SessionComposition = {
   content: BlockOf<'discovery_prompt'>[] | TimelineBlock[]
   contextualControl: BlockOf<'quick_actions' | 'refine_control'> | null
   overlay: BlockOf<'playlist_picker'> | null
-  /** Session navigation, when open. It is shell navigation, not a block. */
-  drawer: { sessions: DrawerSession[]; playlists: DrawerPlaylist[] } | null
+  /**
+   * Session navigation. It is shell navigation, not a block: a drawer on
+   * small screens, opened on request, and a standing rail on wide ones.
+   */
+  navigation: { sessions: DrawerSession[]; playlists: DrawerPlaylist[] }
+  /** Whether the user has asked for the navigation drawer. */
+  drawerOpen: boolean
+  /** The song now playing, for the composer's compact now-playing slot. */
+  nowPlaying: { title: string; artworkUrl: string | null; playing: boolean } | null
   composerPlaceholder: string
 }
 
@@ -277,12 +284,10 @@ function composeOverlay(
   }
 }
 
-function composeDrawer(
+function composeNavigation(
   state: SessionState,
   environment: SessionEnvironment,
-): SessionComposition['drawer'] {
-  if (state.overlay?.type !== 'session_drawer') return null
-
+): SessionComposition['navigation'] {
   const describe = (intent: Intent | null) =>
     intent ? describeIntent(intent) : NO_INTENT_YET
   const listed = environment.sessions.some(
@@ -342,7 +347,13 @@ export function composeSession(
     ...content,
     contextualControl: composeContextualControl(state, environment, current),
     overlay: composeOverlay(state, environment, current),
-    drawer: composeDrawer(state, environment),
+    navigation: composeNavigation(state, environment),
+    drawerOpen: state.overlay?.type === 'session_drawer',
+    nowPlaying: current && {
+      title: current.title,
+      artworkUrl: current.artworkUrl,
+      playing: state.playback.playing,
+    },
     composerPlaceholder: isNewSession
       ? 'Tell Intentune what you want…'
       : 'Tell Intentune what you want next…',

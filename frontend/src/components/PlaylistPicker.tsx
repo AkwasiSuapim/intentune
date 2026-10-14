@@ -1,3 +1,4 @@
+import type { AnimationEvent } from 'react'
 import Artwork from './Artwork.tsx'
 import PlaylistSwatch from './PlaylistSwatch.tsx'
 import type { PlaylistTone } from './PlaylistSwatch.tsx'
@@ -19,6 +20,9 @@ type PlaylistPickerProps = {
   playlists: PlaylistOption[]
   /** Only what the user has explicitly chosen. */
   selectedIds: string[]
+  /** Plays the exit: the sheet slides away, then `onExited` is called. */
+  leaving?: boolean
+  onExited?: () => void
   onToggle?: (id: string) => void
   onCreate?: () => void
   onConfirm?: () => void
@@ -38,6 +42,8 @@ function PlaylistPicker({
   artworkUrl,
   playlists,
   selectedIds,
+  leaving = false,
+  onExited,
   onToggle,
   onCreate,
   onConfirm,
@@ -48,8 +54,13 @@ function PlaylistPicker({
   )
   const nothingChosen = selected.length === 0
 
+  function handleAnimationEnd(event: AnimationEvent) {
+    // Only the sheet's own exit counts, not animations inside it.
+    if (leaving && event.target === event.currentTarget) onExited?.()
+  }
+
   return (
-    <div className={styles.layer}>
+    <div className={styles.layer} data-leaving={leaving ? '' : undefined}>
       <button
         type="button"
         className={styles.scrim}
@@ -61,6 +72,8 @@ function PlaylistPicker({
         role="dialog"
         aria-modal="true"
         aria-label="Add to playlist"
+        tabIndex={-1}
+        onAnimationEnd={handleAnimationEnd}
       >
         <span className={styles.grabber} aria-hidden="true" />
         <div className={styles.head}>

@@ -25,6 +25,7 @@ import {
   sessions,
   songs,
   starters,
+  testArtwork,
   whyThisFits,
 } from './fixtures.ts'
 import styles from './ComponentGallery.module.css'
@@ -166,6 +167,35 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
               whyReasons={whyThisFits.peru.reasons}
             />
           </Variant>
+          <Variant label="Busy artwork">
+            <RecommendationCardHero
+              {...songs.joha}
+              playing
+              positionSeconds={48}
+              whySummary={whyThisFits.peru.summary}
+              whyReasons={whyThisFits.peru.reasons}
+            />
+          </Variant>
+          <Variant label="Portrait artwork, bright, two-line title">
+            <RecommendationCardHero
+              {...songs.kuLoSa}
+              artworkUrl={testArtwork.portrait}
+              playing
+              positionSeconds={12}
+              whySummary={whyThisFits.kuLoSa.summary}
+              whyReasons={whyThisFits.kuLoSa.reasons}
+            />
+          </Variant>
+          <Variant label="Pure white artwork, two-line title (worst case)">
+            <RecommendationCardHero
+              {...songs.kuLoSa}
+              artworkUrl={testArtwork.white}
+              playing
+              positionSeconds={12}
+              whySummary={whyThisFits.kuLoSa.summary}
+              whyReasons={whyThisFits.kuLoSa.reasons}
+            />
+          </Variant>
           <Variant label="No artwork, long title, single explanation">
             <RecommendationCardHero
               {...songs.kuLoSa}
@@ -272,6 +302,7 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
               value=""
               placeholder={composerPlaceholders.nextTurn}
               nowPlaying={{ ...songs.calmDown, playing: true }}
+              showNowPlaying
             />
           </Variant>
           <Variant label="Compact now-playing, paused" layout="edge">
@@ -279,6 +310,19 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
               value=""
               placeholder={composerPlaceholders.nextTurn}
               nowPlaying={{ ...songs.lastLast, playing: false }}
+              showNowPlaying
+            />
+          </Variant>
+          <Variant label="Compact now-playing over pure white artwork" layout="edge">
+            <Composer
+              value=""
+              placeholder={composerPlaceholders.nextTurn}
+              nowPlaying={{
+                title: 'White',
+                artworkUrl: testArtwork.white,
+                playing: true,
+              }}
+              showNowPlaying
             />
           </Variant>
         </Section>
@@ -320,8 +364,15 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
         </Section>
 
         <Section title="SessionDrawer">
-          <Variant label="Sessions and playlists" layout="frame">
+          <Variant label="Overlay drawer: sessions and playlists" layout="frame">
             <SessionDrawer sessions={sessions} playlists={playlists} />
+          </Variant>
+          <Variant label="Desktop rail" layout="frame">
+            <SessionDrawer
+              variant="rail"
+              sessions={sessions}
+              playlists={playlists}
+            />
           </Variant>
         </Section>
       </div>

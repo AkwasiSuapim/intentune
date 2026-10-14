@@ -75,7 +75,6 @@ function RecommendationCardHero({
     >
       <div className={styles.media}>
         <Artwork src={artworkUrl} glyphSize={64} className={styles.art} />
-        <div className={styles.scrim} aria-hidden="true" />
         <div className={styles.meta}>
           <span className={styles.descriptors}>{descriptors.join(' · ')}</span>
           <h2 className={styles.title}>{title}</h2>
@@ -86,7 +85,7 @@ function RecommendationCardHero({
       <div className={styles.body}>
         {echo && <p className={styles.echo}>You said “{echo}”</p>}
 
-        <div className={styles.playback}>
+        <div className={styles.playback} data-now-playing-controls>
           <button
             type="button"
             className={styles.play}

@@ -25,11 +25,14 @@
   align-items: center;
   justify-content: center;
   color: var(--color-mauve);
-  transition: opacity var(--duration-color) ease;
+  transition:
+    opacity var(--duration-color) ease,
+    transform var(--duration-color) var(--ease-out);
 }
 
 .lead[data-mode='playing'] .glyph {
   opacity: 0;
+  transform: scale(0.7);
 }
 
 .mini {
@@ -37,6 +40,18 @@
   inset: 0;
   overflow: hidden;
   border-radius: var(--radius-pill);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.7);
+  transition:
+    opacity var(--duration-color) ease,
+    transform var(--duration-color) var(--ease-out);
+}
+
+.lead[data-mode='playing'] .mini {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
 }
 
 .miniArt {
@@ -60,6 +75,7 @@
   height: 5px;
   border-radius: 2px;
   background: var(--color-text);
+  transition: height var(--duration-fast) var(--ease-out);
 }
 
 .equalizer[data-playing] > span:nth-child(1) {

@@ -41,3 +41,8 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+.spacer {
+  flex-shrink: 0;
+  width: var(--touch-target);
+}

@@ -14,12 +14,27 @@
     var(--color-ground);
 }
 
+/*
+ * Desktop: the session navigation becomes a rail and the session column is
+ * centred in the space beside it. Sheets centre over that same space.
+ */
+.shell[data-railed] {
+  display: grid;
+  grid-template-columns: var(--drawer-width) minmax(0, 1fr);
+  --overlay-inset-left: var(--drawer-width);
+}
+
+.rail {
+  min-height: 0;
+}
+
 .column {
   display: flex;
   flex-direction: column;
   width: 100%;
   max-width: var(--column-max);
   height: 100%;
+  min-height: 0;
   margin-inline: auto;
 }
 
@@ -42,4 +57,9 @@
     max(var(--space-14), env(safe-area-inset-bottom));
   background: var(--color-ground);
   border-top: 1px solid var(--border-hairline);
+}
+
+/* Holds nothing in the layout; overlays position themselves against the shell. */
+.overlay {
+  display: contents;
 }

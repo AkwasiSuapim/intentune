@@ -61,7 +61,7 @@ describe('starting a session', () => {
     expect(view(workspace).layout).toBe('prompt')
     expect(view(workspace).title).toBe('New session')
     expect(
-      view(act(workspace, { type: 'open_drawer' })).drawer?.sessions.map(
+      view(act(workspace, { type: 'open_drawer' })).navigation.sessions.map(
         (session) => session.title,
       ),
     ).toEqual([
@@ -438,7 +438,7 @@ describe('moving between sessions', () => {
     )
 
     expect(view(workspace).title).toBe('Gym Energy')
-    expect(view(workspace).drawer).toBeNull()
+    expect(view(workspace).drawerOpen).toBe(false)
     expect(view(workspace).content.at(-2)).toMatchObject({
       type: 'session_summary',
       label: 'Picking up where you left off',
@@ -454,7 +454,7 @@ describe('moving between sessions', () => {
       { type: 'open_drawer' },
     )
 
-    expect(view(workspace).drawer?.sessions.map((session) => session.title)).toEqual(
+    expect(view(workspace).navigation.sessions.map((session) => session.title)).toEqual(
       ['Emotional Afrobeats', 'Late Night Study', 'Gym Energy', 'Coding', 'Morning Focus'],
     )
   })
@@ -476,7 +476,7 @@ describe('moving between sessions', () => {
       'Medium energy',
     ])
     expect(
-      view(act(away, { type: 'open_drawer' })).drawer?.sessions.find(
+      view(act(away, { type: 'open_drawer' })).navigation.sessions.find(
         (session) => session.title === 'Emotional Afrobeats',
       )?.subtitle,
     ).toBe('Emotional · Afrobeats · Medium energy')
@@ -489,14 +489,14 @@ describe('moving between sessions', () => {
       { type: 'select_starter', starterId: 'move' },
       { type: 'open_drawer' },
     )
-    const [first] = view(workspace).drawer?.sessions ?? []
+    const [first] = view(workspace).navigation.sessions
 
     expect(first).toMatchObject({
       title: 'Move',
       subtitle: 'Driven · Any genre · High energy',
       active: true,
     })
-    expect(view(workspace).drawer?.sessions).toHaveLength(6)
+    expect(view(workspace).navigation.sessions).toHaveLength(6)
   })
 
   it('only closes the drawer when the open session is chosen again, or a new one is already open', () => {
@@ -507,9 +507,10 @@ describe('moving between sessions', () => {
     })
     const fresh = act(open(), { type: 'open_drawer' }, { type: 'new_session' })
 
-    expect(view(same).drawer).toBeNull()
+    expect(view(browsing).drawerOpen).toBe(true)
+    expect(view(same).drawerOpen).toBe(false)
     expect(types(same)).toEqual(types(inEmotionalAfrobeats()))
-    expect(view(fresh).drawer).toBeNull()
+    expect(view(fresh).drawerOpen).toBe(false)
     expect(view(fresh).layout).toBe('prompt')
   })
 })

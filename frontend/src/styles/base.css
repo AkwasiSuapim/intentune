@@ -43,6 +43,20 @@ button {
   cursor: pointer;
 }
 
+/*
+ * Pointer devices get a quiet hover on every button. Zero specificity, so any
+ * component can opt out or restyle it.
+ */
+@media (hover: hover) {
+  :where(button) {
+    transition: filter var(--duration-fast) ease;
+  }
+
+  :where(button:hover:not(:disabled)) {
+    filter: brightness(1.14);
+  }
+}
+
 :focus-visible {
   outline: 2px solid var(--accent-high);
   outline-offset: 2px;

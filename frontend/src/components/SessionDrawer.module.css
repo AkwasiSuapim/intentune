@@ -8,18 +8,49 @@
   position: absolute;
   inset: 0;
   background: var(--scrim-strong);
+  animation: scrim-in var(--duration-scrim) ease both;
+  /* A scrim should not brighten under the pointer. */
+  filter: none;
 }
 
-.drawer {
+.layer[data-leaving] {
+  pointer-events: none;
+}
+
+.layer[data-leaving] .scrim {
+  animation: scrim-out var(--duration-exit) ease both;
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes drawer-out {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* Shared by the overlay drawer and the desktop rail. */
+.drawer,
+.rail {
   scrollbar-width: none;
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
   display: flex;
   flex-direction: column;
-  width: var(--drawer-width);
-  max-width: 86%;
   overflow-y: auto;
   padding: max(var(--space-10), env(safe-area-inset-top)) var(--space-12)
     max(24px, env(safe-area-inset-bottom));
@@ -27,8 +58,34 @@
   background: var(--color-surface-sunken);
 }
 
-.drawer::-webkit-scrollbar {
+.drawer::-webkit-scrollbar,
+.rail::-webkit-scrollbar {
   display: none;
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--drawer-width);
+  max-width: 86%;
+  /* Focus lands here when the drawer opens; the drawer itself needs no ring. */
+  outline: none;
+  animation: drawer-in var(--duration-sheet) var(--ease-sheet) both;
+}
+
+.layer[data-leaving] .drawer {
+  animation: drawer-out var(--duration-exit) var(--ease-sheet) both;
+}
+
+.rail {
+  height: 100%;
+}
+
+/* The rail has no close button beside the wordmark; keep the row its height. */
+.rail .head {
+  min-height: var(--touch-target);
 }
 
 .head {

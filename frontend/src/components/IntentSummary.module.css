@@ -16,9 +16,9 @@
 }
 
 /*
- * The strip scrolls sideways when the chips do not fit. The trailing padding
- * plus mask fades chips out at the edge only when they actually overflow.
- * The 4px padding / negative margin leaves room for focus rings.
+ * The strip scrolls sideways when the chips do not fit, fading at whichever
+ * edge has more beyond it. The 4px padding / negative margin leaves room for
+ * focus rings.
  */
 .strip {
   scrollbar-width: none;
@@ -27,14 +27,30 @@
   display: flex;
   gap: var(--space-6);
   overflow-x: auto;
+  scroll-behavior: smooth;
+  /* Keeps a chip brought into view clear of the fades. */
+  scroll-padding: 0 40px 0 24px;
   margin: calc(-1 * var(--space-4)) 0 calc(-1 * var(--space-4))
     calc(-1 * var(--space-4));
-  padding: var(--space-4) 40px var(--space-4) var(--space-4);
+  padding: var(--space-4) var(--gutter) var(--space-4) var(--space-4);
+  /* Each edge fades only while there is more beyond it. */
+  --fade-start: 0px;
+  --fade-end: 0px;
   mask-image: linear-gradient(
     90deg,
-    #000 calc(100% - 40px),
-    transparent calc(100% - 6px)
+    transparent 0,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
+    transparent 100%
   );
+}
+
+.strip[data-more-start] {
+  --fade-start: 24px;
+}
+
+.strip[data-more-end] {
+  --fade-end: 40px;
 }
 
 .strip::-webkit-scrollbar {
