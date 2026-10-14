@@ -1,97 +1,13 @@
-// Representative fixture props for the demo compositions. Static display data
-// only: nothing here selects, scores or ranks music.
+// Component-prop fixtures for the gallery. Songs, starters and tuning options
+// come from the shared mocks; nothing here selects, scores or ranks music.
 import type { IntentChange } from '../components/Ack.tsx'
-import type { StarterIntent } from '../components/DiscoveryPrompt.tsx'
 import type { IntentChip } from '../components/IntentSummary.tsx'
 import type { PlaylistOption } from '../components/PlaylistPicker.tsx'
 import type { QuickAction } from '../components/QuickActions.tsx'
-import type { RefineOption } from '../components/RefineControl.tsx'
 import type { DrawerSession } from '../components/SessionDrawer.tsx'
-import calmDownArt from './artwork/calm-down.svg'
-import essenceArt from './artwork/essence.svg'
-import lastLastArt from './artwork/last-last.svg'
-import loveNwantitiArt from './artwork/love-nwantiti.svg'
-import mnikeArt from './artwork/mnike.svg'
-import monalisaArt from './artwork/monalisa.svg'
-import peruArt from './artwork/peru.svg'
-import rushArt from './artwork/rush.svg'
-import sosoArt from './artwork/soso.svg'
+import { mockEnvironment } from '../mocks/environment.ts'
 
-type SongFixture = {
-  title: string
-  artist: string
-  descriptors: string[]
-  artworkUrl: string | null
-  durationSeconds: number
-}
-
-export const songs = {
-  calmDown: {
-    title: 'Calm Down',
-    artist: 'Rema',
-    descriptors: ['Afrobeats', 'Emotional', 'Gentle'],
-    artworkUrl: calmDownArt,
-    durationSeconds: 239,
-  },
-  lastLast: {
-    title: 'Last Last',
-    artist: 'Burna Boy',
-    descriptors: ['Afrobeats', 'Bittersweet', 'Steady groove'],
-    artworkUrl: lastLastArt,
-    durationSeconds: 172,
-  },
-  rush: {
-    title: 'Rush',
-    artist: 'Ayra Starr',
-    descriptors: ['Afrobeats', 'Bright', 'Mid-tempo'],
-    artworkUrl: rushArt,
-    durationSeconds: 185,
-  },
-  loveNwantiti: {
-    title: 'Love Nwantiti',
-    artist: 'CKay',
-    descriptors: ['Afro-pop', 'Romantic', 'Swaying'],
-    artworkUrl: loveNwantitiArt,
-    durationSeconds: 145,
-  },
-  essence: {
-    title: 'Essence',
-    artist: 'Wizkid ft. Tems',
-    descriptors: ['Afrobeats', 'Warm', 'Slow groove'],
-    artworkUrl: essenceArt,
-    durationSeconds: 248,
-  },
-  soso: {
-    title: 'Soso',
-    artist: 'Omah Lay',
-    descriptors: ['Afrobeats', 'Mellow', 'Tender'],
-    artworkUrl: sosoArt,
-    durationSeconds: 190,
-  },
-  monalisa: {
-    title: 'Monalisa',
-    artist: 'Lojay & Sarz',
-    descriptors: ['Afrobeats', 'Smooth', 'Steady pulse'],
-    artworkUrl: monalisaArt,
-    durationSeconds: 177,
-  },
-  // Bright, low-contrast artwork: exercises the text contrast treatment.
-  peru: {
-    title: 'Peru',
-    artist: 'Fireboy DML',
-    descriptors: ['Afrobeats', 'Playful', 'Upbeat'],
-    artworkUrl: peruArt,
-    durationSeconds: 187,
-  },
-  // No artwork and a long title: exercises the fallback and clamping.
-  kuLoSa: {
-    title: 'Ku Lo Sa – A COLORS SHOW',
-    artist: 'Oxlade',
-    descriptors: ['Afro-soul', 'Intimate', 'Hushed'],
-    artworkUrl: null,
-    durationSeconds: 151,
-  },
-} satisfies Record<string, SongFixture>
+export { songs } from '../mocks/songs.ts'
 
 export const intents = {
   emotionalLow: [
@@ -210,27 +126,10 @@ export const quickActions = {
 } satisfies Record<string, QuickAction[]>
 
 export const refineOptions = {
-  energyLevels: [
-    { id: 'very-low', label: 'Very low' },
-    { id: 'low', label: 'Low' },
-    { id: 'medium', label: 'Medium' },
-    { id: 'high', label: 'High' },
-    { id: 'very-high', label: 'Very high' },
-  ],
-  moods: [
-    { id: 'emotional', label: 'Emotional' },
-    { id: 'focused', label: 'Focused' },
-    { id: 'calm', label: 'Calm' },
-    { id: 'joyful', label: 'Joyful' },
-    { id: 'driven', label: 'Driven' },
-  ],
-  genres: [
-    { id: 'afrobeats', label: 'Afrobeats' },
-    { id: 'amapiano', label: 'Amapiano' },
-    { id: 'alte', label: 'Alté' },
-    { id: 'any', label: 'Any genre' },
-  ],
-} satisfies Record<string, RefineOption[]>
+  energyLevels: mockEnvironment.refineOptions.energy,
+  moods: mockEnvironment.refineOptions.mood,
+  genres: mockEnvironment.refineOptions.genre,
+}
 
 export const playlists: PlaylistOption[] = [
   { id: 'favorites', name: 'Favorites', tone: 'violet' },
@@ -264,27 +163,7 @@ export const sessions: DrawerSession[] = [
   },
 ]
 
-export const starters: StarterIntent[] = [
-  {
-    id: 'focus',
-    label: 'Focus',
-    phrase: 'Help me focus',
-    artworkUrl: monalisaArt,
-  },
-  {
-    id: 'unwind',
-    label: 'Unwind',
-    phrase: 'Something to unwind to',
-    artworkUrl: essenceArt,
-  },
-  { id: 'move', label: 'Move', phrase: 'Get me moving', artworkUrl: mnikeArt },
-  {
-    id: 'discover',
-    label: 'Discover',
-    phrase: 'Surprise me',
-    artworkUrl: rushArt,
-  },
-]
+export const starters = mockEnvironment.starters
 
 export const composerPlaceholders = {
   firstTurn: 'Tell Intentune what you want…',

@@ -37,7 +37,8 @@ Use:
 - **TypeScript** for typed props, state, controlled UI schemas, and future API contracts;
 - **Vite** for development/build tooling;
 - **CSS Modules plus a small global token/reset layer** for styling and responsive layout;
-- **oxlint** as the frontend linter (the scaffold's existing setup).
+- **oxlint** as the frontend linter (the scaffold's existing setup);
+- **Vitest** as the frontend unit-test runner.
 
 Do not use by default:
 
@@ -669,6 +670,8 @@ Intent chips and quick actions must never clip text or create page-level horizon
 ## 26. Testing Strategy
 
 Test user-visible behavior and architectural boundaries, not implementation trivia.
+
+**Vitest** is the approved unit-test runner (`npm test` in `frontend/`). It reuses the Vite configuration. Tests live next to the code they cover as `*.test.ts` / `*.test.tsx`. Do not add further test libraries merely for completeness; add one only when a phase has a concrete need that the existing setup cannot meet.
 
 Important future coverage includes:
 

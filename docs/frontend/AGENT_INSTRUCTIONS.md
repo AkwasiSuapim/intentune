@@ -99,6 +99,7 @@ The approved frontend stack is:
 - Vite
 - responsive CSS / CSS Modules
 - oxlint for linting (the scaffold's existing setup)
+- Vitest for unit tests (`npm test`)
 
 Do not replace or add major frontend technologies without explicit approval.
 
@@ -117,6 +118,7 @@ Do not introduce by default:
 - a global state library
 - a routing library
 - ESLint or another linter in place of oxlint
+- another test runner in place of Vitest, or extra test libraries added only for completeness
 
 A dependency may be added only when the current phase has a concrete need that cannot be handled cleanly with the existing stack. Explain the need before adding it.
 

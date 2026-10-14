@@ -1,34 +1,31 @@
-import type { ComponentType } from 'react'
+import SessionView from '../features/session/SessionView.tsx'
+import { mockEnvironment } from '../mocks/environment.ts'
+import { mockSessions } from '../mocks/sessions.ts'
 import ComponentGallery from './ComponentGallery.tsx'
-import {
-  DiscoveryScene,
-  DrawerScene,
-  InitialScene,
-  IntentChangeScene,
-  NewSessionScene,
-  RefineScene,
-  SaveScene,
-} from './scenes.tsx'
+
+type SceneId = keyof typeof mockSessions
 
 // Scene ids match the `scene` options of the approved design export.
-const SCENES: { id: string; label: string; Scene: ComponentType }[] = [
-  { id: 'new', label: 'New session', Scene: NewSessionScene },
-  { id: 'initial', label: 'First recommendation', Scene: InitialScene },
-  { id: 'change', label: 'Intent changed', Scene: IntentChangeScene },
-  { id: 'save', label: 'Saving to a playlist', Scene: SaveScene },
-  { id: 'discovery', label: 'Longer session', Scene: DiscoveryScene },
-  { id: 'refine', label: 'Tuning', Scene: RefineScene },
-  { id: 'drawer', label: 'Session drawer', Scene: DrawerScene },
+const SCENES: { id: SceneId; label: string }[] = [
+  { id: 'new', label: 'New session' },
+  { id: 'initial', label: 'First recommendation' },
+  { id: 'change', label: 'Intent changed' },
+  { id: 'save', label: 'Saving to a playlist' },
+  { id: 'discovery', label: 'Longer session' },
+  { id: 'refine', label: 'Tuning' },
+  { id: 'drawer', label: 'Session drawer' },
 ]
 
-// Development entry for F3: `?demo=<scene id>` shows one static scene,
-// anything else shows the component gallery.
+// Development entry: `?demo=<scene id>` renders that mock session state
+// through the session view; anything else shows the component gallery.
 function Demo() {
   const requested = new URLSearchParams(window.location.search).get('demo')
-  const match = SCENES.find((scene) => scene.id === requested)
+  const scene = SCENES.find((candidate) => candidate.id === requested)
 
-  if (match) {
-    return <match.Scene />
+  if (scene) {
+    return (
+      <SessionView state={mockSessions[scene.id]} environment={mockEnvironment} />
+    )
   }
   return <ComponentGallery scenes={SCENES} />
 }
