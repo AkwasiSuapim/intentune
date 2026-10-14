@@ -22,6 +22,8 @@ export type IntentChange = {
 
 export type Recommendation = {
   id: string
+  /** The song recommended. The same song can be recommended more than once. */
+  songId: string
   title: string
   artist: string
   /** Concise music descriptors, e.g. genre and feel. */
@@ -43,7 +45,14 @@ export type Recommendation = {
 export type SessionEvent =
   | { kind: 'user_message'; id: string; text: string }
   | { kind: 'intent_set'; id: string; intent: Intent }
-  | { kind: 'intent_updated'; id: string; changes: IntentChange[] }
+  | {
+      kind: 'intent_updated'
+      id: string
+      changes: IntentChange[]
+      /** Wording for the acknowledgement, when the default does not fit. */
+      label?: string
+    }
+  | { kind: 'intent_kept'; id: string; intent: Intent; label: string }
   | { kind: 'intent_unchanged'; id: string; cause: 'not_for_me' }
   | { kind: 'session_resumed'; id: string; intent: Intent }
   | { kind: 'recommendation'; id: string; recommendationId: string }

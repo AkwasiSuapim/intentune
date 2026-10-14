@@ -29,6 +29,7 @@ export type SessionBlock =
       id: string
       /** `hero` is the one current recommendation; `compact` is history. */
       variant: 'hero'
+      recommendationId: string
       title: string
       artist: string
       descriptors: string[]
@@ -47,6 +48,7 @@ export type SessionBlock =
       type: 'recommendation'
       id: string
       variant: 'compact'
+      recommendationId: string
       title: string
       artist: string
       artworkUrl: string | null

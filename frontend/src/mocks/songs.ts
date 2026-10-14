@@ -1,6 +1,8 @@
 // Mock song display data. Static: nothing here selects, scores or ranks music.
 import calmDownArt from './artwork/calm-down.svg'
 import essenceArt from './artwork/essence.svg'
+import freeMindArt from './artwork/free-mind.svg'
+import johaArt from './artwork/joha.svg'
 import lastLastArt from './artwork/last-last.svg'
 import loveNwantitiArt from './artwork/love-nwantiti.svg'
 import mnikeArt from './artwork/mnike.svg'
@@ -8,6 +10,7 @@ import monalisaArt from './artwork/monalisa.svg'
 import peruArt from './artwork/peru.svg'
 import rushArt from './artwork/rush.svg'
 import sosoArt from './artwork/soso.svg'
+import waterArt from './artwork/water.svg'
 
 export type MockSong = {
   title: string
@@ -74,6 +77,27 @@ export const songs = {
     artworkUrl: mnikeArt,
     durationSeconds: 380,
   },
+  freeMind: {
+    title: 'Free Mind',
+    artist: 'Tems',
+    descriptors: ['Alté', 'Reflective', 'Spacious'],
+    artworkUrl: freeMindArt,
+    durationSeconds: 247,
+  },
+  water: {
+    title: 'Water',
+    artist: 'Tyla',
+    descriptors: ['Amapiano', 'Sultry', 'Rolling'],
+    artworkUrl: waterArt,
+    durationSeconds: 200,
+  },
+  joha: {
+    title: 'Joha',
+    artist: 'Asake',
+    descriptors: ['Afrobeats', 'Fuji-tinged', 'Driving'],
+    artworkUrl: johaArt,
+    durationSeconds: 161,
+  },
   // Bright, low-contrast artwork: exercises the text contrast treatment.
   peru: {
     title: 'Peru',
@@ -91,3 +115,5 @@ export const songs = {
     durationSeconds: 151,
   },
 } satisfies Record<string, MockSong>
+
+export type MockSongId = keyof typeof songs

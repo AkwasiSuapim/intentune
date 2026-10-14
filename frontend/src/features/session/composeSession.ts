@@ -111,12 +111,20 @@ function composeEvent(
       return {
         type: 'ack',
         id: event.id,
-        label: 'Intent updated',
+        label: event.label ?? 'Intent updated',
         changes: event.changes.map((change) => ({
           dimension: dimensionName(change.dimension),
           from: change.from.label,
           to: change.to.label,
         })),
+        tone: 'confirm',
+      }
+    case 'intent_kept':
+      return {
+        type: 'ack',
+        id: event.id,
+        label: event.label,
+        detail: describeIntent(event.intent),
         tone: 'confirm',
       }
     case 'intent_unchanged':
@@ -144,6 +152,7 @@ function composeEvent(
           type: 'recommendation',
           id: event.id,
           variant: 'compact',
+          recommendationId: recommendation.id,
           title: recommendation.title,
           artist: recommendation.artist,
           artworkUrl: recommendation.artworkUrl,
@@ -154,6 +163,7 @@ function composeEvent(
         type: 'recommendation',
         id: event.id,
         variant: 'hero',
+        recommendationId: recommendation.id,
         title: recommendation.title,
         artist: recommendation.artist,
         descriptors: recommendation.descriptors,
@@ -182,25 +192,28 @@ function composeTimeline(
   current: Recommendation | null,
 ): TimelineBlock[] {
   const blocks: TimelineBlock[] = []
-  let heroShown = false
+  let hero: TimelineBlock | null = null
 
   for (const event of state.events) {
     const block = composeEvent(event, state, environment)
     if (!block) continue
     if (block.type === 'recommendation' && block.variant === 'hero') {
       // A recommendation repeated in the stream still yields a single hero.
-      if (heroShown) continue
-      heroShown = true
+      hero ??= block
+      continue
     }
     blocks.push(block)
   }
+  // The hero always closes the stream: anything noted since it started
+  // playing (such as returning to the session) reads above it.
+  if (hero) blocks.push(hero)
 
   // Up next is one peek row, shown only while the quick actions are.
   const upNext =
     current && !state.refine && state.upNextRecommendationId
       ? state.recommendations[state.upNextRecommendationId]
       : undefined
-  if (heroShown && upNext && upNext.id !== current?.id) {
+  if (hero && upNext && upNext.id !== current?.id) {
     blocks.push({
       type: 'up_next',
       id: 'up-next',

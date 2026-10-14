@@ -16,11 +16,16 @@ const SCENES: { id: SceneId; label: string }[] = [
   { id: 'drawer', label: 'Session drawer' },
 ]
 
-// Development entry: `?demo=<scene id>` renders that mock session state
-// through the session view; anything else shows the component gallery.
-function Demo() {
-  const requested = new URLSearchParams(window.location.search).get('demo')
-  const scene = SCENES.find((candidate) => candidate.id === requested)
+type DemoProps = {
+  /** A scene id, or anything else (such as `gallery`) for the gallery. */
+  view: string
+}
+
+// Development demo. A scene id renders that fixed mock session state, with
+// inert controls, for comparison with the approved design; anything else
+// shows the component gallery.
+function Demo({ view }: DemoProps) {
+  const scene = SCENES.find((candidate) => candidate.id === view)
 
   if (scene) {
     return (

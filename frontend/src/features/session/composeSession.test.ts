@@ -112,6 +112,27 @@ describe('timeline', () => {
     expect(heroes(state)).toHaveLength(1)
   })
 
+  it('keeps the hero at the end, below anything noted since it started playing', () => {
+    const resumed: SessionState = {
+      ...mockSessions.initial,
+      events: [
+        ...mockSessions.initial.events,
+        {
+          kind: 'session_resumed',
+          id: 'back',
+          intent: mockIntent('emotional', 'afrobeats', 'low'),
+        },
+      ],
+    }
+
+    expect(compose(resumed).content.map((block) => block.type)).toEqual([
+      'user_message',
+      'ack',
+      'session_summary',
+      'recommendation',
+    ])
+  })
+
   it('leaves out a recommendation event whose recommendation is missing', () => {
     const state: SessionState = {
       ...mockSessions.initial,

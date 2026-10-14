@@ -70,9 +70,13 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
         <header className={styles.intro}>
           <h1 className={styles.pageTitle}>Intentune components</h1>
           <p className={styles.pageNote}>
-            Static fixtures only. Controls are not wired to session behaviour.
+            Static fixtures only. Controls here are not wired to session
+            behaviour.
           </p>
           <nav className={styles.sceneLinks} aria-label="Design scenes">
+            <a className={styles.sceneLink} href="./">
+              Open the app
+            </a>
             {scenes.map((scene) => (
               <a
                 key={scene.id}

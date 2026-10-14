@@ -11,16 +11,43 @@ import TuneBar from '../../components/TuneBar.tsx'
 import UpNext from '../../components/UpNext.tsx'
 import UserMessage from '../../components/UserMessage.tsx'
 import type { BlockOf, SessionBlock, SessionBlockType } from './blocks.ts'
+import type { SessionCommand } from './commands.ts'
+import type { IntentDimension } from './types.ts'
 import UnknownBlock from './UnknownBlock.tsx'
 
-type BlockProps<T extends SessionBlockType> = { block: BlockOf<T> }
+type CommandHandler = (command: SessionCommand) => void
 
-function IntentSummaryBlock({ block }: BlockProps<'intent_summary'>) {
-  return <IntentSummary chips={block.chips} />
+type BlockProps<T extends SessionBlockType> = {
+  block: BlockOf<T>
+  /** Reports what the user did. Blocks never change state themselves. */
+  onCommand: CommandHandler
 }
 
-function DiscoveryPromptBlock({ block }: BlockProps<'discovery_prompt'>) {
-  return <DiscoveryPrompt starters={block.starters} />
+function IntentSummaryBlock({
+  block,
+  onCommand,
+}: BlockProps<'intent_summary'>) {
+  return (
+    <IntentSummary
+      chips={block.chips}
+      onSelectChip={(id) =>
+        // Chip ids are the intent dimensions they show.
+        onCommand({ type: 'toggle_refine_tab', tab: id as IntentDimension })
+      }
+    />
+  )
+}
+
+function DiscoveryPromptBlock({
+  block,
+  onCommand,
+}: BlockProps<'discovery_prompt'>) {
+  return (
+    <DiscoveryPrompt
+      starters={block.starters}
+      onStart={(starterId) => onCommand({ type: 'select_starter', starterId })}
+    />
+  )
 }
 
 function UserMessageBlock({ block }: BlockProps<'user_message'>) {
@@ -42,7 +69,10 @@ function SessionSummaryBlock({ block }: BlockProps<'session_summary'>) {
   return <SessionSummary label={block.label} detail={block.detail} />
 }
 
-function RecommendationBlock({ block }: BlockProps<'recommendation'>) {
+function RecommendationBlock({
+  block,
+  onCommand,
+}: BlockProps<'recommendation'>) {
   if (block.variant === 'compact') {
     return (
       <RecommendationCardCompact
@@ -50,6 +80,12 @@ function RecommendationBlock({ block }: BlockProps<'recommendation'>) {
         artist={block.artist}
         artworkUrl={block.artworkUrl}
         outcome={block.outcome}
+        onReplay={() =>
+          onCommand({
+            type: 'replay',
+            recommendationId: block.recommendationId,
+          })
+        }
       />
     )
   }
@@ -68,25 +104,46 @@ function RecommendationBlock({ block }: BlockProps<'recommendation'>) {
       whyExpanded={block.whyExpanded}
       liked={block.liked}
       savedTo={block.savedTo}
+      onTogglePlay={() => onCommand({ type: 'toggle_play' })}
+      onNext={() => onCommand({ type: 'next' })}
+      onToggleWhy={() => onCommand({ type: 'toggle_why' })}
+      onLike={() => onCommand({ type: 'toggle_like' })}
+      onNotForMe={() => onCommand({ type: 'not_for_me' })}
+      onSave={() => onCommand({ type: 'open_playlist_picker' })}
     />
   )
 }
 
-function UpNextBlock({ block }: BlockProps<'up_next'>) {
+function UpNextBlock({ block, onCommand }: BlockProps<'up_next'>) {
   return (
     <UpNext
       title={block.title}
       artist={block.artist}
       artworkUrl={block.artworkUrl}
+      onPlay={() => onCommand({ type: 'next' })}
     />
   )
 }
 
-function QuickActionsBlock({ block }: BlockProps<'quick_actions'>) {
-  return <TuneBar actions={block.actions} />
+function QuickActionsBlock({ block, onCommand }: BlockProps<'quick_actions'>) {
+  return (
+    <TuneBar
+      actions={block.actions}
+      onSelectAction={(actionId) =>
+        onCommand({ type: 'select_quick_action', actionId })
+      }
+      onOpenTune={() => onCommand({ type: 'open_refine' })}
+    />
+  )
 }
 
-function RefineControlBlock({ block }: BlockProps<'refine_control'>) {
+function RefineControlBlock({
+  block,
+  onCommand,
+}: BlockProps<'refine_control'>) {
+  const refine = (dimension: IntentDimension) => (valueId: string) =>
+    onCommand({ type: 'refine', dimension, valueId })
+
   return (
     <RefineControl
       activeTab={block.activeTab}
@@ -96,11 +153,19 @@ function RefineControlBlock({ block }: BlockProps<'refine_control'>) {
       moodId={block.moodId}
       genres={block.genres}
       genreId={block.genreId}
+      onTabChange={(tab) => onCommand({ type: 'change_refine_tab', tab })}
+      onEnergyChange={refine('energy')}
+      onMoodChange={refine('mood')}
+      onGenreChange={refine('genre')}
+      onClose={() => onCommand({ type: 'close_refine' })}
     />
   )
 }
 
-function PlaylistPickerBlock({ block }: BlockProps<'playlist_picker'>) {
+function PlaylistPickerBlock({
+  block,
+  onCommand,
+}: BlockProps<'playlist_picker'>) {
   return (
     <PlaylistPicker
       songTitle={block.songTitle}
@@ -108,6 +173,12 @@ function PlaylistPickerBlock({ block }: BlockProps<'playlist_picker'>) {
       artworkUrl={block.artworkUrl}
       playlists={block.playlists}
       selectedIds={block.selectedIds}
+      onToggle={(playlistId) =>
+        onCommand({ type: 'toggle_playlist', playlistId })
+      }
+      onCreate={() => onCommand({ type: 'create_playlist' })}
+      onConfirm={() => onCommand({ type: 'confirm_playlists' })}
+      onClose={() => onCommand({ type: 'close_playlist_picker' })}
     />
   )
 }
@@ -132,22 +203,29 @@ function isRegistered(type: unknown): type is SessionBlockType {
   return typeof type === 'string' && Object.hasOwn(REGISTRY, type)
 }
 
+function ignoreCommand() {}
+
 type BlockRendererProps = {
   block: SessionBlock
+  /** Left out for a static rendering: the block's controls then do nothing. */
+  onCommand?: CommandHandler
 }
 
 // Renders one block through the registry. Data that reaches here at runtime
 // may not match the types (for example a future backend response), so the
 // type is checked rather than trusted: anything unrecognised falls back to
 // UnknownBlock and none of its content is rendered.
-function BlockRenderer({ block }: BlockRendererProps) {
+function BlockRenderer({
+  block,
+  onCommand = ignoreCommand,
+}: BlockRendererProps) {
   const type: unknown = (block as { type?: unknown } | null | undefined)?.type
 
   if (!isRegistered(type)) {
     return <UnknownBlock type={typeof type === 'string' ? type : 'untyped'} />
   }
-  const Component = REGISTRY[type] as ComponentType<{ block: SessionBlock }>
-  return <Component block={block} />
+  const Component = REGISTRY[type] as ComponentType<BlockProps<SessionBlockType>>
+  return <Component block={block} onCommand={onCommand} />
 }
 
 export default BlockRenderer

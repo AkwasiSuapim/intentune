@@ -5,19 +5,21 @@ import type {
   SessionEvent,
   SessionState,
 } from '../features/session/types.ts'
+import { createSession } from '../features/session/sessionReducer.ts'
 import { mockIntent } from './environment.ts'
 import { songs } from './songs.ts'
-import type { MockSong } from './songs.ts'
+import type { MockSongId } from './songs.ts'
 
 function recommendation(
   id: string,
-  song: MockSong,
+  songId: MockSongId,
   why: Recommendation['why'],
   rest: Partial<Recommendation> = {},
 ): Recommendation {
   return {
     id,
-    ...song,
+    songId,
+    ...songs[songId],
     why,
     liked: false,
     skipped: false,
@@ -29,7 +31,7 @@ function recommendation(
 const EMOTIONAL_FEEL_WITH_LIFT =
   'Keeps the emotional Afrobeats feel with enough lift to keep things moving.'
 
-const calmDown = recommendation('calm-down', songs.calmDown, {
+const calmDown = recommendation('calm-down', 'calmDown', {
   summary: 'Keeps the emotional Afrobeats feel while staying relaxed.',
   reasons: [
     'Emotional, gentle — keeps the emotional tone you asked for.',
@@ -37,7 +39,7 @@ const calmDown = recommendation('calm-down', songs.calmDown, {
   ],
 })
 
-const lastLast = recommendation('last-last', songs.lastLast, {
+const lastLast = recommendation('last-last', 'lastLast', {
   summary: EMOTIONAL_FEEL_WITH_LIFT,
   reasons: [
     'Bittersweet, steady groove — keeps the emotional tone you asked for.',
@@ -56,12 +58,12 @@ const lastLastAfterEnergyRaised: Recommendation = {
   },
 }
 
-const rush = recommendation('rush', songs.rush, {
+const rush = recommendation('rush', 'rush', {
   summary: EMOTIONAL_FEEL_WITH_LIFT,
   reasons: ['Bright, mid-tempo — keeps the emotional tone you asked for.'],
 })
 
-const loveNwantiti = recommendation('love-nwantiti', songs.loveNwantiti, {
+const loveNwantiti = recommendation('love-nwantiti', 'loveNwantiti', {
   summary: EMOTIONAL_FEEL_WITH_LIFT,
   reasons: [
     'Romantic, swaying — keeps the emotional tone you asked for.',
@@ -69,17 +71,17 @@ const loveNwantiti = recommendation('love-nwantiti', songs.loveNwantiti, {
   ],
 })
 
-const soso = recommendation('soso', songs.soso, {
+const soso = recommendation('soso', 'soso', {
   summary: 'Soft, unhurried Afrobeats while staying relaxed.',
   reasons: ['Mellow, tender — keeps things soft and unhurried.'],
 })
 
-const essence = recommendation('essence', songs.essence, {
+const essence = recommendation('essence', 'essence', {
   summary: 'Soft, unhurried Afrobeats while staying relaxed.',
   reasons: ['Warm, slow groove — keeps things soft and unhurried.'],
 })
 
-const monalisa = recommendation('monalisa', songs.monalisa, {
+const monalisa = recommendation('monalisa', 'monalisa', {
   summary: 'A steady Afrobeats pulse with a lift to keep you awake.',
   reasons: [
     'Smooth, steady pulse — stays steady enough to hold your focus.',
@@ -114,21 +116,7 @@ const energyRaisedTurn: SessionEvent[] = [
   { kind: 'recommendation', id: 'e6', recommendationId: lastLast.id },
 ]
 
-const blank: SessionState = {
-  id: 'new',
-  title: 'New session',
-  intent: null,
-  changedDimensions: [],
-  events: [],
-  recommendations: {},
-  currentRecommendationId: null,
-  playback: { playing: false, positionSeconds: 0 },
-  whyExpanded: false,
-  quickActions: [],
-  upNextRecommendationId: null,
-  refine: null,
-  overlay: null,
-}
+const blank = createSession('new')
 
 const initial: SessionState = {
   ...blank,
@@ -237,8 +225,8 @@ const refine: SessionState = {
   currentRecommendationId: monalisa.id,
   playback: { playing: true, positionSeconds: 64 },
   quickActions: [
-    { id: 'fewer-vocals', label: 'Fewer vocals' },
     { id: 'keep-this-energy', label: 'Keep this energy' },
+    { id: 'a-bit-calmer', label: 'A bit calmer' },
   ],
   refine: { tab: 'energy' },
 }
@@ -247,6 +235,92 @@ const drawer: SessionState = {
   ...initial,
   overlay: { type: 'session_drawer' },
 }
+
+// Three more existing sessions, so the drawer has somewhere to go.
+function openingSession(
+  id: string,
+  title: string,
+  firstMessage: string,
+  intent: SessionState['intent'] & object,
+  current: Recommendation,
+  positionSeconds: number,
+  quickActions: SessionState['quickActions'],
+): SessionState {
+  return {
+    ...createSession(id),
+    title,
+    intent,
+    events: [
+      { kind: 'user_message', id: 'e1', text: firstMessage },
+      { kind: 'intent_set', id: 'e2', intent },
+      { kind: 'recommendation', id: 'e3', recommendationId: current.id },
+    ],
+    recommendations: { [current.id]: current },
+    currentRecommendationId: current.id,
+    playback: { playing: true, positionSeconds },
+    quickActions,
+  }
+}
+
+const gymEnergy = openingSession(
+  'gym-energy',
+  'Gym Energy',
+  'Hard-hitting Amapiano for the gym.',
+  mockIntent('driven', 'amapiano', 'high'),
+  recommendation('mnike', 'mnike', {
+    summary: 'Driving Amapiano momentum at a strong pace.',
+    reasons: [
+      'Festive, log-drum heavy — keeps the momentum up.',
+      'High energy, matching the pace you set.',
+    ],
+  }),
+  30,
+  [
+    { id: 'push-it-harder', label: 'Push it harder' },
+    { id: 'switch-genre', label: 'Switch genre' },
+  ],
+)
+
+const coding = openingSession(
+  'coding',
+  'Coding',
+  'Something spacious to code to.',
+  mockIntent('focused', 'alte', 'low'),
+  recommendation('free-mind', 'freeMind', {
+    summary: 'A steady Alté pulse while staying relaxed.',
+    reasons: [
+      'Reflective, spacious — stays steady enough to hold your focus.',
+      'Keeps the energy relaxed.',
+    ],
+  }),
+  95,
+  [
+    { id: 'keep-this-energy', label: 'Keep this energy' },
+    { id: 'a-bit-calmer', label: 'A bit calmer' },
+  ],
+)
+
+const morningFocus = openingSession(
+  'morning-focus',
+  'Morning Focus',
+  'Easy Afrobeats to start the day.',
+  calmLow,
+  { ...essence, id: 'essence-morning' },
+  12,
+  [
+    { id: 'keep-this-mood', label: 'Keep this mood' },
+    { id: 'even-calmer', label: 'Even calmer' },
+  ],
+)
+
+/** The sessions that already exist when the app opens, in drawer order. */
+export const seededSessions: SessionState[] = [
+  initial,
+  { ...refine, refine: null },
+  gymEnergy,
+  coding,
+  morningFocus,
+]
 
 /** Keyed by the scene names of the approved design export. */
 export const mockSessions = {
