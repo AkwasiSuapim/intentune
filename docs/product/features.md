@@ -16,12 +16,13 @@
 - Top-k recommendations
 - Human-readable reasons
 - CLI output
+- Unified typed domain models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`)
+- Formal `Catalog` port with a `CsvCatalog` implementation, and catalog-backed application orchestration (`recommend_from_catalog()`)
 - Pytest coverage
 - Model card and README
 
 ## Planned Core-Logic Features
 
-- Unified typed domain models
 - Multiple preferred genres
 - Multiple preferred moods
 - Preference strength
@@ -43,7 +44,6 @@ Each feature must be introduced only after its behavior and tests are defined.
 - Versioned recommendation endpoint
 - Health endpoint
 - Structured validation errors
-- Catalog repository abstraction
 - Configuration through environment variables
 - Structured logging
 - Automated API tests

@@ -99,3 +99,20 @@ def load_music_candidates(csv_path: str) -> List[MusicCandidate]:
     with csv_file.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         return [music_candidate_from_csv_row(row) for row in reader]
+
+
+class CsvCatalog:
+    """Catalog port implementation backed by a CSV file on disk.
+
+    Binds a single csv_path to repeated list_candidates() calls so the
+    application layer can depend on the Catalog port (see
+    src/intentune/ports/catalog.py) instead of this class or
+    load_music_candidates() directly. Parsing itself still happens in
+    load_music_candidates() -- this class does not duplicate it.
+    """
+
+    def __init__(self, csv_path: str) -> None:
+        self._csv_path = csv_path
+
+    def list_candidates(self) -> List[MusicCandidate]:
+        return load_music_candidates(self._csv_path)

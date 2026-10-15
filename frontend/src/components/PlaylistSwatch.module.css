@@ -1,0 +1,20 @@
+.swatch {
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #e9d5ff, #9a62d6);
+}
+
+.swatch[data-tone='violet'] {
+  background: linear-gradient(135deg, #c084fc, #7c3aed);
+}
+
+.swatch[data-tone='indigo'] {
+  background: linear-gradient(135deg, #6a4fd0, #241c38);
+}
+
+.swatch[data-tone='ember'] {
+  background: linear-gradient(135deg, #a855f7, #e7895b);
+}
+
+.swatch[data-tone='dusk'] {
+  background: linear-gradient(135deg, #e7895b, #6b2a7a);
+}

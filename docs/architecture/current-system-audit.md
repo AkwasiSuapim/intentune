@@ -22,12 +22,14 @@ The uploaded repository began as the CodePath Music Recommender Simulation start
 - `backend/src/intentune/domain/scoring.py`
 - `backend/src/intentune/domain/ranking.py`
 - `backend/src/intentune/application/recommendation_service.py`
+- `backend/src/intentune/ports/catalog.py`
 - `backend/src/intentune/adapters/csv_catalog.py`
 - `backend/tests/test_recommender.py`
 - `backend/tests/test_domain_models.py`
 - `backend/tests/test_canonical_scoring.py`
 - `backend/tests/test_canonical_ranking.py`
 - `backend/tests/test_csv_catalog.py`
+- `backend/tests/test_catalog_port.py`
 - `backend/tests/test_recommendation_service.py`
 - `backend/tests/test_legacy_compatibility.py`
 
@@ -109,7 +111,7 @@ The current interaction is terminal-only and the sample profile is hard-coded.
 
 The engine assumes all candidates have CSV-style genre, mood, energy, and danceability fields. Future YouTube candidates may not have all those values.
 
-**Partially addressed (this phase):** `load_songs()`, `score_song()`, and `recommend_songs()` are now internally wired through `MusicCandidate` (via `src/intentune/adapters/csv_catalog.py` and the boundary converters in `src/recommender.py`), and the canonical scorer (`src/intentune/domain/scoring.py`) raises a clear `ValueError` if a candidate is missing a required scoring field rather than inventing a value. What remains unaddressed: the scorer still *requires* genre, mood, energy, and danceability to be present -- it does not yet skip missing features and renormalize the active weight. That is the "Expanded and Configurable Scoring Engine" future milestone's missing-feature-handling principle (see docs/planning/development-phases.md), needed before a YouTube candidate with partial metadata could be scored at all.
+**Addressed (this phase):** `load_songs()`, `score_song()`, and `recommend_songs()` are now internally wired through `MusicCandidate` (via `src/intentune/adapters/csv_catalog.py` and the boundary converters in `src/recommender.py`), and the canonical scorer (`src/intentune/domain/scoring.py`) raises a clear `ValueError` if a candidate is missing a required scoring field rather than inventing a value. A formal `Catalog` port (`src/intentune/ports/catalog.py`) now exists, and the application layer's `recommend_from_catalog()` depends on that port rather than a concrete adapter -- a future database or YouTube catalog can be substituted without changing the application layer. What remains unaddressed: the scorer still *requires* genre, mood, energy, and danceability to be present -- it does not yet skip missing features and renormalize the active weight. That is the "Expanded and Configurable Scoring Engine" future milestone's missing-feature-handling principle (see docs/planning/development-phases.md), needed before a YouTube candidate with partial metadata could be scored at all.
 
 ### Compatibility Conversion Overhead
 

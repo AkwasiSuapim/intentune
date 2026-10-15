@@ -1,0 +1,30 @@
+.summary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-sunken);
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-mauve);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-note);
+}
+
+.label {
+  font-weight: var(--weight-semibold);
+}
+
+.detail {
+  color: var(--color-text-muted);
+}

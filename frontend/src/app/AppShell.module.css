@@ -1,0 +1,76 @@
+.shell {
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0
+    env(safe-area-inset-left);
+  background:
+    radial-gradient(
+      130% 40% at 50% -8%,
+      var(--accent-glow) 0%,
+      rgb(15 13 22 / 0) 72%
+    ),
+    var(--color-ground);
+}
+
+/*
+ * Desktop: the session navigation becomes a rail and the session column is
+ * centred in the space beside it. Sheets centre over that same space.
+ */
+.shell[data-railed] {
+  display: grid;
+  grid-template-columns: var(--drawer-width) minmax(0, 1fr);
+  --overlay-inset-left: var(--drawer-width);
+}
+
+.rail {
+  min-height: 0;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--column-max);
+  height: 100%;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+/* The content child (timeline or Tune in prompt) owns its padding and scrolling. */
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-10) 0
+    max(var(--space-14), env(safe-area-inset-bottom));
+  background: var(--color-ground);
+  border-top: 1px solid var(--border-hairline);
+}
+
+/* Holds nothing in the layout; overlays position themselves against the shell. */
+.overlay {
+  display: contents;
+}
+
+/* Heard, not seen. */
+.announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

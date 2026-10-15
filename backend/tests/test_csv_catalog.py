@@ -1,6 +1,7 @@
 import pytest
 
-from src.intentune.adapters.csv_catalog import load_music_candidates, music_candidate_from_csv_row
+from src.intentune.adapters.csv_catalog import CsvCatalog, load_music_candidates, music_candidate_from_csv_row
+from src.intentune.ports.catalog import Catalog
 
 
 def _sample_row(**overrides):
@@ -93,6 +94,26 @@ def test_load_music_candidates_reads_full_catalog():
 
 def test_load_music_candidates_does_not_print(capsys):
     load_music_candidates("data/songs.csv")
+
+    output = capsys.readouterr().out
+    assert output == ""
+
+
+def test_csv_catalog_satisfies_catalog_protocol():
+    assert isinstance(CsvCatalog("data/songs.csv"), Catalog)
+
+
+def test_csv_catalog_list_candidates_reads_full_catalog():
+    catalog = CsvCatalog("data/songs.csv")
+
+    candidates = catalog.list_candidates()
+
+    assert len(candidates) == 20
+    assert all(candidate.source == "csv" for candidate in candidates)
+
+
+def test_csv_catalog_does_not_print(capsys):
+    CsvCatalog("data/songs.csv").list_candidates()
 
     output = capsys.readouterr().out
     assert output == ""

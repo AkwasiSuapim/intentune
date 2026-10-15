@@ -1,7 +1,7 @@
 import pytest
 
 from src.intentune.domain.models import MusicCandidate, UserProfile
-from src.intentune.application.recommendation_service import recommend_music
+from src.intentune.application.recommendation_service import recommend_from_catalog, recommend_music
 
 
 def _profile():
@@ -47,3 +47,60 @@ def test_recommend_music_rejects_non_music_candidate_items():
 
 def test_recommend_music_handles_empty_candidates():
     assert recommend_music([], _profile(), limit=5) == []
+
+
+class _FakeCatalog:
+    def __init__(self, candidates):
+        self._candidates = candidates
+
+    def list_candidates(self):
+        return self._candidates
+
+
+def test_recommend_from_catalog_ranks_candidates_from_fake_catalog():
+    catalog = _FakeCatalog(_candidates())
+
+    recommendations = recommend_from_catalog(catalog, _profile(), limit=2)
+
+    assert len(recommendations) == 2
+    assert recommendations[0].candidate.title == "High Match"
+    assert recommendations[0].rank == 1
+
+
+def test_recommend_from_catalog_is_deterministic():
+    catalog = _FakeCatalog(_candidates())
+
+    first = recommend_from_catalog(catalog, _profile(), limit=2)
+    second = recommend_from_catalog(catalog, _profile(), limit=2)
+
+    assert [r.candidate.candidate_id for r in first] == [r.candidate.candidate_id for r in second]
+
+
+def test_recommend_from_catalog_respects_limit():
+    candidates = [
+        MusicCandidate(candidate_id=str(i), title=f"Song {i}", creator="Artist", source="fake", genre="pop", mood="happy", energy=0.8, danceability=0.8)
+        for i in range(10)
+    ]
+    catalog = _FakeCatalog(candidates)
+
+    recommendations = recommend_from_catalog(catalog, _profile(), limit=3)
+
+    assert len(recommendations) == 3
+
+
+def test_recommend_from_catalog_handles_empty_catalog():
+    catalog = _FakeCatalog([])
+
+    assert recommend_from_catalog(catalog, _profile(), limit=5) == []
+
+
+def test_recommend_from_catalog_rejects_non_catalog():
+    with pytest.raises(TypeError):
+        recommend_from_catalog(object(), _profile(), limit=5)
+
+
+def test_recommend_from_catalog_rejects_non_user_profile():
+    catalog = _FakeCatalog(_candidates())
+
+    with pytest.raises(TypeError):
+        recommend_from_catalog(catalog, {"favorite_genre": "pop"}, limit=2)

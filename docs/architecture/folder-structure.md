@@ -32,6 +32,9 @@ intentune/
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   └── recommendation_service.py
+│   │       ├── ports/
+│   │       │   ├── __init__.py
+│   │       │   └── catalog.py
 │   │       └── adapters/
 │   │           ├── __init__.py
 │   │           └── csv_catalog.py
@@ -42,15 +45,13 @@ intentune/
 │       ├── test_canonical_scoring.py
 │       ├── test_canonical_ranking.py
 │       ├── test_recommendation_service.py
-│       └── test_legacy_compatibility.py
+│       ├── test_legacy_compatibility.py
+│       └── test_catalog_port.py
 └── frontend/
-    └── (empty; not yet scaffolded)
+    └── Vite + React + TypeScript scaffold
 ```
 
-`domain/scoring.py` and `domain/ranking.py` implement the current four-feature scoring rule and ranking/tie-breaking as the single source of truth; `application/recommendation_service.py` is a first, minimal use-case orchestrator; `adapters/csv_catalog.py` is the first adapter, converting raw CSV rows into `MusicCandidate` objects. `src/recommender.py`'s legacy dict/dataclass functions now call into these rather than containing their own copy of the logic. Placeholder folders (`api/`, `ports/`, `database_catalog.py`, `youtube_catalog.py`, `ai_intent_parser.py`) are still intentionally not created until working code needs them, per the Migration Rule below.
-
-No catalog interface or `ports/` module exists yet. The CSV adapter is working
-code, but the compatibility layer currently calls it directly.
+`domain/scoring.py` and `domain/ranking.py` implement the current four-feature scoring rule and ranking/tie-breaking as the single source of truth; `ports/catalog.py` defines the `Catalog` protocol (`list_candidates() -> Sequence[MusicCandidate]`); `application/recommendation_service.py` is a use-case orchestrator offering both `recommend_music(candidates, profile, limit)` (candidates passed directly) and `recommend_from_catalog(catalog, profile, limit)` (candidates requested from a `Catalog` port); `adapters/csv_catalog.py` is the first adapter, converting raw CSV rows into `MusicCandidate` objects via `load_music_candidates()` and exposing `CsvCatalog`, which implements the `Catalog` port around that loader. `src/recommender.py`'s legacy dict/dataclass functions now call into these rather than containing their own copy of the logic. Placeholder folders (`api/`, `database_catalog.py`, `youtube_catalog.py`, `ai_intent_parser.py`) are still intentionally not created until working code needs them, per the Migration Rule below.
 
 ## Proposed Incremental Structure
 

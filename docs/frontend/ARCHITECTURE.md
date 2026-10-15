@@ -36,7 +36,9 @@ Use:
 - **React** for component-based interactive UI;
 - **TypeScript** for typed props, state, controlled UI schemas, and future API contracts;
 - **Vite** for development/build tooling;
-- **CSS Modules plus a small global token/reset layer** for styling and responsive layout.
+- **CSS Modules plus a small global token/reset layer** for styling and responsive layout;
+- **oxlint** as the frontend linter (the scaffold's existing setup);
+- **Vitest** as the frontend unit-test runner, with **jsdom** and **Testing Library** for DOM-level tests.
 
 Do not use by default:
 
@@ -45,7 +47,8 @@ Do not use by default:
 - React Native / Expo,
 - Redux,
 - Tailwind,
-- a heavy component framework.
+- a heavy component framework,
+- ESLint or another linter in place of oxlint.
 
 These may be reconsidered only when a real requirement justifies the cost.
 
@@ -131,6 +134,10 @@ The exported Claude Design HTML is stored as a **reference specification**, not 
 - server-side business validation.
 
 A recommendation card may display a recommendation. It must not calculate why that recommendation should rank above another song.
+
+### Intent interpretation boundary
+
+React components, reducers, and UI composition must not perform natural-language phrase matching. Typed text, starters, and quick actions are passed to the session service unread. Any temporary phrase interpretation belongs only behind the session-service boundary (today, the mock implementation), so a real intent parser or API can replace it without rewriting UI components.
 
 ---
 
@@ -615,6 +622,40 @@ FastAPI implementation later
 
 Do not scatter `fetch()` across visual components.
 
+### Service interface (F8)
+
+`SessionService` (`src/features/session/sessionService.ts`) is the only way the session feature reaches whatever answers it. The mock in `src/mocks/` implements it today; an HTTP client will implement the same interface. `App.tsx` is the only place a concrete implementation is chosen.
+
+- **Asynchronous.** Every method returns a promise and rejects when it cannot answer. The mock answers at once through the same interface.
+- **Failure is opaque.** The feature never inspects a rejection: any failure means "the request did not go through". Mapping specific backend errors (validation, rate limits, provider failures) to different UI waits for approved error semantics.
+- **Commands stay pure.** `planCommand` takes no service. It returns the changes to make at once plus, at most, one `ServiceQuestion`. `ask` puts the question to the service and returns the answer, or the failure, as one action for the session that asked. `ask` never rejects.
+- **One request at a time per session.** While a request that moves the session forward (a message, starter, quick action, tuning value, Next, Not for me) is pending, further ones are not sent. Local actions (play/pause, Why this fits, opening Tune, the drawer, switching sessions) carry on.
+- **Answers go to the session that asked**, even if the user has opened another session since.
+- **Hints are optional.** Quick actions after a reaction and playlist suggestions never block anything. If one fails it is left out. If it arrives after the song has changed it is dropped.
+
+Loading and error states:
+
+- **Sessions loading.** `WorkspaceStatus` shows the wordmark and "Loading your sessions…". It fades in only after 600ms, so a fast load shows nothing but the background.
+- **Sessions failed to load.** The screen says so and offers Try again. The button stays (`aria-disabled`) while a retry loads, so focus is not lost.
+- **Answer pending.** The user's words appear at once with a `turn_status` note, "Working on it…", where the answer will appear. The note fades in after 400ms. A typed draft is kept, not sent, until the answer arrives.
+- **Answer failed.** The note becomes "That didn't go through." with Try again. The words, the song and the intent stay as they were. Try again resends the same request; anything else the user asks replaces it.
+
+### Backend contract status
+
+No HTTP API exists in the repository yet. `docs/design/api-design.md` is a **Draft** and describes profile-based recommendation requests (`POST /api/v1/recommendations`, `POST /api/v1/feedback`). It does not cover what the session UI asks for:
+
+- session turns: a message, a tuning change, Next, Not for me;
+- the workspace: existing sessions, starters, tuning options, playlists;
+- quick actions and playlist suggestions;
+- saving to and creating playlists;
+- session identity.
+
+Because the contract is not approved, F8 stops at the frontend abstraction. There is no HTTP client, no request/response DTOs and no API base-URL configuration. Likes, saves and created playlists stay on the device; they become service calls once a contract defines them.
+
+### Playback authority boundary
+
+The current frontend playback clock is mock/prototype behavior: a timer that advances a position, with no audio behind it. When real media or provider playback is introduced, the real playback state becomes authoritative, and the mock tick mechanism must be replaced rather than run alongside it.
+
 ---
 
 ## 24. Suggested Frontend Structure
@@ -662,13 +703,34 @@ The frontend must handle:
 
 Intent chips and quick actions must never clip text or create page-level horizontal overflow.
 
+### Keyboard and announcement rules
+
+- Use an ARIA widget role only with the keyboard behavior it implies. The tuning tabs follow the tabs pattern: one Tab stop, arrow keys and Home/End move and select, and the panel is labelled by its tab. Tuning values are toggle buttons (`aria-pressed`), not radios, because choosing one retunes the session immediately; radio arrow keys would start a new turn on every keypress.
+- When a control the user is focused on is replaced (a new recommendation, the refine control replacing the quick actions), focus moves to its counterpart rather than falling to the page. Controls that can be replaced carry `data-focus-key`.
+- Overlays make the rest of the screen inert, take focus when they open, close on Escape, and hand focus back to whatever opened them.
+- New turns are announced once, politely, by the shell's single live region. Items in the session history are not live regions.
+- While an answer is pending, focus that has lost its control (a starter, Try again) waits on the pending note. It then moves to the new song or, if the request failed, to Try again. A failure is announced; waiting is not.
+
 ---
 
 ## 26. Testing Strategy
 
 Test user-visible behavior and architectural boundaries, not implementation trivia.
 
-Important future coverage includes:
+**Vitest** is the approved unit-test runner (`npm test` in `frontend/`). It reuses the Vite configuration. Tests live next to the code they cover as `*.test.ts` / `*.test.tsx`. Do not add further test libraries merely for completeness; add one only when a phase has a concrete need that the existing setup cannot meet.
+
+DOM-level tests (`*.dom.test.tsx`) run in **jsdom** with **@testing-library/react** (and its peer **@testing-library/dom**) and **@testing-library/user-event**. They exist because event wiring, focus management, keyboard behavior, and effect-driven behavior cannot be checked by rendering to static markup. `src/test/dom.tsx` supplies what jsdom lacks (IntersectionObserver, ResizeObserver, `matchMedia`, scrolling) as fakes the tests can drive, and runs Vitest's fake clock.
+
+What each layer protects:
+
+- **Pure tests:** composition policy, reducers, commands, the mock service, announcement wording, and the service boundary: what is sent and when, pending and failed requests, retries, late answers, and hints that fail or arrive late.
+- **Static-render tests:** every block type through the registry, and the unknown-block fallback.
+- **DOM tests:** the interactive app by pointer and keyboard: commands reaching the session, focus moves, overlays, Escape, tuning keyboard behavior, the announcer, the playback clock, compact now-playing. They also cover loading, waiting and failure states, using a service whose answers the test releases or fails (`heldService` in `src/test/dom.tsx`).
+- **Browser checks (`npm run check:browser`, not part of `npm test`):** the full mock walkthrough, layout and overflow across a fixed viewport matrix, motion and reduced motion, overlay focus and exit animations, contrast over artwork, text at 200%, an automated accessibility audit (axe-core), a keyboard-only probe, and a comparison with the approved design. jsdom has no layout or animation, so these need a real browser. They live in `frontend/browser-checks/`, which documents requirements, viewports and expected results.
+
+**Not yet validated:** the frontend has not been tested on physical phones (iOS Safari, Android Chrome) or with real screen readers (VoiceOver, TalkBack, NVDA, JAWS). Emulated devices and automated audits are not a substitute and must not be reported as such.
+
+Important coverage includes:
 
 - empty/new-session state;
 - current-intent rendering;

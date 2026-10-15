@@ -1,0 +1,63 @@
+/* column-reverse keeps the newest content pinned to the bottom edge. */
+.scroller {
+  scrollbar-width: none;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  padding: var(--space-8) var(--gutter) var(--space-14);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  transform-origin: 50% 100%;
+}
+
+/* Arrivals. Each runs once, when the item first appears. */
+.item[data-enter='rise'] {
+  animation: rise var(--duration-enter) var(--ease-out) both;
+}
+
+.item[data-enter='reveal'] {
+  animation: reveal var(--duration-enter) var(--ease-out) both;
+}
+
+.item[data-enter='settle'] {
+  animation: settle var(--duration-enter) var(--ease-out) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+}
+
+/* A hero that has just become history: it eases down into its compact row. */
+@keyframes settle {
+  from {
+    opacity: 0.2;
+    transform: scale(1.04);
+  }
+}

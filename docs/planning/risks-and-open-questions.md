@@ -35,7 +35,6 @@
 
 ## Open Backend Questions
 
-- What exact typed models replace the current dictionaries and competing dataclasses?
 - How should missing candidate features affect score normalization?
 - How should genre and mood similarity be represented?
 - How should diversity penalties interact with relevance scores?

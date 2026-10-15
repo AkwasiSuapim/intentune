@@ -1,0 +1,19 @@
+.message {
+  margin: 0;
+  padding-left: 64px;
+  color: var(--color-text-soft);
+  font-size: var(--text-body);
+  line-height: var(--leading-snug);
+  text-align: right;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+.prefix {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

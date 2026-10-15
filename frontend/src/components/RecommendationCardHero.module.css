@@ -1,0 +1,208 @@
+.card {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-hero);
+  background: var(--color-surface);
+}
+
+/*
+ * The artwork area keeps its designed height, but grows if enlarged text
+ * needs more room, so the song's title is never pushed out of the card.
+ */
+.media {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: var(--hero-art-height);
+}
+
+.art {
+  position: absolute;
+  inset: 0;
+}
+
+.art > img {
+  object-position: center 35%;
+}
+
+/* Fallback glyph sits above the text block instead of dead centre. */
+.art > svg {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  opacity: 0.8;
+  transform: translate(-50%, -50%);
+}
+
+/*
+ * Contrast treatment: the scrim belongs to the text block and rises above it,
+ * so the text stays readable over any artwork, whether the title takes one
+ * line or two.
+ */
+.meta {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--artwork-scrim-rise) var(--space-20) var(--space-16);
+  background: var(--artwork-scrim);
+  text-shadow: var(--artwork-text-shadow);
+}
+
+.descriptors {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-lavender);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+}
+
+.title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-hero);
+  line-height: var(--leading-hero);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-display);
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-dim);
+  font-size: var(--text-body-lg);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-14) var(--space-16);
+}
+
+.echo {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-note);
+}
+
+/* Playback is the loudest control on the card. */
+.playback {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.play {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--color-on-accent);
+  transition: background-color var(--duration-color) ease;
+}
+
+.progress {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.track {
+  overflow: hidden;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-track);
+}
+
+/* Glides between the once-a-second position updates. */
+.fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent-high);
+  transition: width 1s linear;
+}
+
+.times {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-text-subtle);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.next {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-soft);
+}
+
+/*
+ * Song reactions are quieter than playback. Equal thirds when there is room;
+ * on narrow cards each keeps at least its label width, and with enlarged
+ * text they wrap onto a second row rather than clip.
+ */
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.reaction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1 1 0;
+  min-width: max-content;
+  height: var(--touch-target);
+  padding: 0 var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--fill-quiet);
+  color: var(--color-text-icon);
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-color) ease,
+    border-color var(--duration-color) ease,
+    color var(--duration-color) ease;
+}
+
+.reaction[data-active] {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--color-text);
+}
+
+/* A reaction confirms itself with one small beat of its icon. */
+.reaction[data-active] > svg {
+  animation: confirm var(--duration-enter) var(--ease-out);
+}
+
+@keyframes confirm {
+  40% {
+    transform: scale(1.3);
+  }
+}

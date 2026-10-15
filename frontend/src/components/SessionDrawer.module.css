@@ -1,0 +1,255 @@
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim-strong);
+  animation: scrim-in var(--duration-scrim) ease both;
+  /* A scrim should not brighten under the pointer. */
+  filter: none;
+}
+
+.layer[data-leaving] {
+  pointer-events: none;
+}
+
+.layer[data-leaving] .scrim {
+  animation: scrim-out var(--duration-exit) ease both;
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes drawer-out {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* Shared by the overlay drawer and the desktop rail. */
+.drawer,
+.rail {
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: max(var(--space-10), env(safe-area-inset-top)) var(--space-12)
+    max(24px, env(safe-area-inset-bottom));
+  border-right: 1px solid var(--border-subtle);
+  background: var(--color-surface-sunken);
+}
+
+.drawer::-webkit-scrollbar,
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--drawer-width);
+  max-width: 86%;
+  /* Focus lands here when the drawer opens; the drawer itself needs no ring. */
+  outline: none;
+  animation: drawer-in var(--duration-sheet) var(--ease-sheet) both;
+}
+
+.layer[data-leaving] .drawer {
+  animation: drawer-out var(--duration-exit) var(--ease-sheet) both;
+}
+
+.rail {
+  height: 100%;
+}
+
+/* The rail has no close button beside the wordmark; keep the row its height. */
+.rail .head {
+  min-height: var(--touch-target);
+}
+
+.head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 var(--space-12) var(--space-10);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.brandGlyph {
+  color: var(--color-mauve);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: var(--text-wordmark);
+  line-height: var(--leading-heading);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wordmark);
+}
+
+.close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  border-radius: var(--radius-control-sm);
+  color: var(--color-text-muted);
+}
+
+.newSession {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  height: 48px;
+  padding: 0 var(--space-14);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+.sectionLabel {
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  flex-shrink: 0;
+  padding: 22px var(--space-12) var(--space-8);
+  color: var(--color-text-subtle);
+}
+
+.sessions + .sectionLabel {
+  padding: 26px var(--space-12) var(--space-6);
+}
+
+.sessions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  width: 100%;
+  min-height: 58px;
+  padding: 9px var(--space-12);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  text-align: left;
+}
+
+.session[aria-current='page'] {
+  background: var(--color-raised);
+}
+
+.sessionText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sessionTitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: var(--text-subtitle);
+  line-height: var(--leading-heading);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+}
+
+.sessionSubtitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+.playingMark {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  height: 14px;
+}
+
+.playingMark > span {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent-high);
+}
+
+.playingMark > span:nth-child(1) {
+  height: 8px;
+}
+
+.playingMark > span:nth-child(2) {
+  height: 14px;
+}
+
+.playingMark > span:nth-child(3) {
+  height: 10px;
+}
+
+.playlist {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-control-sm);
+  color: var(--color-text-icon);
+  font-size: var(--text-body-sm);
+  text-align: left;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.playlistName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
