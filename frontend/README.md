@@ -13,7 +13,8 @@ npm install      # install dependencies
 npm run dev      # start the development server
 npm run build    # typecheck and build for production
 npm run lint     # lint with oxlint
-npm test         # run the tests with Vitest
+npm test         # run all tests with Vitest (unit, static-render and DOM-level)
+npm run check:browser  # build, then run the browser checks (see browser-checks/README.md)
 npm run preview  # serve the production build locally
 ```
 

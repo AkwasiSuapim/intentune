@@ -5,9 +5,16 @@
   background: var(--color-surface);
 }
 
+/*
+ * The artwork area keeps its designed height, but grows if enlarged text
+ * needs more room, so the song's title is never pushed out of the card.
+ */
 .media {
   position: relative;
-  height: var(--hero-art-height);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: var(--hero-art-height);
 }
 
 .art {
@@ -34,10 +41,7 @@
  * line or two.
  */
 .meta {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -155,11 +159,12 @@
 
 /*
  * Song reactions are quieter than playback. Equal thirds when there is room;
- * on narrow cards each column keeps at least its label width so nothing clips.
+ * on narrow cards each keeps at least its label width, and with enlarged
+ * text they wrap onto a second row rather than clip.
  */
 .reactions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(max-content, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-8);
 }
 
@@ -168,6 +173,8 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
+  flex: 1 1 0;
+  min-width: max-content;
   height: var(--touch-target);
   padding: 0 var(--space-6);
   border: 1px solid var(--border-subtle);

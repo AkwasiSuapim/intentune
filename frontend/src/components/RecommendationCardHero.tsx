@@ -90,6 +90,7 @@ function RecommendationCardHero({
             type="button"
             className={styles.play}
             aria-label={`${playing ? 'Pause' : 'Play'} ${title}`}
+            data-focus-key="hero-play"
             onClick={onTogglePlay}
           >
             {playing ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
@@ -102,6 +103,7 @@ function RecommendationCardHero({
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(progress)}
+              aria-valuetext={`${formatTime(positionSeconds)} of ${formatTime(durationSeconds)}`}
             >
               <div className={styles.fill} style={{ width: `${progress}%` }} />
             </div>
@@ -114,6 +116,7 @@ function RecommendationCardHero({
             type="button"
             className={styles.next}
             aria-label="Next recommendation"
+            data-focus-key="hero-next"
             onClick={onNext}
           >
             <NextIcon size={22} />
@@ -133,12 +136,18 @@ function RecommendationCardHero({
             className={styles.reaction}
             data-active={liked ? '' : undefined}
             aria-pressed={liked}
+            data-focus-key="hero-like"
             onClick={onLike}
           >
             <HeartIcon size={17} filled={liked} />
             {liked ? 'Liked' : 'Like'}
           </button>
-          <button type="button" className={styles.reaction} onClick={onNotForMe}>
+          <button
+            type="button"
+            className={styles.reaction}
+            data-focus-key="hero-not-for-me"
+            onClick={onNotForMe}
+          >
             <CloseIcon size={15} />
             Not for me
           </button>
@@ -151,6 +160,7 @@ function RecommendationCardHero({
                 ? `Saved to ${savedTo.join(', ')}. Change playlists`
                 : 'Save to a playlist'
             }
+            data-focus-key="hero-save"
             onClick={onSave}
           >
             {saved ? <CheckIcon size={15} /> : <PlusIcon size={15} />}

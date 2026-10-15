@@ -54,6 +54,7 @@ function DiscoveryPrompt({ starters, onStart }: DiscoveryPromptProps) {
             type="button"
             className={styles.starter}
             aria-label={`${starter.label}: ${starter.phrase}`}
+            data-focus-key="starter"
             onClick={() => onStart?.(starter.id)}
           >
             <Artwork src={starter.artworkUrl} className={styles.swatch} />

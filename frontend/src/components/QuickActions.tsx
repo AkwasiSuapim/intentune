@@ -31,11 +31,12 @@ function QuickActions({ actions, onSelect }: QuickActionsProps) {
       role="group"
       aria-label="Suggested refinements"
     >
-      {shown.map((action) => (
+      {shown.map((action, index) => (
         <button
           key={action.id}
           type="button"
           className={styles.action}
+          data-focus-key={`quick-action-${index}`}
           onClick={() => onSelect?.(action.id)}
         >
           {action.label}

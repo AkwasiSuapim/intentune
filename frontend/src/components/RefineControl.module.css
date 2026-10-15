@@ -136,7 +136,7 @@
 }
 
 /* The selected level also gets a ring, so the state is not colour-only. */
-.barButton[aria-checked='true'] .bar {
+.barButton[aria-pressed='true'] .bar {
   outline: 1.5px solid var(--accent-ring);
   outline-offset: 2px;
 }
@@ -173,7 +173,7 @@
     color var(--duration-color) ease;
 }
 
-.choice[aria-checked='true'] {
+.choice[aria-pressed='true'] {
   border-color: var(--accent-ring);
   background: var(--accent-soft);
   color: var(--color-text);

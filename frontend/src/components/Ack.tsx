@@ -17,7 +17,7 @@ type AckProps = {
 
 function Ack({ label, detail, changes = [], tone = 'confirm' }: AckProps) {
   return (
-    <div className={styles.ack} role="status">
+    <div className={styles.ack}>
       <span className={styles.icon} data-tone={tone} aria-hidden="true">
         {tone === 'confirm' ? (
           <CheckIcon size={12} strokeWidth="2.8" />

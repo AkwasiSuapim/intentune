@@ -39,6 +39,7 @@ function WhyThisFits({
         className={styles.row}
         aria-expanded={expanded}
         aria-controls={reasonsId}
+        data-focus-key="hero-why"
         onClick={onToggle}
       >
         <span className={styles.text}>

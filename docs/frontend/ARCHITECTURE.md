@@ -38,7 +38,7 @@ Use:
 - **Vite** for development/build tooling;
 - **CSS Modules plus a small global token/reset layer** for styling and responsive layout;
 - **oxlint** as the frontend linter (the scaffold's existing setup);
-- **Vitest** as the frontend unit-test runner.
+- **Vitest** as the frontend unit-test runner, with **jsdom** and **Testing Library** for DOM-level tests.
 
 Do not use by default:
 
@@ -673,6 +673,13 @@ The frontend must handle:
 
 Intent chips and quick actions must never clip text or create page-level horizontal overflow.
 
+### Keyboard and announcement rules
+
+- Use an ARIA widget role only with the keyboard behavior it implies. The tuning tabs follow the tabs pattern: one Tab stop, arrow keys and Home/End move and select, and the panel is labelled by its tab. Tuning values are toggle buttons (`aria-pressed`), not radios, because choosing one retunes the session immediately; radio arrow keys would start a new turn on every keypress.
+- When a control the user is focused on is replaced (a new recommendation, the refine control replacing the quick actions), focus moves to its counterpart rather than falling to the page. Controls that can be replaced carry `data-focus-key`.
+- Overlays make the rest of the screen inert, take focus when they open, close on Escape, and hand focus back to whatever opened them.
+- New turns are announced once, politely, by the shell's single live region. Items in the session history are not live regions.
+
 ---
 
 ## 26. Testing Strategy
@@ -681,7 +688,18 @@ Test user-visible behavior and architectural boundaries, not implementation triv
 
 **Vitest** is the approved unit-test runner (`npm test` in `frontend/`). It reuses the Vite configuration. Tests live next to the code they cover as `*.test.ts` / `*.test.tsx`. Do not add further test libraries merely for completeness; add one only when a phase has a concrete need that the existing setup cannot meet.
 
-Important future coverage includes:
+DOM-level tests (`*.dom.test.tsx`) run in **jsdom** with **@testing-library/react** (and its peer **@testing-library/dom**) and **@testing-library/user-event**. They exist because event wiring, focus management, keyboard behavior, and effect-driven behavior cannot be checked by rendering to static markup. `src/test/dom.tsx` supplies what jsdom lacks (IntersectionObserver, ResizeObserver, `matchMedia`, scrolling) as fakes the tests can drive, and runs Vitest's fake clock.
+
+What each layer protects:
+
+- **Pure tests:** composition policy, reducers, commands, the mock service, announcement wording.
+- **Static-render tests:** every block type through the registry, and the unknown-block fallback.
+- **DOM tests:** the interactive app by pointer and keyboard: commands reaching the session, focus moves, overlays, Escape, tuning keyboard behavior, the announcer, the playback clock, compact now-playing.
+- **Browser checks (`npm run check:browser`, not part of `npm test`):** the full mock walkthrough, layout and overflow across a fixed viewport matrix, motion and reduced motion, overlay focus and exit animations, contrast over artwork, text at 200%, an automated accessibility audit (axe-core), a keyboard-only probe, and a comparison with the approved design. jsdom has no layout or animation, so these need a real browser. They live in `frontend/browser-checks/`, which documents requirements, viewports and expected results.
+
+**Not yet validated:** the frontend has not been tested on physical phones (iOS Safari, Android Chrome) or with real screen readers (VoiceOver, TalkBack, NVDA, JAWS). Emulated devices and automated audits are not a substitute and must not be reported as such.
+
+Important coverage includes:
 
 - empty/new-session state;
 - current-intent rendering;

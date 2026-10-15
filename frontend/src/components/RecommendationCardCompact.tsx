@@ -34,6 +34,7 @@ function RecommendationCardCompact({
       className={styles.card}
       data-outcome={outcome}
       aria-label={`Play ${title} by ${artist} again. ${outcomeLabel}`}
+      data-focus-key="history"
       onClick={onReplay}
     >
       <Artwork src={artworkUrl} glyphSize={18} className={styles.art} />

@@ -18,7 +18,7 @@ function TuneBar({ actions, onSelectAction, onOpenTune }: TuneBarProps) {
         type="button"
         className={styles.tune}
         aria-label="Tune energy, mood or genre"
-        aria-expanded={false}
+        data-focus-key="tune"
         onClick={onOpenTune}
       >
         <TuneIcon size={17} />

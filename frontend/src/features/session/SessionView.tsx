@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import AppShell, { RAIL_MEDIA_QUERY } from '../../app/AppShell.tsx'
 import MobileHeader from '../../app/MobileHeader.tsx'
+import { useFocusRescue } from '../../app/useFocusRescue.ts'
 import { useLingering } from '../../app/useLingering.ts'
 import { useMediaQuery } from '../../app/useMediaQuery.ts'
 import Composer from '../../components/Composer.tsx'
@@ -8,6 +9,7 @@ import SessionDrawer from '../../components/SessionDrawer.tsx'
 import SessionTimeline, {
   TimelineItem,
 } from '../../components/SessionTimeline.tsx'
+import { announceBlocks } from './announce.ts'
 import BlockRenderer from './BlockRenderer.tsx'
 import type { SessionBlock } from './blocks.ts'
 import type { SessionCommand } from './commands.ts'
@@ -19,6 +21,22 @@ type SessionViewProps = {
   environment: SessionEnvironment
   /** Left out for a static rendering: the controls then do nothing. */
   onCommand?: (command: SessionCommand) => void
+}
+
+/**
+ * Where keyboard focus goes when the focused control is replaced and no
+ * control with the same focus key takes its place.
+ */
+const FOCUS_SUCCESSORS: Record<string, string[]> = {
+  starter: ['hero-play'],
+  tune: ['refine-tab'],
+  refine: ['tune'],
+  'refine-tab': ['tune'],
+  'refine-close': ['tune'],
+  'quick-action-0': ['refine-tab', 'tune'],
+  'quick-action-1': ['quick-action-0', 'refine-tab', 'tune'],
+  history: ['hero-play'],
+  'up-next': ['hero-play'],
 }
 
 /** A recommendation gets a new key when it turns from hero into history. */
@@ -39,6 +57,7 @@ function entranceOf(block: SessionBlock) {
 function SessionView({ state, environment, onCommand }: SessionViewProps) {
   const view = composeSession(state, environment)
   const railed = useMediaQuery(RAIL_MEDIA_QUERY)
+  useFocusRescue(FOCUS_SUCCESSORS)
 
   // The unsent draft is input state of this view, not of the session.
   const [draft, setDraft] = useState('')
@@ -48,6 +67,12 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
     () => new Set(view.content.map(keyOf)),
   )
   const [nowPlayingHidden, setNowPlayingHidden] = useState(false)
+  // What the announcer last said, and how much of the session it had seen.
+  const [news, setNews] = useState({
+    sessionId: state.id,
+    eventCount: state.events.length,
+    text: '',
+  })
 
   // Another session has been opened in this view: start its view state clean.
   // The view itself stays mounted so the drawer can finish sliding away.
@@ -57,6 +82,23 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
     setDraft('')
     setPresentAtOpen(new Set(view.content.map(keyOf)))
     setNowPlayingHidden(false)
+    setNews({
+      sessionId: state.id,
+      eventCount: state.events.length,
+      text: `Opened ${view.title}.`,
+    })
+  } else if (news.eventCount !== state.events.length) {
+    // The stream grew: announce what arrived, in the words shown on screen.
+    const added = new Set(
+      state.events.slice(news.eventCount).map((event) => event.id),
+    )
+    setNews({
+      sessionId: state.id,
+      eventCount: state.events.length,
+      text:
+        announceBlocks(view.content.filter((block) => added.has(block.id))) ||
+        news.text,
+    })
   }
 
   // Overlays stay on screen long enough to animate out.
@@ -104,6 +146,7 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
   return (
     <AppShell
       accent={view.accent}
+      announcement={news.text}
       header={
         <MobileHeader
           title={view.title}

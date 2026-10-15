@@ -80,6 +80,7 @@ function Composer({
         type="text"
         autoComplete="off"
         enterKeyHint="send"
+        data-focus-key="composer"
         value={value}
         placeholder={placeholder}
         onChange={(event) => onValueChange?.(event.target.value)}

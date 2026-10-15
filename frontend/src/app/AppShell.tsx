@@ -27,6 +27,8 @@ type AppShellProps = {
    */
   overlayModal?: boolean
   onDismissOverlay?: () => void
+  /** Short news for screen readers, e.g. what a turn changed. Read politely. */
+  announcement?: string
   accent?: AccentContext
 }
 
@@ -40,6 +42,7 @@ function AppShell({
   overlay,
   overlayModal = false,
   onDismissOverlay,
+  announcement = '',
   accent = 'emotional',
 }: AppShellProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -80,18 +83,23 @@ function AppShell({
       )}
       <div className={styles.column} inert={overlayModal}>
         {header}
-        {intentSummary}
         <main className={styles.content} aria-label="Listening session">
+          {intentSummary}
           {children}
         </main>
-        <footer className={styles.dock}>
+        {/* A labelled region, not a footer: these are the session's controls. */}
+        <section className={styles.dock} aria-label="Session controls">
           {contextualControls}
           {composer}
-        </footer>
+        </section>
       </div>
       <div ref={overlayRef} className={styles.overlay}>
         {overlay}
       </div>
+      {/* Outside the column, so it still speaks while an overlay makes the column inert. */}
+      <p className={styles.announcer} role="status" aria-live="polite">
+        {announcement}
+      </p>
     </div>
   )
 }

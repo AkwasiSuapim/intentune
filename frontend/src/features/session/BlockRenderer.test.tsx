@@ -47,7 +47,7 @@ const SAMPLES: { block: SessionBlock; shows: string[] }[] = [
       changes: [{ dimension: 'Energy', from: 'Low', to: 'Medium' }],
       tone: 'confirm',
     },
-    shows: ['role="status"', 'Intent updated', 'Medium'],
+    shows: ['Intent updated', 'Energy', 'Low', 'Medium'],
   },
   {
     block: {
@@ -168,6 +168,13 @@ describe('known blocks', () => {
     expect(new Set(SAMPLES.map((sample) => sample.block.type))).toEqual(
       new Set(Object.keys(vocabulary)),
     )
+  })
+
+  it('keeps acknowledgements in the history out of the live region', () => {
+    // New turns are announced once by the shell's announcer; history entries
+    // must not each be a live region that re-announces or competes with it.
+    expect(render(SAMPLES[3].block)).not.toContain('role="status"')
+    expect(render(SAMPLES[3].block)).not.toContain('aria-live')
   })
 
   it('renders the hero and compact recommendation variants differently', () => {

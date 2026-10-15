@@ -16,6 +16,7 @@ function UpNext({ title, artist, artworkUrl, onPlay }: UpNextProps) {
       type="button"
       className={styles.row}
       aria-label={`Up next: ${title} by ${artist}. Play now`}
+      data-focus-key="up-next"
       onClick={onPlay}
     >
       <Artwork src={artworkUrl} className={styles.art} />
