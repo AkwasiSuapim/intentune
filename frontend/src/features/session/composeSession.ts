@@ -8,6 +8,7 @@ import type {
 } from '../../components/SessionDrawer.tsx'
 import type { RecommendationOutcome } from '../../components/RecommendationCardCompact.tsx'
 import type { BlockOf, TimelineBlock } from './blocks.ts'
+import { nextEventId } from './sessionReducer.ts'
 import { INTENT_DIMENSIONS } from './types.ts'
 import type {
   Intent,
@@ -37,6 +38,8 @@ export type SessionComposition = {
   /** The song now playing, for the composer's compact now-playing slot. */
   nowPlaying: { title: string; artworkUrl: string | null; playing: boolean } | null
   composerPlaceholder: string
+  /** True while the service is answering: nothing new can be sent yet. */
+  busy: boolean
 }
 
 const NO_INTENT_YET = 'No intent yet'
@@ -229,6 +232,24 @@ function composeTimeline(
       artworkUrl: upNext.artworkUrl,
     })
   }
+
+  // An open request reads last, where its answer will appear.
+  const { openRequest } = state
+  if (openRequest) {
+    if (openRequest.request.kind === 'message') {
+      // Takes the id the message will have once answered, so it stays put.
+      blocks.push({
+        type: 'user_message',
+        id: nextEventId(state),
+        text: openRequest.request.text,
+      })
+    }
+    blocks.push({
+      type: 'turn_status',
+      id: `turn-${openRequest.status}`,
+      status: openRequest.status,
+    })
+  }
   return blocks
 }
 
@@ -322,7 +343,8 @@ export function composeSession(
     (state.currentRecommendationId &&
       state.recommendations[state.currentRecommendationId]) ||
     null
-  const isNewSession = state.events.length === 0 && !state.intent
+  const isNewSession =
+    state.events.length === 0 && !state.intent && !state.openRequest
   const content: Pick<SessionComposition, 'layout' | 'content'> = isNewSession
     ? {
         layout: 'prompt',
@@ -357,5 +379,6 @@ export function composeSession(
     composerPlaceholder: isNewSession
       ? 'Tell Intentune what you want…'
       : 'Tell Intentune what you want next…',
+    busy: state.openRequest?.status === 'pending',
   }
 }

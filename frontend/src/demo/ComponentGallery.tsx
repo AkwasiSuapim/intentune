@@ -12,6 +12,7 @@ import RefineControl from '../components/RefineControl.tsx'
 import SessionDrawer from '../components/SessionDrawer.tsx'
 import SessionSummary from '../components/SessionSummary.tsx'
 import TuneBar from '../components/TuneBar.tsx'
+import TurnStatus from '../components/TurnStatus.tsx'
 import UpNext from '../components/UpNext.tsx'
 import UserMessage from '../components/UserMessage.tsx'
 import WhyThisFits from '../components/WhyThisFits.tsx'
@@ -123,6 +124,15 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
           </Variant>
           <Variant label="Neutral: intent unchanged">
             <Ack label="Not for me" detail="Intent unchanged" tone="neutral" />
+          </Variant>
+        </Section>
+
+        <Section title="TurnStatus">
+          <Variant label="Waiting for an answer (fades in after a moment)">
+            <TurnStatus status="pending" />
+          </Variant>
+          <Variant label="The answer never came">
+            <TurnStatus status="failed" />
           </Variant>
         </Section>
 

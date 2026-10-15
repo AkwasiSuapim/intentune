@@ -8,6 +8,7 @@ import RecommendationCardHero from '../../components/RecommendationCardHero.tsx'
 import RefineControl from '../../components/RefineControl.tsx'
 import SessionSummary from '../../components/SessionSummary.tsx'
 import TuneBar from '../../components/TuneBar.tsx'
+import TurnStatus from '../../components/TurnStatus.tsx'
 import UpNext from '../../components/UpNext.tsx'
 import UserMessage from '../../components/UserMessage.tsx'
 import type { BlockOf, SessionBlock, SessionBlockType } from './blocks.ts'
@@ -74,6 +75,15 @@ function AckBlock({ block }: BlockProps<'ack'>) {
 
 function SessionSummaryBlock({ block }: BlockProps<'session_summary'>) {
   return <SessionSummary label={block.label} detail={block.detail} />
+}
+
+function TurnStatusBlock({ block, onCommand }: BlockProps<'turn_status'>) {
+  return (
+    <TurnStatus
+      status={block.status}
+      onRetry={() => onCommand({ type: 'retry' })}
+    />
+  )
 }
 
 function RecommendationBlock({
@@ -201,6 +211,7 @@ const REGISTRY: { [T in SessionBlockType]: ComponentType<BlockProps<T>> } = {
   user_message: UserMessageBlock,
   ack: AckBlock,
   session_summary: SessionSummaryBlock,
+  turn_status: TurnStatusBlock,
   recommendation: RecommendationBlock,
   up_next: UpNextBlock,
   quick_actions: QuickActionsBlock,

@@ -1,7 +1,11 @@
 // Deterministic state transitions for one listening session. Pure: the same
 // state and action always give the same next state. Anything a backend would
 // decide arrives here already decided, inside the action.
-import type { RecommendedSong, SessionTurn } from './sessionService.ts'
+import type {
+  RecommendedSong,
+  SessionTurn,
+  TurnRequest,
+} from './sessionService.ts'
 import { INTENT_DIMENSIONS } from './types.ts'
 import type {
   Intent,
@@ -13,6 +17,9 @@ import type {
 } from './types.ts'
 
 export type SessionAction =
+  | { type: 'request_sent'; request: TurnRequest }
+  | { type: 'request_answered' }
+  | { type: 'request_failed' }
   | { type: 'turn_applied'; turn: SessionTurn }
   | { type: 'play_toggled' }
   | { type: 'playback_ticked'; seconds: number }
@@ -32,13 +39,28 @@ export type SessionAction =
     }
   | { type: 'playlist_toggled'; playlistId: string }
   | { type: 'playlist_picker_closed' }
-  | { type: 'playlists_saved'; quickActions: SessionState['quickActions'] }
+  | { type: 'playlists_saved'; quickActions?: SessionState['quickActions'] }
+  // Hints that arrive after the change they follow. Each names the
+  // recommendation it was asked about and is dropped once that has moved on.
+  | {
+      type: 'quick_actions_offered'
+      recommendationId: string
+      quickActions: SessionState['quickActions']
+    }
+  | {
+      type: 'playlists_suggested'
+      recommendationId: string
+      suggestedPlaylistIds: string[]
+    }
   | { type: 'recommendation_replayed'; recommendationId: string }
   | { type: 'drawer_opened' }
   | { type: 'drawer_closed' }
   | { type: 'session_resumed' }
 
 const SESSION_ACTION_TYPES = new Set<string>([
+  'request_sent',
+  'request_answered',
+  'request_failed',
   'turn_applied',
   'play_toggled',
   'playback_ticked',
@@ -50,6 +72,8 @@ const SESSION_ACTION_TYPES = new Set<string>([
   'playlist_toggled',
   'playlist_picker_closed',
   'playlists_saved',
+  'quick_actions_offered',
+  'playlists_suggested',
   'recommendation_replayed',
   'drawer_opened',
   'drawer_closed',
@@ -82,6 +106,7 @@ export function createSession(id: string): SessionState {
     upNextRecommendationId: null,
     refine: null,
     overlay: null,
+    openRequest: null,
   }
 }
 
@@ -91,8 +116,15 @@ type NewEvent = SessionEvent extends infer Event
     : never
   : never
 
+const eventId = (position: number) => `e${position}`
+
+/** The id the next event added to this session will have. */
+export function nextEventId(state: SessionState) {
+  return eventId(state.events.length + 1)
+}
+
 function append(events: SessionEvent[], event: NewEvent) {
-  events.push({ ...event, id: `e${events.length + 1}` } as SessionEvent)
+  events.push({ ...event, id: eventId(events.length + 1) } as SessionEvent)
 }
 
 function diffIntent(before: Intent, after: Intent): IntentChange[] {
@@ -192,7 +224,9 @@ function applyTurn(state: SessionState, turn: SessionTurn): SessionState {
     quickActions: turn.quickActions,
     upNextRecommendationId: turn.upNext ? UP_NEXT_ID : null,
     refine: turn.refineTab && intent ? { tab: turn.refineTab } : null,
-    overlay: null,
+    // The playlist sheet belonged to the song this turn replaces; the
+    // drawer, opened while the answer was on its way, stays open.
+    overlay: state.overlay?.type === 'session_drawer' ? state.overlay : null,
   }
 }
 
@@ -229,6 +263,22 @@ export function sessionReducer(
   const current = currentOf(state)
 
   switch (action.type) {
+    case 'request_sent':
+      return {
+        ...state,
+        openRequest: { request: action.request, status: 'pending' },
+      }
+
+    case 'request_answered':
+      return state.openRequest ? { ...state, openRequest: null } : state
+
+    case 'request_failed':
+      if (state.openRequest?.status !== 'pending') return state
+      return {
+        ...state,
+        openRequest: { ...state.openRequest, status: 'failed' },
+      }
+
     case 'turn_applied':
       return applyTurn(state, action.turn)
 
@@ -317,10 +367,31 @@ export function sessionReducer(
           savedToPlaylistIds: overlay.selectedPlaylistIds,
           echo: undefined,
         }),
-        quickActions: action.quickActions,
+        quickActions: action.quickActions ?? state.quickActions,
         overlay: null,
       }
     }
+
+    case 'quick_actions_offered':
+      if (action.recommendationId !== state.currentRecommendationId) {
+        return state
+      }
+      return { ...state, quickActions: action.quickActions }
+
+    case 'playlists_suggested':
+      if (
+        state.overlay?.type !== 'playlist_picker' ||
+        action.recommendationId !== state.currentRecommendationId
+      ) {
+        return state
+      }
+      return {
+        ...state,
+        overlay: {
+          ...state.overlay,
+          suggestedPlaylistIds: action.suggestedPlaylistIds,
+        },
+      }
 
     case 'recommendation_replayed':
       return replay(state, action.recommendationId)

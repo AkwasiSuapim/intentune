@@ -1,0 +1,69 @@
+.screen {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-12);
+  padding: var(--space-28) var(--gutter);
+  text-align: center;
+}
+
+/* The same wordmark as the session rail. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.brandGlyph {
+  color: var(--color-mauve);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: var(--text-wordmark);
+  line-height: var(--leading-heading);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wordmark);
+}
+
+.message {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+/*
+ * A load that finishes quickly shows nothing but the background: this screen
+ * only fades in once loading has visibly taken a while.
+ */
+.screen[data-status='loading'] {
+  animation: appear var(--duration-fast) var(--ease-out) 600ms both;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
+.retry {
+  min-height: var(--touch-target);
+  margin-top: var(--space-4);
+  padding: 0 var(--space-20);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-low);
+  color: var(--color-text-soft);
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
+}
+
+.retry[aria-disabled='true'] {
+  cursor: default;
+  color: var(--color-text-subtle);
+}

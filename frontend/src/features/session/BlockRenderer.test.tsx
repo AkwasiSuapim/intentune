@@ -136,6 +136,14 @@ const SAMPLES: { block: SessionBlock; shows: string[] }[] = [
     },
     shows: ['Add to playlist', 'Choose a playlist'],
   },
+  {
+    block: { type: 'turn_status', id: 'b12', status: 'pending' },
+    shows: ['Working on it…'],
+  },
+  {
+    block: { type: 'turn_status', id: 'b13', status: 'failed' },
+    shows: ['That didn’t go through.', 'Try again'],
+  },
 ]
 
 describe('known blocks', () => {
@@ -158,6 +166,7 @@ describe('known blocks', () => {
       user_message: true,
       ack: true,
       session_summary: true,
+      turn_status: true,
       recommendation: true,
       up_next: true,
       quick_actions: true,

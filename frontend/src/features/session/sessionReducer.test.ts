@@ -189,7 +189,7 @@ describe('a turn', () => {
     expect(Object.keys(after.recommendations)).toHaveLength(3)
   })
 
-  it('closes overlays and the refine control unless the turn keeps tuning open', () => {
+  it('closes the playlist sheet and the refine control unless the turn keeps tuning open', () => {
     const tuning = apply(started, { type: 'refine_opened', tab: 'mood' })
     const closed = apply(tuning, { type: 'turn_applied', turn: turn() })
     const kept = apply(tuning, {
@@ -200,9 +200,19 @@ describe('a turn', () => {
     expect(closed.refine).toBeNull()
     expect(kept.refine).toEqual({ tab: 'energy' })
     expect(
+      apply(
+        started,
+        { type: 'playlist_picker_opened', suggestedPlaylistIds: [] },
+        { type: 'turn_applied', turn: turn() },
+      ).overlay,
+    ).toBeNull()
+  })
+
+  it('leaves the drawer open: it may have been opened while the turn was on its way', () => {
+    expect(
       apply(started, { type: 'drawer_opened' }, { type: 'turn_applied', turn: turn() })
         .overlay,
-    ).toBeNull()
+    ).toEqual({ type: 'session_drawer' })
   })
 
   it('does not mutate the state it was given', () => {

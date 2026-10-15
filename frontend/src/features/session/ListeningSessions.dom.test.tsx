@@ -8,6 +8,7 @@ import {
   advance,
   renderApp,
   setObservedVisible,
+  settle,
   useWideScreen,
 } from '../../test/dom.tsx'
 
@@ -49,8 +50,8 @@ async function openSession(user: UserEvent, title: string) {
 }
 
 describe('starting a session', () => {
-  it('opens on Tune in, with four starters and the composer ready', () => {
-    renderApp()
+  it('opens on Tune in, with four starters and the composer ready', async () => {
+    await renderApp()
 
     expect(
       screen.getByRole('heading', {
@@ -68,7 +69,7 @@ describe('starting a session', () => {
   })
 
   it('turns a starter into the first turn, announces it, and keeps focus on the new song', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Focus' })).toBeTruthy()
@@ -87,7 +88,7 @@ describe('starting a session', () => {
   })
 
   it('sends a typed request on Enter, clears the field and keeps focus in it', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     const field = screen.getByRole('textbox', { name: 'Tell Intentune what you want' })
 
@@ -103,7 +104,7 @@ describe('starting a session', () => {
   })
 
   it('does not send an empty request', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await user.type(
       screen.getByRole('textbox', { name: 'Tell Intentune what you want' }),
       '   {Enter}',
@@ -115,7 +116,7 @@ describe('starting a session', () => {
 
 describe('steering and reacting', () => {
   it('sends a quick action as its words and moves the hero into the history', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
 
     await user.click(button('A bit calmer'))
@@ -132,7 +133,7 @@ describe('steering and reacting', () => {
   })
 
   it('likes a song without moving on', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
 
     await user.click(hero().getByRole('button', { name: 'Like' }))
@@ -151,7 +152,7 @@ describe('steering and reacting', () => {
   })
 
   it('moves on from a song that is not for me, keeping the intent and keyboard focus', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     const before = intent()
 
@@ -169,7 +170,7 @@ describe('steering and reacting', () => {
   })
 
   it('goes to the next song quietly, keeping focus on Next', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
 
     hero().getByRole('button', { name: 'Next recommendation' }).focus()
@@ -184,7 +185,7 @@ describe('steering and reacting', () => {
   })
 
   it('expands and collapses why the song fits', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     const why = hero().getByRole('button', { name: /^Why this fits/ })
 
@@ -198,7 +199,7 @@ describe('steering and reacting', () => {
   })
 
   it('plays a song from the history again', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(hero().getByRole('button', { name: 'Next recommendation' }))
 
@@ -215,7 +216,7 @@ describe('steering and reacting', () => {
 
 describe('saving to a playlist', () => {
   it('asks for an explicit choice, saves it, and hands focus back', async () => {
-    const { user, container } = renderApp()
+    const { user, container } = await renderApp()
     await startFocus(user)
     await user.click(button('Save to a playlist'))
 
@@ -245,7 +246,7 @@ describe('saving to a playlist', () => {
   })
 
   it('closes on Escape without saving', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(button('Save to a playlist'))
     await user.click(screen.getByRole('checkbox', { name: /Study/ }))
@@ -258,7 +259,7 @@ describe('saving to a playlist', () => {
   })
 
   it('hints at a playlist that fits the session without ticking it', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await openSession(user, 'Emotional Afrobeats')
     await user.click(button('Save to a playlist'))
 
@@ -270,7 +271,7 @@ describe('saving to a playlist', () => {
 
 describe('tuning', () => {
   it('opens on the energy tab with focus on it, and arrow keys move between tabs', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
 
     await user.click(button('Tune energy, mood or genre'))
@@ -301,7 +302,7 @@ describe('tuning', () => {
   })
 
   it('offers the values as pressed buttons and applies one when chosen', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(button('Tune energy, mood or genre'))
 
@@ -327,7 +328,7 @@ describe('tuning', () => {
   })
 
   it('closes on Escape and returns focus to Tune', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(button('Tune energy, mood or genre'))
 
@@ -338,7 +339,7 @@ describe('tuning', () => {
   })
 
   it('closes from its close button and returns focus to Tune', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(button('Tune energy, mood or genre'))
 
@@ -348,7 +349,7 @@ describe('tuning', () => {
   })
 
   it('opens from an intent chip on that dimension, and the chip closes it again', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     const genre = button('Tune Any genre')
 
@@ -366,7 +367,7 @@ describe('tuning', () => {
 
 describe('moving between sessions', () => {
   it('opens the drawer as a modal, switches session, announces it and returns focus', async () => {
-    const { user, container } = renderApp()
+    const { user, container } = await renderApp()
 
     await user.click(button('Open listening sessions'))
     const drawer = screen.getByRole('navigation', {
@@ -386,7 +387,7 @@ describe('moving between sessions', () => {
   })
 
   it('keeps each session as it was left', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(hero().getByRole('button', { name: 'Like' }))
 
@@ -400,7 +401,7 @@ describe('moving between sessions', () => {
 
   it('shows the sessions as a standing rail on a wide screen', async () => {
     useWideScreen(true)
-    const { user } = renderApp()
+    const { user } = await renderApp()
 
     const rail = screen.getByRole('navigation', { name: 'Listening sessions and playlists' })
     expect(screen.queryByRole('button', { name: 'Open listening sessions' })).toBeNull()
@@ -420,7 +421,7 @@ describe('playback', () => {
     screen.getByRole('progressbar', { name: 'Playback position' }).getAttribute('aria-valuetext')
 
   it('advances while playing, holds while paused, and moves on when the song ends', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
 
     play(3)
@@ -432,12 +433,13 @@ describe('playback', () => {
 
     await user.click(button('Play Last Last'))
     play(169)
+    await settle()
     expect(heroes()[0].getAttribute('aria-label')).toBe('Now playing: Rush by Ayra Starr')
     expect(announcer().textContent).toBe('Now playing Rush by Ayra Starr.')
   })
 
   it('stands still while the playlist sheet is open', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     await user.click(button('Save to a playlist'))
 
@@ -447,7 +449,7 @@ describe('playback', () => {
   })
 
   it('offers compact now-playing in the composer once the hero scrolls away', async () => {
-    const { user } = renderApp()
+    const { user } = await renderApp()
     await startFocus(user)
     const mini = () =>
       screen.getByRole('textbox').closest('form')!.querySelector('button[aria-label]')!

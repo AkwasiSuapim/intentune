@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { mockSessionService } from '../../mocks/mockSessionService.ts'
 import { mockEnvironment } from '../../mocks/environment.ts'
 import { mockSessions } from '../../mocks/sessions.ts'
-import { planCommand } from './commands.ts'
+import { ask, planCommand } from './commands.ts'
 import type { SessionCommand } from './commands.ts'
 import { composeSession } from './composeSession.ts'
 import {
@@ -17,14 +17,19 @@ import type { WorkspaceState } from './workspaceReducer.ts'
 
 const service = mockSessionService
 
-const open = () => createWorkspace(service.loadWorkspace())
+const open = async () => createWorkspace(await service.loadWorkspace())
 
-function act(workspace: WorkspaceState, ...commands: SessionCommand[]) {
-  return commands.reduce(
-    (current, command) =>
-      planCommand(current, command, service).reduce(workspaceReducer, current),
-    workspace,
-  )
+/** Runs commands as the app does: the changes made at once, then the service's answer. */
+async function act(workspace: WorkspaceState, ...commands: SessionCommand[]) {
+  let current = workspace
+  for (const command of commands) {
+    const { actions, question } = planCommand(current, command)
+    current = actions.reduce(workspaceReducer, current)
+    if (question) {
+      current = workspaceReducer(current, await ask(service, question))
+    }
+  }
+  return current
 }
 
 const view = (workspace: WorkspaceState) =>
@@ -51,17 +56,17 @@ const types = (workspace: WorkspaceState) =>
   view(workspace).content.map((block) => block.type)
 
 /** Opens the seeded "Emotional Afrobeats" session. */
-const inEmotionalAfrobeats = () =>
-  act(open(), { type: 'open_session', sessionId: 'emotional-afrobeats' })
+const inEmotionalAfrobeats = async () =>
+  act(await open(), { type: 'open_session', sessionId: 'emotional-afrobeats' })
 
 describe('starting a session', () => {
-  it('opens on Tune in, with the existing sessions one tap away', () => {
-    const workspace = open()
+  it('opens on Tune in, with the existing sessions one tap away', async () => {
+    const workspace = await open()
 
     expect(view(workspace).layout).toBe('prompt')
     expect(view(workspace).title).toBe('New session')
     expect(
-      view(act(workspace, { type: 'open_drawer' })).navigation.sessions.map(
+      view(await act(workspace, { type: 'open_drawer' })).navigation.sessions.map(
         (session) => session.title,
       ),
     ).toEqual([
@@ -74,8 +79,8 @@ describe('starting a session', () => {
     ])
   })
 
-  it('turns a starter into a first message, an acknowledgement and a recommendation', () => {
-    const workspace = act(open(), { type: 'select_starter', starterId: 'focus' })
+  it('turns a starter into a first message, an acknowledgement and a recommendation', async () => {
+    const workspace = await act(await open(), { type: 'select_starter', starterId: 'focus' })
     const [message, ack] = view(workspace).content
 
     expect(types(workspace)).toEqual(['user_message', 'ack', 'recommendation'])
@@ -89,24 +94,24 @@ describe('starting a session', () => {
     expect(heroTitle(workspace)).toBe('Last Last')
   })
 
-  it('treats a typed request exactly like the starter with the same words', () => {
-    const typed = act(open(), { type: 'send_message', text: '  Help me focus  ' })
-    const tapped = act(open(), { type: 'select_starter', starterId: 'focus' })
+  it('treats a typed request exactly like the starter with the same words', async () => {
+    const typed = await act(await open(), { type: 'send_message', text: '  Help me focus  ' })
+    const tapped = await act(await open(), { type: 'select_starter', starterId: 'focus' })
 
     expect(activeSession(typed)).toEqual(activeSession(tapped))
   })
 
-  it('ignores an empty message', () => {
-    const workspace = open()
+  it('ignores an empty message', async () => {
+    const workspace = await open()
 
-    expect(act(workspace, { type: 'send_message', text: '   ' })).toBe(workspace)
+    expect(await act(workspace, { type: 'send_message', text: '   ' })).toBe(workspace)
   })
 })
 
 describe('steering with words', () => {
-  it('reproduces the approved "intent changed" scene from the first one', () => {
-    const workspace = act(
-      inEmotionalAfrobeats(),
+  it('reproduces the approved "intent changed" scene from the first one', async () => {
+    const workspace = await act(
+      await inEmotionalAfrobeats(),
       { type: 'toggle_like' },
       { type: 'send_message', text: 'Make it more energetic.' },
     )
@@ -131,9 +136,9 @@ describe('steering with words', () => {
     expect(actionLabels(workspace)).toEqual(['Keep this energy', 'More energetic'])
   })
 
-  it('sends a quick action as the words on it', () => {
-    const before = inEmotionalAfrobeats()
-    const workspace = act(before, {
+  it('sends a quick action as the words on it', async () => {
+    const before = await inEmotionalAfrobeats()
+    const workspace = await act(before, {
       type: 'select_quick_action',
       actionId: 'a-bit-calmer',
     })
@@ -147,8 +152,8 @@ describe('steering with words', () => {
     expect(heroTitle(workspace)).not.toBe(heroTitle(before))
   })
 
-  it('keeps the intent and says so when asked for more of the same', () => {
-    const workspace = act(inEmotionalAfrobeats(), {
+  it('keeps the intent and says so when asked for more of the same', async () => {
+    const workspace = await act(await inEmotionalAfrobeats(), {
       type: 'select_quick_action',
       actionId: 'more-like-this',
     })
@@ -162,18 +167,18 @@ describe('steering with words', () => {
     )
   })
 
-  it('ignores a quick action that is not on offer', () => {
-    const workspace = inEmotionalAfrobeats()
+  it('ignores a quick action that is not on offer', async () => {
+    const workspace = await inEmotionalAfrobeats()
 
     expect(
-      act(workspace, { type: 'select_quick_action', actionId: 'push-it-harder' }),
+      await act(workspace, { type: 'select_quick_action', actionId: 'push-it-harder' }),
     ).toBe(workspace)
   })
 
-  it('understands a request to save or a declaration of liking as a reaction, not a new direction', () => {
-    const base = inEmotionalAfrobeats()
-    const saving = act(base, { type: 'send_message', text: 'Save this.' })
-    const liking = act(base, { type: 'send_message', text: 'I love this one' })
+  it('understands a request to save or a declaration of liking as a reaction, not a new direction', async () => {
+    const base = await inEmotionalAfrobeats()
+    const saving = await act(base, { type: 'send_message', text: 'Save this.' })
+    const liking = await act(base, { type: 'send_message', text: 'I love this one' })
 
     expect(view(saving).overlay).toMatchObject({ type: 'playlist_picker', selectedIds: [] })
     expect(heroTitle(saving)).toBe(heroTitle(base))
@@ -183,9 +188,9 @@ describe('steering with words', () => {
 })
 
 describe('tuning', () => {
-  it('opens from Tune, changes the energy and stays open on the same tab', () => {
-    const tuning = act(inEmotionalAfrobeats(), { type: 'open_refine' })
-    const changed = act(tuning, {
+  it('opens from Tune, changes the energy and stays open on the same tab', async () => {
+    const tuning = await act(await inEmotionalAfrobeats(), { type: 'open_refine' })
+    const changed = await act(tuning, {
       type: 'refine',
       dimension: 'energy',
       valueId: 'high',
@@ -213,9 +218,9 @@ describe('tuning', () => {
     expect(heroTitle(changed)).toBe('Peru')
   })
 
-  it('changes mood and genre the same way', () => {
-    const workspace = act(
-      inEmotionalAfrobeats(),
+  it('changes mood and genre the same way', async () => {
+    const workspace = await act(
+      await inEmotionalAfrobeats(),
       { type: 'toggle_refine_tab', tab: 'mood' },
       { type: 'refine', dimension: 'mood', valueId: 'driven' },
       { type: 'change_refine_tab', tab: 'genre' },
@@ -232,45 +237,45 @@ describe('tuning', () => {
     expect(hero(workspace)).toMatchObject({ title: 'Water' })
   })
 
-  it('does nothing when the value chosen is already the current one', () => {
-    const tuning = act(inEmotionalAfrobeats(), { type: 'open_refine' })
+  it('does nothing when the value chosen is already the current one', async () => {
+    const tuning = await act(await inEmotionalAfrobeats(), { type: 'open_refine' })
 
     expect(
-      act(tuning, { type: 'refine', dimension: 'energy', valueId: 'low' }),
+      await act(tuning, { type: 'refine', dimension: 'energy', valueId: 'low' }),
     ).toBe(tuning)
   })
 
-  it('opens from an intent chip and closes when the same chip is tapped again', () => {
-    const opened = act(inEmotionalAfrobeats(), {
+  it('opens from an intent chip and closes when the same chip is tapped again', async () => {
+    const opened = await act(await inEmotionalAfrobeats(), {
       type: 'toggle_refine_tab',
       tab: 'genre',
     })
-    const closed = act(opened, { type: 'toggle_refine_tab', tab: 'genre' })
+    const closed = await act(opened, { type: 'toggle_refine_tab', tab: 'genre' })
 
     expect(view(opened).contextualControl).toMatchObject({ activeTab: 'genre' })
     expect(view(closed).contextualControl?.type).toBe('quick_actions')
     expect(
-      view(act(opened, { type: 'close_refine' })).contextualControl?.type,
+      view(await act(opened, { type: 'close_refine' })).contextualControl?.type,
     ).toBe('quick_actions')
   })
 })
 
 describe('reacting to the current song', () => {
-  it('likes without changing the song, the stream or the intent', () => {
-    const before = inEmotionalAfrobeats()
-    const liked = act(before, { type: 'toggle_like' })
+  it('likes without changing the song, the stream or the intent', async () => {
+    const before = await inEmotionalAfrobeats()
+    const liked = await act(before, { type: 'toggle_like' })
 
     expect(hero(liked)).toMatchObject({ liked: true })
     expect(heroTitle(liked)).toBe(heroTitle(before))
     expect(types(liked)).toEqual(types(before))
     expect(view(liked).intentSummary).toEqual(view(before).intentSummary)
     expect(actionLabels(liked)).toEqual(['More like this', 'Save this'])
-    expect(hero(act(liked, { type: 'toggle_like' }))).toMatchObject({ liked: false })
+    expect(hero(await act(liked, { type: 'toggle_like' }))).toMatchObject({ liked: false })
   })
 
-  it('moves on from a song that is not for me and leaves the intent as it was', () => {
-    const before = inEmotionalAfrobeats()
-    const after = act(before, { type: 'not_for_me' })
+  it('moves on from a song that is not for me and leaves the intent as it was', async () => {
+    const before = await inEmotionalAfrobeats()
+    const after = await act(before, { type: 'not_for_me' })
     const skipped = view(after).content.find(
       (block) => block.type === 'recommendation' && block.variant === 'compact',
     )
@@ -284,10 +289,10 @@ describe('reacting to the current song', () => {
     expect(actionLabels(after)).toEqual(['Different artist', 'Keep this mood'])
   })
 
-  it('saves only to the playlists the user picks', () => {
-    const picking = act(inEmotionalAfrobeats(), { type: 'open_playlist_picker' })
-    const unconfirmed = act(picking, { type: 'confirm_playlists' })
-    const saved = act(
+  it('saves only to the playlists the user picks', async () => {
+    const picking = await act(await inEmotionalAfrobeats(), { type: 'open_playlist_picker' })
+    const unconfirmed = await act(picking, { type: 'confirm_playlists' })
+    const saved = await act(
       picking,
       { type: 'toggle_playlist', playlistId: 'favorites' },
       { type: 'confirm_playlists' },
@@ -304,15 +309,15 @@ describe('reacting to the current song', () => {
     expect(actionLabels(saved)).toEqual(['More like this', 'Keep this energy'])
   })
 
-  it('creates a playlist named after the session and selects it', () => {
-    const created = act(
-      inEmotionalAfrobeats(),
+  it('creates a playlist named after the session and selects it', async () => {
+    const created = await act(
+      await inEmotionalAfrobeats(),
       { type: 'open_playlist_picker' },
       { type: 'create_playlist' },
       { type: 'create_playlist' },
     )
     const names = view(created).overlay?.playlists.map((playlist) => playlist.name)
-    const saved = act(created, { type: 'confirm_playlists' })
+    const saved = await act(created, { type: 'confirm_playlists' })
 
     expect(names?.slice(-2)).toEqual(['Emotional Afrobeats', 'Emotional Afrobeats 2'])
     expect(view(created).overlay?.selectedIds).toHaveLength(2)
@@ -321,9 +326,9 @@ describe('reacting to the current song', () => {
     })
   })
 
-  it('closes the picker without saving', () => {
-    const closed = act(
-      inEmotionalAfrobeats(),
+  it('closes the picker without saving', async () => {
+    const closed = await act(
+      await inEmotionalAfrobeats(),
       { type: 'open_playlist_picker' },
       { type: 'toggle_playlist', playlistId: 'study' },
       { type: 'close_playlist_picker' },
@@ -335,9 +340,9 @@ describe('reacting to the current song', () => {
 })
 
 describe('moving through songs', () => {
-  it('goes to the next song without an acknowledgement', () => {
-    const before = inEmotionalAfrobeats()
-    const after = act(before, { type: 'next' })
+  it('goes to the next song without an acknowledgement', async () => {
+    const before = await inEmotionalAfrobeats()
+    const after = await act(before, { type: 'next' })
     const count = (workspace: WorkspaceState, type: string) =>
       types(workspace).filter((candidate) => candidate === type).length
 
@@ -346,32 +351,32 @@ describe('moving through songs', () => {
     expect(heroTitle(after)).not.toBe(heroTitle(before))
   })
 
-  it('peeks at what is next after a few songs, then plays exactly that', () => {
-    const second = act(inEmotionalAfrobeats(), { type: 'next' })
-    const third = act(second, { type: 'next' })
+  it('peeks at what is next after a few songs, then plays exactly that', async () => {
+    const second = await act(await inEmotionalAfrobeats(), { type: 'next' })
+    const third = await act(second, { type: 'next' })
     const peek = view(third).content.at(-1)
-    const fourth = act(third, { type: 'next' })
+    const fourth = await act(third, { type: 'next' })
 
     expect(types(second)).not.toContain('up_next')
     expect(peek?.type).toBe('up_next')
     expect(heroTitle(fourth)).toBe(peek?.type === 'up_next' ? peek.title : null)
   })
 
-  it('hides the peek while tuning and drops it when the direction changes', () => {
-    const peeking = act(inEmotionalAfrobeats(), { type: 'next' }, { type: 'next' })
+  it('hides the peek while tuning and drops it when the direction changes', async () => {
+    const peeking = await act(await inEmotionalAfrobeats(), { type: 'next' }, { type: 'next' })
 
-    expect(types(act(peeking, { type: 'open_refine' }))).not.toContain('up_next')
+    expect(types(await act(peeking, { type: 'open_refine' }))).not.toContain('up_next')
     expect(
-      types(act(peeking, { type: 'send_message', text: 'Make it more energetic.' })),
+      types(await act(peeking, { type: 'send_message', text: 'Make it more energetic.' })),
     ).not.toContain('up_next')
   })
 
-  it('plays a song from the history again', () => {
-    const moved = act(inEmotionalAfrobeats(), { type: 'next' })
+  it('plays a song from the history again', async () => {
+    const moved = await act(await inEmotionalAfrobeats(), { type: 'next' })
     const first = view(moved).content.find(
       (block) => block.type === 'recommendation' && block.variant === 'compact',
     )
-    const replayed = act(moved, {
+    const replayed = await act(moved, {
       type: 'replay',
       recommendationId:
         first?.type === 'recommendation' ? first.recommendationId : '',
@@ -385,43 +390,43 @@ describe('moving through songs', () => {
     ).toHaveLength(1)
   })
 
-  it('never recommends the same song twice until the mock catalogue runs out', () => {
-    let workspace = inEmotionalAfrobeats()
+  it('never recommends the same song twice until the mock catalogue runs out', async () => {
+    let workspace = await inEmotionalAfrobeats()
     const titles = [heroTitle(workspace)]
     for (let step = 0; step < 12; step++) {
-      workspace = act(workspace, { type: 'next' })
+      workspace = await act(workspace, { type: 'next' })
       titles.push(heroTitle(workspace))
     }
 
     expect(new Set(titles).size).toBe(13)
-    expect(heroTitle(act(workspace, { type: 'next' }))).not.toBe(titles.at(-1))
+    expect(heroTitle(await act(workspace, { type: 'next' }))).not.toBe(titles.at(-1))
   })
 })
 
 describe('the playback clock', () => {
-  it('advances a playing song one second per tick', () => {
-    const before = inEmotionalAfrobeats()
-    const after = act(before, { type: 'tick' }, { type: 'tick' })
+  it('advances a playing song one second per tick', async () => {
+    const before = await inEmotionalAfrobeats()
+    const after = await act(before, { type: 'tick' }, { type: 'tick' })
 
     expect(hero(after)).toMatchObject({ positionSeconds: 74 })
   })
 
-  it('stands still while paused or covered by a sheet or the drawer', () => {
-    const base = inEmotionalAfrobeats()
-    const paused = act(base, { type: 'toggle_play' })
-    const picking = act(base, { type: 'open_playlist_picker' })
-    const browsing = act(base, { type: 'open_drawer' })
+  it('stands still while paused or covered by a sheet or the drawer', async () => {
+    const base = await inEmotionalAfrobeats()
+    const paused = await act(base, { type: 'toggle_play' })
+    const picking = await act(base, { type: 'open_playlist_picker' })
+    const browsing = await act(base, { type: 'open_drawer' })
 
-    expect(act(paused, { type: 'tick' })).toBe(paused)
-    expect(act(picking, { type: 'tick' })).toBe(picking)
-    expect(act(browsing, { type: 'tick' })).toBe(browsing)
+    expect(await act(paused, { type: 'tick' })).toBe(paused)
+    expect(await act(picking, { type: 'tick' })).toBe(picking)
+    expect(await act(browsing, { type: 'tick' })).toBe(browsing)
   })
 
-  it('moves to the next song when the current one ends', () => {
-    let workspace = inEmotionalAfrobeats()
+  it('moves to the next song when the current one ends', async () => {
+    let workspace = await inEmotionalAfrobeats()
     const first = heroTitle(workspace)
     for (let second = 72; second < 239; second++) {
-      workspace = act(workspace, { type: 'tick' })
+      workspace = await act(workspace, { type: 'tick' })
     }
 
     expect(heroTitle(workspace)).not.toBe(first)
@@ -430,9 +435,9 @@ describe('the playback clock', () => {
 })
 
 describe('moving between sessions', () => {
-  it('opens another session and picks up where it left off', () => {
-    const workspace = act(
-      open(),
+  it('opens another session and picks up where it left off', async () => {
+    const workspace = await act(
+      await open(),
       { type: 'open_drawer' },
       { type: 'open_session', sessionId: 'gym-energy' },
     )
@@ -447,9 +452,9 @@ describe('moving between sessions', () => {
     expect(heroTitle(workspace)).toBe('Mnike')
   })
 
-  it('drops a new session that was never used', () => {
-    const workspace = act(
-      open(),
+  it('drops a new session that was never used', async () => {
+    const workspace = await act(
+      await open(),
       { type: 'open_session', sessionId: 'coding' },
       { type: 'open_drawer' },
     )
@@ -459,14 +464,14 @@ describe('moving between sessions', () => {
     )
   })
 
-  it('keeps each session’s own state while the user is elsewhere', () => {
-    const tuned = act(
-      inEmotionalAfrobeats(),
+  it('keeps each session’s own state while the user is elsewhere', async () => {
+    const tuned = await act(
+      await inEmotionalAfrobeats(),
       { type: 'toggle_like' },
       { type: 'send_message', text: 'Make it more energetic.' },
     )
-    const away = act(tuned, { type: 'open_session', sessionId: 'coding' })
-    const back = act(away, { type: 'open_session', sessionId: 'emotional-afrobeats' })
+    const away = await act(tuned, { type: 'open_session', sessionId: 'coding' })
+    const back = await act(away, { type: 'open_session', sessionId: 'emotional-afrobeats' })
 
     expect(view(away).title).toBe('Coding')
     expect(heroTitle(back)).toBe(heroTitle(tuned))
@@ -476,15 +481,15 @@ describe('moving between sessions', () => {
       'Medium energy',
     ])
     expect(
-      view(act(away, { type: 'open_drawer' })).navigation.sessions.find(
+      view(await act(away, { type: 'open_drawer' })).navigation.sessions.find(
         (session) => session.title === 'Emotional Afrobeats',
       )?.subtitle,
     ).toBe('Emotional · Afrobeats · Medium energy')
   })
 
-  it('creates a new session at the top of the drawer', () => {
-    const workspace = act(
-      inEmotionalAfrobeats(),
+  it('creates a new session at the top of the drawer', async () => {
+    const workspace = await act(
+      await inEmotionalAfrobeats(),
       { type: 'new_session' },
       { type: 'select_starter', starterId: 'move' },
       { type: 'open_drawer' },
@@ -499,17 +504,17 @@ describe('moving between sessions', () => {
     expect(view(workspace).navigation.sessions).toHaveLength(6)
   })
 
-  it('only closes the drawer when the open session is chosen again, or a new one is already open', () => {
-    const browsing = act(inEmotionalAfrobeats(), { type: 'open_drawer' })
-    const same = act(browsing, {
+  it('only closes the drawer when the open session is chosen again, or a new one is already open', async () => {
+    const browsing = await act(await inEmotionalAfrobeats(), { type: 'open_drawer' })
+    const same = await act(browsing, {
       type: 'open_session',
       sessionId: 'emotional-afrobeats',
     })
-    const fresh = act(open(), { type: 'open_drawer' }, { type: 'new_session' })
+    const fresh = await act(await open(), { type: 'open_drawer' }, { type: 'new_session' })
 
     expect(view(browsing).drawerOpen).toBe(true)
     expect(view(same).drawerOpen).toBe(false)
-    expect(types(same)).toEqual(types(inEmotionalAfrobeats()))
+    expect(types(same)).toEqual(types(await inEmotionalAfrobeats()))
     expect(view(fresh).drawerOpen).toBe(false)
     expect(view(fresh).layout).toBe('prompt')
   })
@@ -538,11 +543,11 @@ describe('across a long session', () => {
     { type: 'send_message', text: 'surprise me' },
   ]
 
-  it('always shows one hero, at most two quick actions, and an acknowledgement that matches the intent', () => {
-    let workspace = open()
+  it('always shows one hero, at most two quick actions, and an acknowledgement that matches the intent', async () => {
+    let workspace = await open()
 
     for (const command of script) {
-      workspace = act(workspace, command)
+      workspace = await act(workspace, command)
       const session = activeSession(workspace)
       const composed = view(workspace)
       const heroes = composed.content.filter(
@@ -568,7 +573,7 @@ describe('across a long session', () => {
     }
   })
 
-  it('is deterministic: the same commands give the same session', () => {
-    expect(act(open(), ...script)).toEqual(act(open(), ...script))
+  it('is deterministic: the same commands give the same session', async () => {
+    expect(await act(await open(), ...script)).toEqual(await act(await open(), ...script))
   })
 })

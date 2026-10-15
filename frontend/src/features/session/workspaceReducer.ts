@@ -29,6 +29,11 @@ export type WorkspaceState = Pick<
 
 export type WorkspaceAction =
   | SessionAction
+  /**
+   * What the service answered, for the session that asked, even if another
+   * session has been opened since.
+   */
+  | { type: 'answer_received'; sessionId: string; actions: SessionAction[] }
   | { type: 'session_created' }
   | { type: 'session_opened'; sessionId: string }
   | { type: 'playlist_created' }
@@ -70,7 +75,11 @@ export function selectEnvironment(
 }
 
 function isUntouched(session: SessionState) {
-  return session.events.length === 0 && session.intent === null
+  return (
+    session.events.length === 0 &&
+    session.intent === null &&
+    session.openRequest === null
+  )
 }
 
 /** Leaves the open session: closes its overlay, and drops it if never used. */
@@ -133,6 +142,17 @@ export function workspaceReducer(
   }
 
   switch (action.type) {
+    case 'answer_received': {
+      const target = workspace.sessions[action.sessionId]
+      if (!target) return workspace
+      const next = action.actions.reduce(sessionReducer, target)
+      if (next === target) return workspace
+      return {
+        ...workspace,
+        sessions: { ...workspace.sessions, [target.id]: next },
+      }
+    }
+
     case 'session_created': {
       // An unused new session is already what was asked for.
       if (isUntouched(activeSession(workspace))) {

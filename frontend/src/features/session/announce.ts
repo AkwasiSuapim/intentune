@@ -23,6 +23,11 @@ function sentence(block: SessionBlock): string | null {
         : null
     case 'session_summary':
       return `${block.label}: ${spoken(block.detail)}.`
+    case 'turn_status':
+      // Waiting is not news; a request that failed is.
+      return block.status === 'failed'
+        ? 'That didn’t go through. You can try again.'
+        : null
     default:
       // The user's own message, and anything else, needs no announcing.
       return null

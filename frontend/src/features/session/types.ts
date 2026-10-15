@@ -1,6 +1,7 @@
 // Semantic state of a listening session. Nothing here describes layout or
 // components: `composeSession` turns this state into renderable blocks.
 import type { PlaylistTone } from '../../components/PlaylistSwatch.tsx'
+import type { TurnRequest } from './sessionService.ts'
 
 export type IntentDimension = 'mood' | 'genre' | 'energy'
 
@@ -69,6 +70,13 @@ export type SessionOverlay =
     }
   | { type: 'session_drawer' }
 
+/** A request that moves the session forward, until the service answers it. */
+export type OpenRequest = {
+  request: TurnRequest
+  /** `pending` while the service is answering; `failed` once it could not. */
+  status: 'pending' | 'failed'
+}
+
 export type SessionState = {
   id: string
   title: string
@@ -92,6 +100,8 @@ export type SessionState = {
   /** The open refine mode, or null when the quick actions show instead. */
   refine: { tab: RefineTab } | null
   overlay: SessionOverlay | null
+  /** At most one request is open at a time. */
+  openRequest: OpenRequest | null
 }
 
 export type Playlist = {

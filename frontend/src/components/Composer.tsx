@@ -15,6 +15,8 @@ type ComposerProps = {
   placeholder: string
   onValueChange?: (value: string) => void
   onSubmit?: () => void
+  /** True while Intentune is answering: a draft can be written, not sent. */
+  busy?: boolean
   /** The song that is playing, when there is one. */
   nowPlaying?: ComposerNowPlaying | null
   /**
@@ -30,6 +32,7 @@ function Composer({
   placeholder,
   onValueChange,
   onSubmit,
+  busy = false,
   nowPlaying,
   showNowPlaying = false,
   onTogglePlay,
@@ -88,7 +91,8 @@ function Composer({
       <button
         type="submit"
         className={styles.send}
-        data-ready={value.trim() ? '' : undefined}
+        data-ready={value.trim() && !busy ? '' : undefined}
+        aria-disabled={busy || undefined}
         aria-label="Send to Intentune"
       >
         <ArrowUpIcon size={20} />

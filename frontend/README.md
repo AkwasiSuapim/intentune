@@ -25,7 +25,7 @@ The app root is an interactive listening session on mock data. Nothing is persis
 `?demo=…` opens the development demo instead:
 
 - `/?demo=gallery` shows the component gallery: every component in its representative states, from prop fixtures in `src/demo/`.
-- `/?demo=<scene>` renders one fixed session state with inert controls. `new`, `initial`, `change`, `save`, `discovery`, `refine` and `drawer` match the scenes of the approved design. `stress`, `stress-tune`, `stress-save` and `stress-drawer` use deliberately long content to check that nothing clips or overflows.
+- `/?demo=<scene>` renders one fixed session state with inert controls. `new`, `initial`, `change`, `save`, `discovery`, `refine` and `drawer` match the scenes of the approved design. `stress`, `stress-tune`, `stress-save` and `stress-drawer` use deliberately long content to check that nothing clips or overflows. `turn-pending` and `turn-failed` show an answer on its way and one that failed; `loading` and `load-failed` show the screen before the sessions have loaded.
 
 ## Layout and motion
 

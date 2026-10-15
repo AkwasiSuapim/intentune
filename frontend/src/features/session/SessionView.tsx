@@ -28,7 +28,11 @@ type SessionViewProps = {
  * control with the same focus key takes its place.
  */
 const FOCUS_SUCCESSORS: Record<string, string[]> = {
-  starter: ['hero-play'],
+  starter: ['hero-play', 'turn-status'],
+  // While an answer is on its way focus can wait on the note saying so,
+  // then moves to what arrived: the new song, or the way to try again.
+  'turn-status': ['retry', 'hero-play'],
+  retry: ['turn-status', 'hero-play'],
   tune: ['refine-tab'],
   refine: ['tune'],
   'refine-tab': ['tune'],
@@ -67,10 +71,12 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
     () => new Set(view.content.map(keyOf)),
   )
   const [nowPlayingHidden, setNowPlayingHidden] = useState(false)
+  const requestStatus = state.openRequest?.status ?? null
   // What the announcer last said, and how much of the session it had seen.
   const [news, setNews] = useState({
     sessionId: state.id,
     eventCount: state.events.length,
+    requestStatus,
     text: '',
   })
 
@@ -85,19 +91,31 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
     setNews({
       sessionId: state.id,
       eventCount: state.events.length,
+      requestStatus,
       text: `Opened ${view.title}.`,
     })
-  } else if (news.eventCount !== state.events.length) {
-    // The stream grew: announce what arrived, in the words shown on screen.
+  } else if (
+    news.eventCount !== state.events.length ||
+    news.requestStatus !== requestStatus
+  ) {
+    // The stream grew, or a request failed: announce what arrived, in the
+    // words shown on screen.
     const added = new Set(
       state.events.slice(news.eventCount).map((event) => event.id),
     )
+    const failed = requestStatus === 'failed' && news.requestStatus !== 'failed'
+    const arrived = view.content.filter(
+      (block) =>
+        added.has(block.id) || (failed && block.type === 'turn_status'),
+    )
+    // A new request clears the last news, so its answer is heard even if
+    // it is worded the same.
+    const sent = requestStatus === 'pending' && news.requestStatus !== 'pending'
     setNews({
       sessionId: state.id,
       eventCount: state.events.length,
-      text:
-        announceBlocks(view.content.filter((block) => added.has(block.id))) ||
-        news.text,
+      requestStatus,
+      text: sent ? '' : announceBlocks(arrived) || news.text,
     })
   }
 
@@ -117,7 +135,8 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
   }, [railed, view.drawerOpen])
 
   function sendDraft() {
-    if (!draft.trim()) return
+    // While an answer is on its way the draft waits, rather than being lost.
+    if (!draft.trim() || view.busy) return
     onCommand?.({ type: 'send_message', text: draft })
     setDraft('')
   }
@@ -181,6 +200,7 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
           onValueChange={setDraft}
           onSubmit={sendDraft}
           placeholder={view.composerPlaceholder}
+          busy={view.busy}
           nowPlaying={view.nowPlaying}
           showNowPlaying={nowPlayingHidden}
           onTogglePlay={() => onCommand?.({ type: 'toggle_play' })}
@@ -217,7 +237,7 @@ function SessionView({ state, environment, onCommand }: SessionViewProps) {
       ) : (
         <SessionTimeline
           key={state.id}
-          newestKey={String(state.events.length)}
+          newestKey={`${state.events.length}:${requestStatus ?? ''}`}
           nowPlayingKey={state.currentRecommendationId}
           onNowPlayingHiddenChange={setNowPlayingHidden}
         >

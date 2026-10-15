@@ -208,7 +208,9 @@ try {
     const out = [...document.querySelectorAll('main *, [aria-label="Session controls"] *, header *, nav *, [role=dialog] *')].filter((el) => { const r = el.getBoundingClientRect(); if (!(r.width > 0 && (r.right > innerWidth + 1 || r.left < -1)) || el.closest('[aria-label="Current intent"], [aria-label="Suggested refinements"], [role=radiogroup]')) return false; for (let a = el.parentElement; a; a = a.parentElement) { const ar = a.getBoundingClientRect(); if (getComputedStyle(a).overflowX !== 'visible' && ar.right <= innerWidth + 1 && ar.left >= -1) return false } return true }).length
     return { overflowX: d.scrollWidth > innerWidth || document.body.scrollWidth > innerWidth, small: [...new Set(small)], clipped: [...new Set(clipped)], offscreen: out, railed: !!document.querySelector('nav') && !document.querySelector('nav').closest('[class*=layer]') }
   })()`
-  const scenes = ['new', 'initial', 'change', 'save', 'discovery', 'refine', 'drawer', 'stress', 'stress-tune', 'stress-save', 'stress-drawer']
+  const scenes = ['new', 'initial', 'change', 'save', 'discovery', 'refine', 'drawer', 'stress', 'stress-tune', 'stress-save', 'stress-drawer', 'turn-pending', 'turn-failed', 'loading', 'load-failed']
+  // Before the sessions have loaded there is no navigation to show.
+  const unrailed = ['drawer', 'stress-drawer', 'loading', 'load-failed']
   const sizes = [[320, 568], [344, 882], [360, 740], [375, 667], [390, 844], [430, 932], [600, 960], [699, 900], [700, 900], [768, 1024], [1023, 768], [1024, 768], [1280, 800], [1440, 900], [1920, 1080], [844, 390]]
   const problems = []
   let views = 0
@@ -221,7 +223,7 @@ try {
       if (a.offscreen) problems.push(`${scene}@${w}x${h}: ${a.offscreen} elements off screen`)
       if (a.small.length) problems.push(`${scene}@${w}x${h}: small targets ${a.small.join('; ')}`)
       if (a.clipped.length) problems.push(`${scene}@${w}x${h}: clipped labels ${a.clipped.join('; ')}`)
-      if ((w >= 1024) !== a.railed && scene !== 'drawer' && scene !== 'stress-drawer') problems.push(`${scene}@${w}x${h}: rail ${a.railed ? 'shown' : 'missing'}`)
+      if ((w >= 1024) !== a.railed && !unrailed.includes(scene)) problems.push(`${scene}@${w}x${h}: rail ${a.railed ? 'shown' : 'missing'}`)
       if (['stress', 'stress-save', 'stress-drawer', 'stress-tune'].includes(scene) && [320, 390, 768, 1280].includes(w) && h > 500) await b.shot(`${scene}-${w}`)
       if (['initial', 'refine', 'save'].includes(scene) && [768, 1440].includes(w)) await b.shot(`${scene}-${w}`)
       if (w === 844 && scene === 'initial') await b.shot('initial-landscape')

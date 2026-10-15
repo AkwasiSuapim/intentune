@@ -562,16 +562,18 @@ const PLAYLISTS_FOR_GENRE: Record<string, string[]> = {
   afrobeats: ['afrobeats'],
 }
 
+// Answers at once, but through the same asynchronous interface a backend
+// client will implement, so the session feature cannot tell them apart.
 export const mockSessionService: SessionService = {
-  loadWorkspace: () => ({
+  loadWorkspace: async () => ({
     sessions: seededSessions,
     playlists: mockEnvironment.playlists,
     starters: mockEnvironment.starters,
     refineOptions,
   }),
-  respond,
-  quickActionsAfter: (reaction) => ACTION_SETS[reaction],
-  suggestPlaylists: (context, playlists) => {
+  respond: async (context, request) => respond(context, request),
+  quickActionsAfter: async (reaction) => ACTION_SETS[reaction],
+  suggestPlaylists: async (context, playlists) => {
     const suggested = PLAYLISTS_FOR_GENRE[context.intent?.genre.id ?? ''] ?? []
     return playlists
       .filter((playlist) => suggested.includes(playlist.id))

@@ -33,14 +33,15 @@ const FOCUS = `(() => {
   return (el.getAttribute('role') || el.tagName.toLowerCase()) + ' "' + (el.getAttribute('aria-label') || el.innerText || el.placeholder || '').replace(/\\s+/g, ' ').trim().slice(0, 40) + '"'
 })()`
 
-const SCENES = ['new', 'initial', 'change', 'save', 'discovery', 'refine', 'drawer', 'stress', 'stress-tune']
+const SCENES = ['new', 'initial', 'change', 'save', 'discovery', 'refine', 'drawer', 'stress', 'stress-tune', 'turn-pending', 'turn-failed', 'loading', 'load-failed']
 
 try {
   if (mode === 'all' || mode === 'axe') {
     report.section('axe-core: scenes at phone and desktop width')
     for (const [width, height] of [[390, 844], [1280, 800]]) {
       for (const scene of SCENES) {
-        await b.open(`${APP}?demo=${scene}`, width, height, { mobile: width < 700, scale: 1, settle: 700 })
+        // Long enough for notes that fade in after a delay to be fully shown before contrast is measured.
+        await b.open(`${APP}?demo=${scene}`, width, height, { mobile: width < 700, scale: 1, settle: 1000 })
         await axe(`${scene} @${width}`)
       }
     }
@@ -111,7 +112,7 @@ try {
 
   if (mode === 'all' || mode === 'text') {
     report.section('Text at 200%')
-    for (const scene of ['new', 'initial', 'refine', 'save', 'drawer', 'stress']) {
+    for (const scene of ['new', 'initial', 'refine', 'save', 'drawer', 'stress', 'turn-failed', 'load-failed']) {
       for (const [width, height] of [[390, 844], [1280, 800]]) {
         await b.open(`${APP}?demo=${scene}`, width, height, { mobile: width < 700, scale: 1, settle: 500 })
         await b.ev(`document.documentElement.style.fontSize = '200%'`)

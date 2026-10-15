@@ -24,6 +24,8 @@ export type SessionBlock =
       tone: 'confirm' | 'neutral'
     }
   | { type: 'session_summary'; id: string; label: string; detail: string }
+  /** A request the service is still answering, or could not answer. */
+  | { type: 'turn_status'; id: string; status: 'pending' | 'failed' }
   | {
       type: 'recommendation'
       id: string
@@ -93,5 +95,10 @@ export type BlockOf<T extends SessionBlockType> = Extract<
 
 /** Blocks that may appear in the scrolling session stream. */
 export type TimelineBlock = BlockOf<
-  'user_message' | 'ack' | 'session_summary' | 'recommendation' | 'up_next'
+  | 'user_message'
+  | 'ack'
+  | 'session_summary'
+  | 'recommendation'
+  | 'up_next'
+  | 'turn_status'
 >

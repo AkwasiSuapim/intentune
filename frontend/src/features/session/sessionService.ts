@@ -1,6 +1,10 @@
 // The boundary between the session feature and whatever answers it. Today
 // that is a local mock; later it is the backend. The feature never interprets
 // requests or chooses music itself: it asks here and applies the answer.
+//
+// Every method answers asynchronously, as a backend over HTTP would, and
+// rejects when it cannot answer. The feature does not look inside a
+// rejection: any failure means the request did not go through.
 import type {
   Intent,
   IntentDimension,
@@ -77,10 +81,16 @@ export type WorkspaceSeed = Pick<
 }
 
 export type SessionService = {
-  loadWorkspace(): WorkspaceSeed
-  respond(context: TurnContext, request: TurnRequest): TurnResponse
+  /** Everything the app needs before it can open a session. */
+  loadWorkspace(): Promise<WorkspaceSeed>
+  respond(context: TurnContext, request: TurnRequest): Promise<TurnResponse>
   /** The quick actions to offer after a reaction to the current song. */
-  quickActionsAfter(reaction: 'liked' | 'saved'): SessionState['quickActions']
+  quickActionsAfter(
+    reaction: 'liked' | 'saved',
+  ): Promise<SessionState['quickActions']>
   /** Playlists worth hinting at for the current song. Never a selection. */
-  suggestPlaylists(context: TurnContext, playlists: Playlist[]): string[]
+  suggestPlaylists(
+    context: TurnContext,
+    playlists: Playlist[],
+  ): Promise<string[]>
 }
