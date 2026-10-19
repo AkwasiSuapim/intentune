@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current and Planned**
+**Current, Planned, and Future.** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 ## Product Name
 
@@ -41,17 +41,35 @@ The current repository is a CodePath command-line prototype. It:
 6. Shows human-readable scoring reasons.
 7. Uses pytest to verify loading, scoring, ranking, and edge cases.
 
+Separately, a React frontend (`frontend/`) presents a mobile-first conversational listening session. It runs entirely on mock data and is not yet connected to the backend.
+
+## Prototype 1
+
+**Planned (approved).** The next version is a **local-first, session-aware, continuously adapting** music application ([specification](../planning/intentune-backend-prototype-implementation-spec.md)). The listener will be able to:
+
+1. run Intentune locally, with no account, AI, external provider, or internet connection
+2. import music from several folders on their own device into an Intentune-managed library
+3. keep using the app while new tracks are analyzed in the background
+4. start a fresh listening session and set a structured listening intent
+5. press Play once and get continuous music, with three upcoming candidates managed dynamically
+6. skip, like, replay, save, or say Not for me, and see what comes next adapt immediately
+7. get controlled variety and discovery
+8. create and manage playlists
+9. restart without losing the library, playlists, metadata, feedback, or history
+
+Product principle: **Conversation steers. Music leads.**
+
 ## Long-Term Product Vision
 
 Intentune will become a backend-driven music recommendation application that can:
 
-- Accept structured preferences through a form
-- Accept natural-language requests through an AI chatbot
+- Accept structured preferences through a form *(Prototype 1: structured listening intent in a session)*
+- Accept natural-language requests through an AI chatbot *(Future: deferred beyond Prototype 1, D39)*
 - Interpret current mood, desired mood, activity, and listening goal
-- Search an external music catalog, beginning with the official YouTube API
+- Search an external music catalog, beginning with the official YouTube API *(Future: Prototype 1 uses the listener's own music; external catalogs are deferred, D39)*
 - Rank real candidates through Intentune's own recommendation logic
 - Explain why each result fits the user
-- Learn carefully from likes, dislikes, skips, saves, and opens
+- Learn carefully from likes, dislikes, skips, saves, and opens *(Prototype 1: from likes, saves, replays, skips, completions, and Not for me, D05, D06, D10)*
 - Preserve privacy and keep external API integrations replaceable
 
 ## Product Principles

@@ -2,38 +2,62 @@
 
 ## Status
 
-**Current**
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day; the Dependencies and Configuration sections below reflect that.
+
+This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
 ## Repository Origin
 
 The uploaded repository began as the CodePath Music Recommender Simulation starter project.
 
+## B0 Verified Baseline (2026-10-18)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, run from `backend/` with `backend/.venv` active (Python 3.11.9, pytest 9.1.1) | **131 passed** in about 0.5s |
+| Backend CLI | `python -m src.main`, from `backend/` | Matches the documented top-five output (Sunrise City 9.94, Rooftop Lights 6.88, Gym Hero 6.58, ...) |
+| Frontend tests | `npm test`, from `frontend/` (Node 24.21.0, npm 11.19.0) | **214 passed** in 9 test files |
+| Frontend build | `npm run build` (`tsc -b && vite build`) | Succeeds |
+| Frontend lint | `npm run lint` (oxlint) | Clean |
+
+Backend tests per file: `test_domain_models.py` 44, `test_recommender.py` 21, `test_canonical_scoring.py` 17, `test_csv_catalog.py` 13, `test_legacy_compatibility.py` 12, `test_recommendation_service.py` 11, `test_canonical_ranking.py` 10, `test_catalog_port.py` 3.
+
+How the backend suite must be run:
+
+- From `backend/`. Tests import `src.…`, and there is no `pytest.ini`, `pyproject.toml`, or `conftest.py`. Running `python -m pytest -q backend/tests` from the repository root fails during collection (8 import errors).
+- With the backend virtual environment. On this machine the system Python has no pytest, so a bare `python -m pytest -q` outside the venv fails with `No module named pytest`.
+
+The frontend browser checks (`npm run check:browser`) were not run in B0.
+
 ## Current Files
 
-- `README.md`
-- `model_card.md`
-- `ai_interactions.md`
+### Backend
+
 - `backend/requirements.txt`
+- `backend/.env.example`
 - `backend/data/songs.csv`
+- `backend/src/__init__.py`
 - `backend/src/main.py`
 - `backend/src/recommender.py`
-- `backend/src/__init__.py`
+- `backend/src/intentune/__init__.py` and one `__init__.py` per subpackage
 - `backend/src/intentune/domain/models.py`
 - `backend/src/intentune/domain/scoring.py`
 - `backend/src/intentune/domain/ranking.py`
 - `backend/src/intentune/application/recommendation_service.py`
 - `backend/src/intentune/ports/catalog.py`
 - `backend/src/intentune/adapters/csv_catalog.py`
-- `backend/tests/test_recommender.py`
-- `backend/tests/test_domain_models.py`
-- `backend/tests/test_canonical_scoring.py`
-- `backend/tests/test_canonical_ranking.py`
-- `backend/tests/test_csv_catalog.py`
-- `backend/tests/test_catalog_port.py`
-- `backend/tests/test_recommendation_service.py`
-- `backend/tests/test_legacy_compatibility.py`
+- `backend/tests/` — the eight test files listed above
 
-The archive also contains generated or local artifacts such as screenshots, Python caches, pytest caches, Graphify output, Git metadata, and macOS archive metadata.
+### Frontend
+
+`frontend/` holds a React 19 + TypeScript + Vite application built through frontend phases F0–F8: a mobile-first listening-session UI driven by a mock `SessionService`. See [Frontend State](#frontend-state) below.
+
+### Documentation and project files
+
+- `README.md`, `model_card.md`, `ai_interactions.md` (CodePath-era documents)
+- `docs/` — this documentation set, including the Prototype 1 specification, decision register, and backend execution guide (untracked in Git at the time of the B0 audit)
+
+The original uploaded archive also contained generated or local artifacts such as screenshots, Python caches, pytest caches, Graphify output, Git metadata, and macOS archive metadata.
 
 ## Current Data
 
@@ -60,7 +84,9 @@ The current scoring algorithm only uses genre, mood, energy, and danceability.
 - Danceability similarity: up to 2 points
 - Maximum score: 10 points
 
-Energy and danceability reward closeness to the user's preferred values. A larger raw value is not automatically better.
+Energy and danceability reward closeness to the user's preferred values. A larger raw value is not automatically better. A difference of 0.5 or more earns no points.
+
+`score_candidate()` raises `ValueError` when any of the four required profile or candidate values is missing. It does not skip missing features or renormalize. `ListeningContext` and `FeatureWeights` exist as validated models but are not used by scoring or ranking.
 
 ## Current Main Flow
 
@@ -72,6 +98,18 @@ Energy and danceability reward closeness to the user's preferred values. A large
 
 **Updated internal wiring (Current):** `load_songs()` calls the CSV adapter (`src/intentune/adapters/csv_catalog.py`) and converts `MusicCandidate` objects back to the historical dict shape. `score_song()`/`recommend_songs()` convert their dict inputs into `MusicCandidate`/`UserProfile` and call the canonical scorer/ranker (`src/intentune/domain/scoring.py`, `src/intentune/domain/ranking.py`). The externally observable behavior in steps 1-5 is unchanged; tests compare legacy and canonical results across the full 20-song catalog, while CLI tests protect the documented top-five output.
 
+## Frontend State
+
+**Current (verified in B0):**
+
+- Frontend phases F0–F8 are implemented and committed on `develop` (commits dated 2026-10-13 to 2026-10-15). Per the local Git metadata, `origin/main` includes them through the merge of pull request #1. The local `main` branch is 14 commits behind `origin/main`. The remote state was not re-fetched during B0.
+- The app runs entirely on mock data. Nothing is persisted, and state resets on reload. There is no audio: playback is a timer that advances a position.
+- `src/features/session/sessionService.ts` defines the `SessionService` interface: `loadWorkspace()`, `respond(context, request)`, `quickActionsAfter(reaction)`, `suggestPlaylists(context, playlists)`. `src/mocks/mockSessionService.ts` implements it with fixed phrase tables and hand-ordered song lists. `App.tsx` is the only place an implementation is chosen.
+- `TurnRequest` kinds are `message` (free text, starters and quick actions all arrive as text), `refine` (mood, genre, or energy set to a discrete option id), `not_for_me`, and `next`.
+- Intent is categorical: one value each for mood, genre, and energy. Energy has five levels, from `very-low` to `very-high`.
+- Like, Save, Replay, and playlist creation are local state only. The service is consulted only for optional hints (quick actions after a reaction, playlist suggestions).
+- There is no HTTP client, no request/response DTOs, and no API base-URL configuration. Frontend phase F9 (FastAPI integration) is waiting for an approved backend contract.
+
 ## Existing Strengths
 
 - Working recommendation pipeline
@@ -79,9 +117,11 @@ Energy and danceability reward closeness to the user's preferred values. A large
 - Deterministic ranking
 - Input and numerical validation
 - Edge-case handling for empty results and invalid `k`
-- Test coverage
+- Canonical, source-independent domain models with a formal `Catalog` port
+- Test coverage that runs offline
 - Human-readable README and model card
 - Clear baseline for future comparison
+- A tested, mock-driven frontend with a service boundary ready for an HTTP implementation
 
 ## Current Technical Concerns
 
@@ -105,13 +145,13 @@ The file still contains both dictionaries and dataclasses -- their public shapes
 
 ### CLI Coupling
 
-The current interaction is terminal-only and the sample profile is hard-coded.
+The current backend interaction is terminal-only and the sample profile is hard-coded.
 
 ### Catalog Coupling
 
-The engine assumes all candidates have CSV-style genre, mood, energy, and danceability fields. Future YouTube candidates may not have all those values.
+The engine assumes all candidates have CSV-style genre, mood, energy, and danceability fields. Candidates from other sources, such as locally imported tracks still being analyzed, may not have all those values.
 
-**Addressed (this phase):** `load_songs()`, `score_song()`, and `recommend_songs()` are now internally wired through `MusicCandidate` (via `src/intentune/adapters/csv_catalog.py` and the boundary converters in `src/recommender.py`), and the canonical scorer (`src/intentune/domain/scoring.py`) raises a clear `ValueError` if a candidate is missing a required scoring field rather than inventing a value. A formal `Catalog` port (`src/intentune/ports/catalog.py`) now exists, and the application layer's `recommend_from_catalog()` depends on that port rather than a concrete adapter -- a future database or YouTube catalog can be substituted without changing the application layer. What remains unaddressed: the scorer still *requires* genre, mood, energy, and danceability to be present -- it does not yet skip missing features and renormalize the active weight. That is the "Expanded and Configurable Scoring Engine" future milestone's missing-feature-handling principle (see docs/planning/development-phases.md), needed before a YouTube candidate with partial metadata could be scored at all.
+**Addressed (this phase):** `load_songs()`, `score_song()`, and `recommend_songs()` are now internally wired through `MusicCandidate` (via `src/intentune/adapters/csv_catalog.py` and the boundary converters in `src/recommender.py`), and the canonical scorer (`src/intentune/domain/scoring.py`) raises a clear `ValueError` if a candidate is missing a required scoring field rather than inventing a value. A formal `Catalog` port (`src/intentune/ports/catalog.py`) now exists, and the application layer's `recommend_from_catalog()` depends on that port rather than a concrete adapter -- a future database catalog can be substituted without changing the application layer. What remains unaddressed: the scorer still *requires* genre, mood, energy, and danceability to be present -- it does not yet skip missing features and renormalize the active weight. Prototype 1 Phase B5 implements that rule (spec §14, decision D21).
 
 ### Compatibility Conversion Overhead
 
@@ -122,21 +162,75 @@ The engine assumes all candidates have CSV-style genre, mood, energy, and dancea
 API while new canonical callers use `recommend_music()` directly. Removing
 the round-trip requires a separate backward-compatibility decision.
 
+### Dependencies
+
+**Current (updated 2026-10-18, B1 prerequisites):** `backend/requirements.txt` pins every direct dependency to the version installed and verified in `backend/.venv`:
+
+```text
+pandas==3.0.6
+pytest==9.1.1
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+sqlalchemy==2.1.5
+alembic==1.20.0
+```
+
+`pip check` reports no broken requirements. Only `pytest` is used by code today. No source or test file imports `pandas`, `fastapi`, `uvicorn`, `httpx`, `sqlalchemy`, or `alembic` yet.
+
+*Found in B0 and since fixed:* all entries were unpinned, `sqlalchemy` and `httpx` were listed but not installed, and `alembic` (required by D22) was not listed.
+
+### Configuration and ignore rules
+
+**Current (updated 2026-10-18, B1 prerequisites):**
+
+- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. No code reads these values yet. SQLite resolves the relative path from the working directory, so running from `backend/` gives `backend/data/intentune.db`, the Prototype 1 layout (spec §5).
+- `.gitignore` ignores `backend/data/intentune.db*` (the database plus its SQLite journal, WAL, and SHM files) and `backend/data/media/`, as spec §5 requires. `backend/data/songs.csv` stays tracked.
+- A developer's existing, untracked `backend/.env` copied from the old template still points at `sqlite:///./intentune.db` (`backend/intentune.db`, which is not ignored) until it is updated by hand.
+- There is no CI workflow (`.github/` does not exist).
+
+*Found in B0 and since fixed:* `DATABASE_URL` pointed at `backend/intentune.db`, and `.gitignore` did not cover the database or managed media.
+
 ### Missing Product Capabilities
 
 There is currently no:
 
 - HTTP API
-- Database
-- Persistent user profile
+- Database or persistence of any kind
+- Local music library, import, or audio analysis
+- Persistent listener profile
+- Listening sessions in the backend
 - Feedback store
-- Browser interface
-- Authentication
-- AI intent parser
-- YouTube integration
+- Playlists in the backend
+- Audio playback
+- Authentication (none is planned for Prototype 1, D01)
+- AI intent parser (deferred, D39)
+- YouTube or other provider integration (deferred, D39)
 - Structured logging or monitoring
-- CI workflow confirmed in the uploaded archive
+- CI workflow
+
+A browser interface does exist (see [Frontend State](#frontend-state)), but it is not connected to the backend.
+
+## Prototype 1 Gap Analysis (B0)
+
+What Prototype 1 can build on, and what it must add. Phase names refer to the [development phases](../planning/development-phases.md).
+
+| Prototype 1 need | Exists today | Gap |
+|---|---|---|
+| Canonical models, scoring, ranking, `Catalog` port (D38) | Yes | Preserve. Extend through shared primitives in B5. |
+| `ListeningContext` as the source of intent (D29) | Model only | Not used by scoring. Used from B4/B5. |
+| Missing-feature scoring with renormalization (D21) | No: the scorer raises on missing values | B5, while keeping complete-input legacy outputs identical |
+| SQLite + SQLAlchemy + Alembic (D22) | Libraries installed and pinned (2026-10-18); no persistence code yet | B1 |
+| Local listener identity (D01) | No | B1 |
+| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | No | B2 |
+| Background analysis jobs (D26, D28) | No | B3 |
+| Sessions, turns, recommendation occurrences, feedback events (D31) | No (the frontend has mock sessions only) | B4, B6 |
+| Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | No | B5 |
+| Playlists (D34) | No (frontend-local only) | B7 |
+| FastAPI routes, error envelope, audio serving | No (FastAPI listed but unused) | B8 |
+| Frontend HTTP adapter | Service boundary only | B9 (frontend phase F9) |
+| Conservative long-term adaptation (D06) | No | B10 |
 
 ## Recommendation
 
-Preserve the current implementation as the Version 1 baseline. Refactor it incrementally behind tests rather than deleting the repository and starting from an empty project.
+Preserve the current implementation as the Version 1 baseline. Refactor it incrementally behind tests rather than deleting the repository and starting from an empty project. Prototype 1 extends this baseline; it does not replace it (D38).

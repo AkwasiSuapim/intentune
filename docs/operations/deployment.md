@@ -2,16 +2,23 @@
 
 ## Status
 
-**Future Draft**
+**Future Draft, except local running, which is Planned for Prototype 1.** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+
+Prototype 1 runs only on the listener's own device (D37). Hosted environments, HTTPS, rate limiting, PostgreSQL, and remote access below are **Future**.
 
 ## Environments
 
 ### Local Development
 
-- Local Python virtual environment
+- Local Python virtual environment (`backend/.venv`)
 - Internal CSV catalog
-- Optional local SQLite database
+- Optional local SQLite database *(Prototype 1: required, at `backend/data/intentune.db`, D22)*
+- Managed media at `backend/data/media/` *(Prototype 1)*
 - `.env` for uncommitted secrets
+
+### Prototype 1 Local Run
+
+**Planned.** One backend process (FastAPI, from B8) and the frontend, both on the local machine. `backend/.env.example` binds the API to `127.0.0.1:8000` and allows the Vite dev server origin `http://localhost:5173`. On startup the backend runs a lightweight incremental library scan (D25). Database migrations are applied with Alembic (B1). The exact start commands are recorded when B1 and B8 create them.
 
 ### Test or Staging
 

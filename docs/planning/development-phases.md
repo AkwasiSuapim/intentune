@@ -2,9 +2,69 @@
 
 ## Status
 
-**Planned Roadmap**
+**Planned roadmap.** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+
+The backend roadmap is now the Prototype 1 phase plan **B0–B11** from the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §29, executed one phase at a time under the [backend execution guide](../agents/CLAUDE_BACKEND_EXECUTION_GUIDE.md). The frontend has its own phase plan, **F0–F9**, in [frontend implementation phases](../frontend/IMPLEMENTATION_PHASES.md).
+
+The original roadmap (Phases 0–10) is kept below as history. Phases 0–2 are complete. The rest are superseded by B-phases or deferred to Future, as marked.
+
+## Prototype 1 Backend Phases
+
+Each phase ends with the full test suite, documentation updates, a report, and a stop for review. No phase starts without explicit authorization.
+
+| Phase | Scope | Status |
+|---|---|---|
+| **B0** Reconcile/freeze baseline | Inspect the repository and frontend, run tests, record the baseline, reconcile documentation. No feature code. | **Complete, awaiting review** (2026-10-18). Baseline: 131 backend tests pass. |
+| **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | Prerequisites done (2026-10-18); implementation not started |
+| **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | Not started |
+| **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | Not started |
+| **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | Not started |
+| **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | Not started |
+| **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | Not started |
+| **B7** Playlists | CRUD, add/remove/reorder, persistence | Not started |
+| **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | Not started |
+| **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | Not started. Corresponds to frontend phase F9. |
+| **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | Not started |
+| **B11** Evaluation/hardening | Performance with hundreds to thousands of tracks, restart behavior, migrations, algorithm evaluation | Not started |
+
+Acceptance criteria for each phase are in the execution guide §4–§14. Prototype 1 is done when every item in spec §30 holds.
+
+### B0 record (2026-10-18)
+
+- Backend: 131 tests pass (`python -m pytest -q` from `backend/` with the venv active). CLI output matches the documented baseline.
+- Frontend: F0–F8 implemented; 214 Vitest tests pass; build and lint clean.
+- No feature code was changed. Documentation was reconciled to distinguish Current, Planned, Superseded, and Future behavior.
+- Findings carried into B1: `.gitignore` did not cover the database or managed media; `.env.example`'s `DATABASE_URL` pointed to `backend/intentune.db` rather than `backend/data/intentune.db`; `sqlalchemy` was listed in `requirements.txt` but not installed, `alembic` was not listed, and all entries were unpinned.
+
+Details: [current system audit](../architecture/current-system-audit.md).
+
+### B1 prerequisites (2026-10-18)
+
+Done before any B1 feature code:
+
+- The three Prototype 1 documents were committed (`d493392`).
+- `.gitignore` now ignores `backend/data/intentune.db*` and `backend/data/media/`.
+- `backend/.env.example` now sets `DATABASE_URL=sqlite:///./data/intentune.db`.
+- SQLAlchemy 2.1.5, Alembic 1.20.0, and httpx 0.28.1 were installed, and every direct dependency in `backend/requirements.txt` is pinned to its verified version. `pip check` is clean, and the backend suite still passes (131).
+
+No persistence code, migration, or database file exists yet.
+
+## Frontend Phases
+
+| Phase | Status |
+|---|---|
+| F0–F8 (readiness through API-ready service boundary) | Complete (2026-10-13 to 2026-10-15) |
+| F9 FastAPI integration | Waiting for an approved, implemented backend contract; carried out with B9 |
+
+---
+
+## Original Roadmap (historical)
+
+The phases below were planned before Prototype 1. Their status notes record what happened to each.
 
 ## Phase 0: Preserve and Audit the Baseline
+
+**Status:** Complete.
 
 ### Goal
 
@@ -25,6 +85,8 @@ Understand the uploaded CodePath implementation and preserve its behavior.
 - No important working code is deleted
 
 ## Phase 1: Documentation and Product Definition
+
+**Status:** Complete. Reconciled with Prototype 1 in B0.
 
 ### Goal
 
@@ -85,6 +147,8 @@ Separate pure recommendation logic from CLI and storage concerns.
 
 ## Phase 3: Recommendation Logic Improvements
 
+**Status:** Superseded by B5 (Recommendation Policy v1). Missing-feature handling, diversity re-ranking, and context-aware targets move into B5 with the rules fixed by the specification. The other increments (partial genre/mood similarity, match levels, configurable per-feature weights, context presets) are not part of Prototype 1 unless a B-phase needs them.
+
 ### Goal
 
 Improve deterministic recommendation quality before introducing AI.
@@ -105,7 +169,7 @@ Each increment has documented behavior, tests, and an evaluation example.
 
 ### Future Milestone: Expanded and Configurable Scoring Engine
 
-**Status:** Future -- not implemented in Phase 2.
+**Status:** Superseded by B5. The draft weighting below was never implemented or tuned. B5's missing-feature rule (spec §14) keeps the same principle: no invented target, omit a missing feature, renormalize the active weights.
 
 The current scoring algorithm (genre 3 pts, mood 3 pts, energy up to 2 pts, danceability up to 2 pts, 10-point maximum, sharp similarity cutoff at a 0.5 difference) is preserved unchanged through this phase. A later milestone must extend it to also weigh tempo, valence, and acousticness. A draft default weighting has been proposed for evaluation (not yet implemented or tuned):
 
@@ -135,7 +199,7 @@ For example, if only genre (3.0), mood (3.0), and energy (1.5) are active, the t
 
 ### Future Milestone: Context-Aware and User-Configurable Weighting
 
-**Status:** Future -- not implemented in Phase 2.
+**Status:** Partly absorbed by B5, the rest Future. B5 builds effective *targets* from system policy, the long-term profile, and the current `ListeningContext`, with current explicit intent winning (spec §14). Context presets and user-editable per-feature weights are not in Prototype 1. The five evaluation scenarios in spec §28 (study/calm, workout/high energy, party/dance, relax, discovery) are test scenarios, not presets.
 
 Feature importance must eventually vary by both long-term user taste (`UserProfile`) and moment-specific need (`ListeningContext`), producing session-specific `FeatureWeights`:
 
@@ -150,6 +214,8 @@ default system weights
 Examples of how weighting should shift by context: workouts favor tempo and energy; study favors mood, moderate energy, acousticness, and low danceability; parties favor danceability, tempo, and energy; sleep favors low energy, low tempo, and acousticness; discovery may intentionally reduce genre weight to increase variety. Future context presets (study, workout, relax, party, sleep, commute, focus, mood improvement, discovery) must provide editable defaults, not rigid rules, and users must be able to override any feature weight. None of this is implemented yet -- `FeatureWeights`, `UserProfile`, and `ListeningContext` are modeled so it can be added later without a domain redesign.
 
 ## Phase 4: Backend API
+
+**Status:** Superseded by B8. The API is session-based, not a profile-only recommendation route (see [API Design](../design/api-design.md)).
 
 ### Goal
 
@@ -170,6 +236,8 @@ A client can submit preferences and receive ranked recommendations as JSON.
 
 ## Phase 5: Browser Interface
 
+**Status:** Superseded by frontend phases F0–F9. A conversational listening-session UI was built instead of a preference form (F0–F8 complete; F9 integration pending, with B9).
+
 ### Goal
 
 Allow friends and family to use the product.
@@ -188,6 +256,8 @@ A nontechnical test user can complete the main flow without developer assistance
 
 ## Phase 6: Feedback Persistence
 
+**Status:** Superseded by B1 (persistence), B4 (session history), and B6 (feedback events). SQLite is chosen (D22).
+
 ### Goal
 
 Record user reactions without yet making uncontrolled profile changes.
@@ -205,6 +275,8 @@ Feedback events are stored reliably and can be reviewed.
 
 ## Phase 7: Adaptive Profile Logic
 
+**Status:** Superseded by B10, which fixes the gate at 4 consistent strong signals across 2 sessions (D06). Session-level adaptation happens earlier, in B5/B6.
+
 ### Goal
 
 Use feedback to update preferences gradually and transparently.
@@ -221,6 +293,8 @@ Use feedback to update preferences gradually and transparently.
 Profile changes are deterministic, tested, reversible, and explainable.
 
 ## Phase 8: AI Chatbot
+
+**Status:** Future. Deferred beyond Prototype 1 (D30, D39). Prototype 1 has limited deterministic commands only.
 
 ### Goal
 
@@ -240,6 +314,8 @@ AI can be disabled without breaking the manual recommendation flow.
 
 ## Phase 9: YouTube Integration
 
+**Status:** Future. Deferred beyond Prototype 1 (D39).
+
 ### Goal
 
 Use the official YouTube API as an external candidate provider.
@@ -258,6 +334,8 @@ Use the official YouTube API as an external candidate provider.
 The system returns real YouTube results without scraping or downloading content.
 
 ## Phase 10: Deployment and Product Hardening
+
+**Status:** Future for hosted deployment (Prototype 1 is local and personal, D37). Local performance and restart hardening are part of B11.
 
 ### Goal
 

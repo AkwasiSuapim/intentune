@@ -642,13 +642,7 @@ Loading and error states:
 
 ### Backend contract status
 
-No HTTP API exists in the repository yet. `docs/design/api-design.md` is a **Draft** and describes profile-based recommendation requests (`POST /api/v1/recommendations`, `POST /api/v1/feedback`). It does not cover what the session UI asks for:
-
-- session turns: a message, a tuning change, Next, Not for me;
-- the workspace: existing sessions, starters, tuning options, playlists;
-- quick actions and playlist suggestions;
-- saving to and creating playlists;
-- session identity.
+No HTTP API exists in the repository yet. Since backend phase B0 (2026-10-18), `docs/design/api-design.md` records the Prototype 1 route list, planned for backend phase B8: library, sessions and turns, playback events, reactions, playlists, and audio. Its earlier profile-based draft (`POST /api/v1/recommendations`, `POST /api/v1/feedback`) is marked superseded. The Prototype 1 routes define no request or response bodies yet, and they do not yet cover everything the session UI asks for, such as starters, tuning options, quick actions, and playlist suggestions. `api-design.md` lists the open differences under "Frontend Contract Alignment"; they are resolved in backend phases B8 and B9 (frontend phase F9).
 
 Because the contract is not approved, F8 stops at the frontend abstraction. There is no HTTP client, no request/response DTOs and no API base-URL configuration. Likes, saves and created playlists stay on the device; they become service calls once a contract defines them.
 

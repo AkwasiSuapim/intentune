@@ -2,52 +2,72 @@
 
 ## Status
 
-**Living Document**
+**Living Document.** Last reviewed: Phase B0, 2026-10-18. Questions answered by the [Prototype 1 Decision Register](../decisions/intentune-prototype-decision-register.md) are marked **Resolved** with the decision ID.
 
 ## Product Risks
 
-- Recommendations may feel repetitive because the catalog is small.
+- Recommendations may feel repetitive because the catalog is small. In Prototype 1 the library is whatever the listener imports, so it may still be small; repetition is controlled by cooldown and diversity re-ranking (D17).
 - Exact labels may not represent real musical similarity.
-- Users may expect the product to play music directly.
-- Explanations may sound confident even when metadata is weak.
+- Users may expect the product to play music directly. **Resolved for Prototype 1:** it plays the listener's own local audio.
+- Explanations may sound confident even when metadata is weak. Missing and inferred features make this more likely; inferred values carry provenance and confidence (D20).
+- Policy v1 weights and thresholds are heuristics. Recommendations may feel wrong until they are evaluated (B11).
 
 ## Technical Risks
 
-- Refactoring may change current scoring behavior.
-- AI output may be malformed or inconsistent.
-- YouTube results may lack precise audio features.
-- External API quotas may limit usage.
-- Feedback signals such as skips may be ambiguous.
-- A public deployment may be abused or generate unexpected cost.
+- Refactoring may change current scoring behavior. B5 must prove complete-input legacy outputs stay identical (D38).
+- Audio analysis dependencies (`librosa` and its numeric stack, and any pretrained model) may be hard to install or slow on the listener's machine (Windows, Python 3.11 in the current environment). Their compatibility is unverified.
+- SQLite write contention between the background worker and API requests.
+- Large libraries: import throughput, analysis time, and full-library scoring latency are unmeasured (B11).
+- Browser seeking depends on correct HTTP range support for audio; the installed Starlette behavior must be verified (B8).
+- Path traversal or arbitrary file serving through the audio route if path resolution is wrong.
+- Feedback signals such as skips may be ambiguous. Policy v1 interprets them by played fraction and ignores the first 8 seconds (D10, D11).
+- Dependency drift. **Mitigated (2026-10-18):** direct dependencies are now pinned and installed. Transitive dependencies are not locked, and `pandas` is pinned but unused.
+- AI output may be malformed or inconsistent. *(Future: AI is deferred.)*
+- YouTube results may lack precise audio features. *(Future: YouTube is deferred.)*
+- External API quotas may limit usage. *(Future.)*
+- A public deployment may be abused or generate unexpected cost. *(Future: Prototype 1 is local.)*
 
 ## Data Risks
 
 - Small catalogs can over-represent certain genres or cultures.
-- User prompts may contain sensitive personal information.
-- Adaptive profiles may overreact to a small number of actions.
+- User prompts may contain sensitive personal information. Mitigated by not persisting raw conversational text by default (D33).
+- Adaptive profiles may overreact to a small number of actions. Mitigated by the 4-signal, 2-session gate and bounded changes (D06).
+- Managed media copies roughly double the disk space used by imported music (D02).
+- Database and media files could be committed by accident. **Mitigated (2026-10-18):** `.gitignore` covers `backend/data/intentune.db*` and `backend/data/media/`. A local `backend/.env` copied from the old template still points at the unignored `backend/intentune.db` until updated by hand.
 
 ## Open Product Questions
 
 - Should users select both current mood and desired mood manually?
-- Which recommendation modes should exist first?
-- How many results should be shown by default?
-- Should explanations display raw point values or plain-language reasons?
+- Which recommendation modes should exist first? *(Partly resolved: Surprise me, More familiar, More like this, Try something different, D36.)*
+- How many results should be shown by default? *(Partly resolved: three upcoming candidates are kept, D14; the UI shows one hero and at most one Up Next.)*
+- Should explanations display raw point values or plain-language reasons? *(Resolved by the frontend architecture: plain language; no scores, ranks, or confidence.)*
+- Can the listener continue a historical session after restart, or does any listening action start a new one? D35 says a fresh active session starts and the queue is not restored. The current frontend lets the listener reopen an earlier session from the drawer and keep going.
+- What should a past session show in place of the listener's words, given that raw text is not stored by default (D33)? The current frontend shows user messages in the session history.
 
 ## Open Backend Questions
 
-- How should missing candidate features affect score normalization?
+- How should missing candidate features affect score normalization? **Resolved:** omit the feature and renormalize active weights; never invent a midpoint (D21, spec §14).
 - How should genre and mood similarity be represented?
-- How should diversity penalties interact with relevance scores?
-- What is the first stable API response schema?
+- How should diversity penalties interact with relevance scores? **Resolved:** diversity is a separate re-ranking stage after the combined rank and must not override explicit intent (D07, spec §19).
+- What is the first stable API response schema? Still open: designed in B8.
+- What counts as "useful novelty" for letting candidate #2 play first (D15)? The spec does not define it.
+- How does the frontend's categorical intent (for example, five energy levels) map to `ListeningContext` numeric targets?
+- Where do the frontend's typed messages and quick-action labels become structured turn variants, given that React must not parse language and the backend accepts only limited deterministic commands (D30)?
+- The B9 guidance is to satisfy the existing frontend service interface. That interface has no methods for reactions, playback events, or playlist CRUD, which Prototype 1 requires. How far may B9 extend it?
+- How is artwork extracted in B2 served to the frontend? The route list has no artwork route.
+- How does `GET /api/v1/library/sources` let the listener recognize a folder they registered, given the rule that raw local paths are never exposed to the frontend? `POST /api/v1/library/sources` necessarily receives a path from the client.
 
 ## Open Persistence Questions
 
-- Do first users need accounts?
-- Should anonymous sessions persist across browser visits?
-- Should raw prompts be stored?
-- Which feedback actions should influence profiles?
+- Do first users need accounts? **Resolved:** no; one generated local listener (D01).
+- Should anonymous sessions persist across browser visits? **Resolved:** session history persists; the active queue does not (D35).
+- Should raw prompts be stored? **Resolved:** not by default (D33).
+- Which feedback actions should influence profiles? **Resolved:** session ranking changes immediately (D05); permanent change needs at least 4 consistent strong signals across at least 2 sessions (D06).
+- Where should the database file live? **Resolved:** `backend/data/intentune.db` (spec §5); `.env.example` updated 2026-10-18. Still open for B1: whether the code resolves the relative path from the working directory (SQLite's default) or from the backend root, as the CSV adapter does.
 
 ## Open AI Questions
+
+*Future: AI is deferred (D39).*
 
 - Which provider will be used?
 - What structured schema will the model return?
@@ -55,6 +75,8 @@
 - What deterministic fallback should exist?
 
 ## Open YouTube Questions
+
+*Future: external providers are deferred (D39).*
 
 - How should search queries be generated?
 - How many API calls should one recommendation request make?

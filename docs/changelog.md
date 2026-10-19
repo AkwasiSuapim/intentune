@@ -19,11 +19,28 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - `recommend_from_catalog(catalog, profile, limit)` (`src/intentune/application/recommendation_service.py`), an application-level orchestrator that depends on the `Catalog` port rather than a concrete adapter, so a fake in-memory catalog can be injected for tests.
 - `tests/test_catalog_port.py`, plus new tests in `tests/test_csv_catalog.py` and `tests/test_recommendation_service.py` covering `CsvCatalog` and `recommend_from_catalog()`.
 
+### Added — Frontend (F0–F8)
+
+*Recorded during B0 from the Git history (2026-10-13 to 2026-10-15); the changelog had no frontend entries before.*
+
+- React 19 + TypeScript + Vite application in `frontend/`, with oxlint and Vitest (jsdom, Testing Library).
+- Approved design reference stored in `docs/frontend/design/approved/`; frontend architecture, agent instructions, and phase plan in `docs/frontend/`.
+- Design tokens, mobile app shell, and the approved component vocabulary (recommendation hero and compact cards, Why this fits, TuneBar, RefineControl, PlaylistPicker, Up Next, session drawer, composer with compact now-playing).
+- Controlled generative UI: typed session state, a pure composition policy, a block registry, and a safe unknown-block fallback.
+- Interactive mock listening sessions, then responsive and motion polish for tablet and desktop.
+- Accessibility and browser-quality coverage, including headless-Chrome browser checks.
+- An asynchronous `SessionService` boundary with a mock implementation, plus loading, pending, and failure states, ready for a future HTTP client.
+
 ### Changed
 
 - The legacy `Recommender` wrapper (`src/recommender.py`) no longer hard-codes `preferred_danceability` to `0.5`; the legacy `UserProfile` dataclass gained a real `preferred_danceability` field (default `0.5`, matching the old hard-coded value so existing call sites score identically) that the wrapper now actually reads.
 - The legacy `Recommender` wrapper precomputes song-dict conversions and an id-based lookup once per instance instead of repeating them on every call, and retains the last computed scores/reasons on `self.last_recommendations` instead of discarding them.
 - `load_songs()`, `score_song()`, and `recommend_songs()` in `src/recommender.py` now convert their inputs into canonical `MusicCandidate`/`UserProfile` and delegate to the canonical CSV adapter/scorer/ranker, instead of containing their own CSV parsing and scoring math. Public signatures, dictionary shapes, scores, reasons, and CLI output are unchanged; tests verify behavioral equivalence across the full 20-song catalog and protect the documented top-five CLI baseline.
+- **B1 prerequisites (2026-10-18):** `backend/requirements.txt` pins every direct dependency (`pandas==3.0.6`, `pytest==9.1.1`, `fastapi==0.143.0`, `uvicorn[standard]==0.54.0`, `httpx==0.28.1`, `sqlalchemy==2.1.5`) and adds `alembic==1.20.0`. `backend/.env.example` now sets `DATABASE_URL=sqlite:///./data/intentune.db`, the Prototype 1 location.
+
+### Security
+
+- `.gitignore` now ignores the local SQLite database (`backend/data/intentune.db*`, including journal, WAL, and SHM files) and managed media (`backend/data/media/`), before either can exist (2026-10-18).
 
 ### Removed
 
@@ -38,6 +55,7 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Recorded TD-008 (canonical domain models) and TD-009 (canonical domain objects as internal source of truth) in docs/decisions/technical-decisions.md.
 - Documented two future milestones in docs/planning/development-phases.md: Expanded and Configurable Scoring Engine, and Context-Aware and User-Configurable Weighting.
 - Marked `likes_acoustic` on the legacy `UserProfile` dataclass as deprecated and inert.
+- **Phase B0 (2026-10-18): Prototype 1 documentation reconciliation.** Adopted the Prototype 1 backend specification, decision register (D01–D39), and backend execution guide as the approved backend direction (TD-011). Reconciled the architecture, workflow, folder structure, audit, API, database, decisions, trade-offs, phases, risks, testing, security, product, and operations documents so each distinguishes Current, Planned, Superseded, and Future behavior. Earlier plans were kept and marked Superseded rather than deleted. Recorded the verified baseline. No code changed.
 
 ### Known Limitations
 
@@ -47,8 +65,12 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - The legacy dict shape (`load_songs()`'s output) assumes every candidate field is present; a `MusicCandidate` with a `None` audio feature would fail converting back to that shape. Not an issue for the current CSV catalog, where every field is always populated.
 - The compatibility CLI path performs an extra `MusicCandidate -> legacy dict -> MusicCandidate` conversion; it calls `load_music_candidates()` directly rather than through `CsvCatalog`/`Catalog`, since the legacy dict shape predates the port and rewiring it would change nothing observable.
 - The CLI (`src/main.py`) does not yet use `recommend_from_catalog()` -- it still runs the legacy `load_songs()`/`recommend_songs()` path. Wiring a catalog-backed entry point into the CLI is a future decision, not required for Phase 2.
+- Found in B0 and fixed the same day as B1 prerequisites: `.gitignore` did not ignore the planned database or managed media; `DATABASE_URL` in `backend/.env.example` resolved to `backend/intentune.db`; `backend/requirements.txt` was unpinned, listed `sqlalchemy` and `httpx` without them being installed, and did not list `alembic`. Transitive dependencies are still not locked.
+- The frontend runs only on mock data, has no audio playback, and is not connected to the backend.
 
 ### Current Baseline
+
+Verified in Phase B0 on 2026-10-18:
 
 - CSV-based catalog with 20 songs
 - Content-based scoring using genre, mood, energy, and danceability
@@ -56,7 +78,8 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Human-readable scoring reasons
 - Formal `Catalog` port with a `CsvCatalog` implementation
 - Catalog-backed application orchestration (`recommend_from_catalog()`)
-- Pytest regression suite (131 tests)
+- Pytest regression suite: 131 tests, all passing (`python -m pytest -q` from `backend/`; re-verified after the B1 prerequisites)
+- Mock-driven React frontend (F0–F8): 214 Vitest tests passing; build and lint clean
 
 ## Version Template
 

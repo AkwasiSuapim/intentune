@@ -6,6 +6,8 @@
 
 A trade-off records what the project gains and what it accepts in return.
 
+Every Prototype 1 decision has its main trade-off listed in the [Prototype 1 Decision Register](intentune-prototype-decision-register.md). The [Prototype 1 Trade-offs](#prototype-1-trade-offs) section below expands the ones with the largest consequences. Older entries were reconciled in Phase B0 (2026-10-18).
+
 ## Modular Monolith Instead of Microservices
 
 ### Gain
@@ -25,6 +27,8 @@ A trade-off records what the project gains and what it accepts in return.
 Clear modules need separate ownership, scaling, or deployment.
 
 ## CSV Catalog Before a Database
+
+**Status:** Current today; its revisit condition is now met. Prototype 1 stores a library, sessions, feedback, and playlists, so SQLite arrives in B1 (D22). The CSV adapter stays as a compatibility source.
 
 ### Gain
 
@@ -59,6 +63,8 @@ The product stores profiles, feedback, or recommendation history.
 
 Enough quality feedback data exists to evaluate a learned model responsibly.
 
+**Prototype 1 note:** ranking stays deterministic and staged (D07). No model is trained before an evaluation dataset exists. Validated pretrained audio analyzers may supply features where justified (D19), but they do not rank.
+
 ## Separate React Frontend Instead of Streamlit
 
 ### Gain
@@ -73,11 +79,15 @@ Enough quality feedback data exists to evaluate a learned model responsibly.
 - Two languages and two toolchains (Python and TypeScript)
 - The API must exist before the interface can be built
 
+**Update (2026-10-18, B0):** the last cost did not hold. The frontend was built first against a mock service (F0–F8). The real cost is reconciliation: the mock service boundary and the Prototype 1 API were designed separately and must be aligned in B8/B9 (see [API Design](../design/api-design.md#frontend-contract-alignment)).
+
 ### Revisit When
 
 Maintaining a separate frontend is slowing delivery of the core recommendation features.
 
 ## External AI Provider
+
+**Status:** Future. Deferred beyond Prototype 1 (D39).
 
 ### Gain
 
@@ -96,6 +106,8 @@ Maintaining a separate frontend is slowing delivery of the core recommendation f
 Structured output, validation, timeouts, fallback behavior, and provider abstraction.
 
 ## YouTube as the First External Catalog
+
+**Status:** Superseded. Prototype 1 uses the listener's own music in a managed local library (D02, D03), and external catalogs are deferred (D39). Kept for history.
 
 ### Gain
 
@@ -141,6 +153,62 @@ approved continuing with this canonical modular architecture.
 ### Revisit When
 
 The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/development-phases.md, Phase 3) extends scoring to tempo/valence/acousticness and missing-feature normalization -- at that point the legacy dict API's fixed four-field shape will need a documented limitation notice or a wider replacement, since it cannot express per-feature weights or partial data.
+
+**Update (2026-10-18, B0):** that milestone is superseded by Prototype 1 Phase B5. The revisit point is now B5.
+
+## Prototype 1 Trade-offs
+
+**Accepted (2026-10-18).** The trade-offs below carry the largest consequences. Every decision's main trade-off is in the [decision register](intentune-prototype-decision-register.md).
+
+### Managed copies of imported music (D02, D23)
+
+- **Gain:** the library keeps working when the original files move or are deleted; storage names are generated, so filenames never become identifiers.
+- **Cost:** uses extra disk space, roughly one more copy of every imported track.
+- **Revisit when:** disk use becomes a problem for real libraries (B11).
+
+### SQLite + SQLAlchemy + Alembic (D22)
+
+- **Gain:** no server to run; fits one listener on one device; versioned migrations from the start.
+- **Cost:** limited write concurrency, which matters because a background worker writes while the app reads; a later move to PostgreSQL needs a migration path.
+- **Mitigation:** short transactions, one worker initially, WAL mode only if verified.
+
+### In-process bounded worker instead of a task queue (D28)
+
+- **Gain:** no Redis or Celery; simple to run and debug.
+- **Cost:** shutting the process down interrupts active work.
+- **Mitigation:** job state persisted in SQLite; idempotent jobs that resume after restart.
+
+### SHA-256 exact deduplication (D24)
+
+- **Gain:** simple, exact, and testable.
+- **Cost:** the same song in two encodings (for example, an MP3 and a FLAC) counts as two tracks.
+- **Revisit when:** duplicate transcodes become common; perceptual fingerprinting is deferred.
+
+### Missing features stay missing (D21)
+
+- **Gain:** scores never rest on invented values.
+- **Cost:** fewer active features for partly analyzed tracks, so lower coverage and less discriminating scores until analysis finishes.
+
+### Staged ranking with fixed heuristic weights (D07–D09)
+
+- **Gain:** each stage can be explained, tested, and debugged separately.
+- **Cost:** the weights (0.55/0.30/0.15), feedback values, and thresholds are versioned heuristics, not proven values.
+- **Mitigation:** one versioned policy module; deterministic evaluation scenarios; no claim of improvement without comparison evidence.
+
+### Conservative long-term learning (D06)
+
+- **Gain:** one session or one skip never rewrites long-term taste.
+- **Cost:** the profile adapts slowly. The 4-signal, 2-session threshold itself must later be evaluated.
+
+### No raw conversational text by default (D33)
+
+- **Gain:** data minimization.
+- **Cost:** past sessions cannot show exactly what the listener typed, and future intent-parser work has no stored examples to learn from.
+
+### Fresh session after restart (D35)
+
+- **Gain:** no stale queue or playback state is restored.
+- **Cost:** the listener cannot pick up a queue exactly where it stopped.
 
 ## Trade-off Entry Template
 

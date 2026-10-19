@@ -18,6 +18,11 @@ frontend/dist/
 .env.*
 !.env.example
 
+# Local Intentune data: the SQLite database (with its journal, WAL and SHM
+# files) and the managed media library. Never committed.
+backend/data/intentune.db*
+backend/data/media/
+
 # macOS
 .DS_Store
 

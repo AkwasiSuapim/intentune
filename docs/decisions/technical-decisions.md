@@ -6,6 +6,8 @@
 
 This file records important architectural and implementation decisions. Each decision should include its context, chosen option, alternatives, consequences, status, and date.
 
+Prototype 1 decisions D01–D39 live in the [Prototype 1 Decision Register](intentune-prototype-decision-register.md) and are adopted by TD-011. Where an entry below conflicts with that register, the register wins; affected entries carry a dated update note rather than being rewritten.
+
 ## TD-001: Preserve the Existing Prototype
 
 **Status:** Accepted
@@ -42,7 +44,7 @@ This file records important architectural and implementation decisions. Each dec
 
 ## TD-004: Add AI as an Adapter
 
-**Status:** Planned
+**Status:** Future (deferred beyond Prototype 1). Was: Planned.
 
 **Decision:** AI will implement an intent-parser interface and return validated structured data.
 
@@ -50,9 +52,11 @@ This file records important architectural and implementation decisions. Each dec
 
 **Consequence:** Intentune can change AI providers or disable AI without rewriting the core recommender.
 
+**Update (2026-10-18, B0):** Prototype 1 uses structured `ListeningContext` plus a limited set of deterministic commands, and defers LLM parsing behind a future `IntentParser` port (D29, D30, D39). The principle stands: an LLM never chooses tracks directly.
+
 ## TD-005: Add YouTube as a Catalog Provider
 
-**Status:** Planned
+**Status:** Future (deferred beyond Prototype 1). Was: Planned.
 
 **Decision:** YouTube will provide candidates through an adapter using the official API.
 
@@ -60,11 +64,15 @@ This file records important architectural and implementation decisions. Each dec
 
 **Consequence:** Intentune retains control of ranking but must handle missing music features and API quotas.
 
+**Update (2026-10-18, B0):** Prototype 1's catalog is the listener's own music, imported into an Intentune-managed local library (D02, D03). Spotify/YouTube catalogs are deferred (D39). YouTube is no longer the first external catalog.
+
 ## TD-006: Use FastAPI for the Backend
 
-**Status:** Accepted
+**Status:** Accepted (not implemented yet; Phase B8)
 
 **Reason:** The project is Python-based, the user is learning FastAPI, and typed request validation fits the architecture.
+
+**Update (2026-10-18, B0):** confirmed by Prototype 1. `fastapi` and `uvicorn` are listed in `backend/requirements.txt` but no code uses them yet.
 
 ## TD-007: Use Streamlit for the First Browser Interface
 
@@ -123,6 +131,8 @@ a future decision.
 
 **Revisit When:** The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/development-phases.md) extends `score_candidate()` to tempo/valence/acousticness and missing-feature normalization; at that point the legacy dict API's four-field shape may need its own documented limitation notice, since it cannot express the wider feature set.
 
+**Update (2026-10-18, B0):** that milestone is superseded by Prototype 1 Phase B5 (Recommendation Policy v1). D38 keeps this decision in force: B5 extends or refactors shared scoring primitives instead of creating a second copy of the scoring math, and must prove complete-input legacy outputs stay identical.
+
 ## TD-010: Use React, Vite, and TypeScript for the Frontend
 
 **Status:** Accepted
@@ -134,6 +144,39 @@ a future decision.
 **Alternative:** Streamlit for the first browser interface (TD-007).
 
 **Consequence:** The repository is split into `backend/` (Python) and `frontend/` (TypeScript). `streamlit` was removed from `backend/requirements.txt`. The browser interface cannot be built until the API exists, so the backend API phase comes first.
+
+**Update (2026-10-18, B0):** in practice the frontend was built first, on mock data. Frontend phases F0–F8 (2026-10-13 to 2026-10-15) produced the full session UI behind a `SessionService` interface with a mock implementation. Frontend phase F9 (FastAPI integration) waits for the backend API, which corresponds to backend phases B8 and B9. The sentence above about building the API first describes the plan at the time, not what happened.
+
+## TD-011: Adopt Prototype 1 — Local-First, Session-Aware Recommendation
+
+**Status:** Accepted
+
+**Date:** 2026-10-18 (recorded in Phase B0)
+
+**Context:** Earlier planning aimed at a profile-based recommendation API, then an AI chatbot, then YouTube as the first external catalog, followed by hosted deployment. The approved direction is now different: a local-first application that imports the listener's own music, runs continuous listening sessions, and adapts within a session.
+
+**Decision:** Adopt the [Prototype 1 Backend Implementation Specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [Prototype 1 Decision Register](intentune-prototype-decision-register.md) (D01–D39) as the approved backend direction, executed in phases B0–B11 as described in the [backend execution guide](../agents/CLAUDE_BACKEND_EXECUTION_GUIDE.md).
+
+Key consequences for earlier decisions:
+
+| Earlier decision | Effect |
+|---|---|
+| TD-001 Preserve the existing prototype | Reaffirmed (D38) |
+| TD-002 Modular monolith | Reaffirmed; no Redis, Celery, Kafka, or microservices in Prototype 1 |
+| TD-003 Deterministic logic before AI | Reaffirmed (D29, D30, D39) |
+| TD-004 AI as an adapter | Deferred to Future |
+| TD-005 YouTube as a catalog provider | Deferred to Future; replaced for Prototype 1 by a managed local library |
+| TD-006 FastAPI | Reaffirmed; built in B8 |
+| TD-008, TD-009 Canonical domain | Reaffirmed and protected (D38) |
+| TD-010 React frontend | Reaffirmed; integrated in B9 |
+
+New technical choices introduced by the register include SQLite + SQLAlchemy + Alembic (D22), audio outside the database (D23), SHA-256 exact deduplication (D24), and a bounded in-process worker with persisted job state (D28).
+
+**Alternatives Considered:** Continue the earlier roadmap (profile API, then AI, then YouTube); build on an external provider catalog first.
+
+**Consequences:** Prototype 1 works without AI, external providers, accounts, or internet. It adds persistence, background work, and audio handling to a codebase that today has none. Hosted deployment, authentication, PostgreSQL, and provider integrations move to Future.
+
+**Revisit When:** Prototype 1 meets its definition of done (spec §30), or evaluation in B11 shows a decision in the register does not hold.
 
 ## New Decision Template
 

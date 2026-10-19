@@ -2,11 +2,11 @@
 
 ## Status
 
-**Current and Planned**
+**Current and Planned.** Reconciled with Prototype 1 in Phase B0 (2026-10-18). The approved target is defined in the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §4. This file explains it and records what exists today.
 
 ## Architectural Style
 
-Intentune will begin as a **modular monolith**.
+Intentune is a **modular monolith**, and Prototype 1 stays one.
 
 This means:
 
@@ -20,13 +20,81 @@ This means:
 
 The product requirements and domain rules are still evolving. A modular monolith gives us simple local development and deployment while allowing strong separation of responsibilities.
 
-Microservices would add network calls, service discovery, distributed logging, authentication between services, deployment coordination, and more failure modes. Those costs are not justified for the current team and expected early usage.
+Microservices would add network calls, service discovery, distributed logging, authentication between services, deployment coordination, and more failure modes. Those costs are not justified for the current team and expected early usage. Prototype 1 runs on one device for one listener, which strengthens this choice.
 
-## High-Level Components
+## Current Components
 
-The diagram below is the planned modular-monolith direction. The current
-implementation has a domain layer, an application service, a catalog port,
-and a CSV adapter; it does not yet define an API/UI boundary.
+**Current:** the backend has a domain layer, one application service, one port, and one adapter. It has no API boundary and no persistence. The frontend is a separate React application running on a mock service; it does not call the backend.
+
+```text
+CLI (src/main.py)
+      |
+      v
+Legacy compatibility layer (src/recommender.py)
+      |
+      v
+Application service (recommend_music, recommend_from_catalog)
+      |
+      +------------------------+
+      |                        |
+      v                        v
+Recommendation domain      Catalog port
+(models, scoring, ranking)     |
+                               v
+                           CsvCatalog adapter
+                               |
+                               v
+                           backend/data/songs.csv
+
+
+React frontend (frontend/) --> SessionService interface --> mock implementation
+                               (no connection to the backend yet)
+```
+
+## Prototype 1 Target Architecture
+
+**Planned (approved).** From spec §4:
+
+```text
+React / TypeScript
+        |
+        | HTTP / JSON
+        v
+FastAPI
+        |
+        v
+Application use cases
+        |
+        +----------------------+
+        |                      |
+        v                      v
+Listening-session domain   Recommendation domain
+        |                      |
+        |                      +--> scoring
+        |                      +--> ranking
+        |                      +--> diversity/exploration
+        |
+        v
+Ports
+  - Catalog
+  - SessionRepository
+  - TrackRepository
+  - PlaylistRepository
+  - FeedbackRepository
+        |
+        v
+Adapters
+  - SQLite / SQLAlchemy
+  - managed local media
+  - CSV compatibility
+  - metadata/audio analyzers
+```
+
+Everything runs locally. There are no accounts, cloud services, or external music providers. A bounded in-process worker handles scanning and analysis (D28), and its job state is persisted in SQLite.
+
+### Superseded target diagram
+
+**Superseded by the Prototype 1 target above.** The earlier planned direction had a feedback domain beside the recommendation domain, "CSV / Database / YouTube" catalog adapters, "Memory / SQLite / PostgreSQL" feedback adapters, and an AI chatbot feeding an intent-parser port. Prototype 1 replaces the YouTube catalog with a managed local library, chooses SQLite only (PostgreSQL later, D22), and defers the AI intent parser behind a future `IntentParser` port (D30, D39).
 
 ```text
 Client or browser
@@ -62,39 +130,26 @@ Validated recommendation request
 
 ### Domain Layer
 
-Contains business rules that should not depend on HTTP, databases, Streamlit, AI providers, or YouTube.
+Contains business rules that do not depend on HTTP, databases, the filesystem, AI providers, or music providers.
 
-**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` now implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring -- see docs/planning/development-phases.md, Phase 3.
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring.
 
-Responsibilities:
+**Planned (Prototype 1):**
 
-- User preference models
-- Candidate models
-- Scoring
-- Ranking
-- Tie-breaking
-- Diversity adjustment
-- Match classification
-- Recommendation reasons
-- Feedback interpretation rules later
+- A listening-session domain: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (B4). The session owns current state; turns, occurrences, and feedback own history (D31).
+- Recommendation Policy v1 (B5): eligibility, intent fit, session fit, long-term fit, combined rank, diversity/repetition re-rank, controlled exploration, and the rolling top three. Each stage is computed separately (D07, D08). All constants live in one versioned policy module.
+- Feedback interpretation (B6) and conservative long-term adaptation (B10).
+- Existing `score_candidate()`/`rank_candidates()` are preserved. New scoring extends or refactors shared primitives so the scoring math is never duplicated, and complete-input legacy outputs stay identical (D38).
+
+`Recommendation` (an algorithm result) stays distinct from `RecommendationOccurrence` (that result surfaced in a specific session at a specific moment).
 
 ### Application Layer
 
-Coordinates complete use cases.
+Coordinates complete use cases through ports.
 
-Example:
+**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept, diversification, or session awareness.
 
-```text
-recommend_music(request)
-  -> validate request
-  -> get candidates
-  -> score candidates
-  -> rank candidates
-  -> diversify results
-  -> build response
-```
-
-**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept yet (no diversification, no HTTP request object) -- those arrive with Phase 4's FastAPI layer.
+**Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
 
 **Dependency direction (Current):** the application layer may import the
 domain, and adapters may construct domain models. The domain does not import
@@ -103,52 +158,56 @@ frameworks.
 
 ### API Layer
 
-Handles HTTP concerns:
+**Planned (B8).** A thin FastAPI boundary:
 
-- Routes
-- Request and response schemas
-- Status codes
-- Error translation
+- Routes (listed in [API Design](../design/api-design.md))
+- Pydantic request and response schemas, separate from ORM and domain models
+- Status codes and a consistent error envelope with request IDs
 - Dependency injection
-- Authentication later
+- Audio serving by track ID with range support
+
+Authentication is **not** part of Prototype 1 (D01). Routes stay thin: no scoring, ranking, or persistence logic inside route functions.
 
 ### Repository and Port Layer
 
 Defines interfaces for data access and external capabilities.
 
-Examples:
+**Current:** `src/intentune/ports/catalog.py` defines `Catalog`, a `Protocol` with one method, `list_candidates() -> Sequence[MusicCandidate]`. It names no CSV, database, or provider concept -- any adapter that returns `MusicCandidate` objects satisfies it. `src/intentune/application/recommendation_service.py`'s `recommend_from_catalog()` depends on this port, not on `CsvCatalog` or any other concrete adapter.
 
-- Catalog provider
-- User repository
-- Feedback repository
-- Intent parser
-- External video provider
+**Planned (Prototype 1):** `SessionRepository`, `TrackRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4).
 
-**Current:** `src/intentune/ports/catalog.py` defines `Catalog`, a `Protocol` with one method, `list_candidates() -> Sequence[MusicCandidate]`. It names no CSV, database, or YouTube concept -- any adapter that returns `MusicCandidate` objects satisfies it. `src/intentune/application/recommendation_service.py`'s `recommend_from_catalog()` depends on this port, not on `CsvCatalog` or any other concrete adapter. User repository, feedback repository, and intent parser ports remain future work.
+**Future:** an `IntentParser` port for LLM intent parsing (D30), and an external provider port (D39).
 
 ### Adapter Layer
 
-Implements ports using specific technology:
+Implements ports using specific technology.
 
-- CSV catalog adapter
-- SQLite repository
-- PostgreSQL repository
-- AI provider client
-- YouTube Data API client
+**Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. It exposes both the functional `load_music_candidates()` loader and `CsvCatalog`, a small class implementing the `Catalog` port around that loader. The legacy `load_songs()` in `src/recommender.py` calls `load_music_candidates()` directly and converts the result back into the historical dictionary shape for compatibility -- the legacy path predates the port and was not rewired onto it, since that would change nothing observable and adds risk for no behavioral benefit.
 
-**Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. It exposes both the functional `load_music_candidates()` loader and `CsvCatalog`, a small class implementing the `Catalog` port around that loader. The legacy `load_songs()` in `src/recommender.py` calls `load_music_candidates()` directly and converts the result back into the historical dictionary shape for compatibility -- the legacy path predates the port and was not rewired onto it, since that would change nothing observable and adds risk for no behavioral benefit. SQLite/PostgreSQL repositories, an AI provider client, and a YouTube client remain future adapters.
+**Planned (Prototype 1):**
+
+- SQLite / SQLAlchemy repositories with Alembic migrations (B1)
+- Managed local media: safe copy into `backend/data/media/` under generated UUID names (B2)
+- Tag extraction (`mutagen`) and deterministic signal analysis (`librosa`, only if needed) (B2, B3)
+- CSV compatibility (the existing adapter, kept)
+
+**Future:** PostgreSQL repositories, an AI provider client, a YouTube Data API client, Spotify (D22, D39).
 
 ### UI Layer
 
-Provides a browser experience. It should call application or API interfaces rather than contain scoring rules.
+**Current:** a React + TypeScript + Vite application in `frontend/`, governed by [the frontend architecture](../frontend/ARCHITECTURE.md). It calls a `SessionService` interface and never contains scoring or ranking rules.
+
+**Planned (B9 / frontend F9):** an HTTP implementation of the service boundary. The backend owns session identity, structured context, recommendation occurrences and history, reactions, and playlist state. The frontend owns modal and drawer state, the composer draft, animation, scrolling and focus, and visual expansion state (D32).
 
 ## Core Architectural Rule
 
-The recommendation domain must not import FastAPI, Streamlit, database drivers, OpenAI SDKs, or YouTube clients.
+The domain must not import FastAPI, SQLAlchemy, SQLite, React, filesystem-specific code, AI SDKs, or provider SDKs (spec §4). Never expose raw local file paths to the frontend, and never store audio binaries in SQLite (D23).
 
-## Initial Deployment Model
+## Deployment Model
 
-One backend application and one browser-accessible interface. They may be packaged together initially.
+**Planned (Prototype 1):** one backend process and one browser client on the listener's own device (D37). Database and media live under `backend/data/`.
+
+**Future:** hosted deployment for other users, PostgreSQL, authentication, and multi-user operation.
 
 ## Conditions for Considering Microservices
 
@@ -161,4 +220,4 @@ Microservices should only be considered when there is evidence of one or more of
 - A clear domain boundary has remained stable over time
 - The modular monolith has measurable operational limitations
 
-Until then, the modular monolith remains the preferred architecture.
+Until then, the modular monolith remains the preferred architecture. Redis, Celery, Kafka, and microservices are explicitly out of scope for Prototype 1 (spec §3).

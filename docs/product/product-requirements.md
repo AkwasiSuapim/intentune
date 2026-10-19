@@ -2,9 +2,17 @@
 
 ## Status
 
-**Draft**
+**Superseded in part.** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 This document defines the intended product behavior. Requirements will be refined after the repository audit and early user testing.
+
+**Prototype 1 requirements** are defined by the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md): scope in §3, behavior in §5–§25, and the definition of done in §30. Where this document differs, the specification wins. In particular, these MVP requirements below are **superseded**:
+
+- the preference form and Recommend action, replaced by listening sessions with structured intent, continuous playback, and a rolling three-candidate queue
+- the recommendation output fields **final score** and **match classification**: the approved frontend never shows scores, ranks, or confidence
+- the feedback set like / dislike / skip / save / open, replaced by LIKE, SAVE, REPLAY, SKIP, COMPLETE, and NOT_FOR_ME with playback facts
+
+The nonfunctional requirements remain in force.
 
 ## Product Goal
 
@@ -95,6 +103,7 @@ A browser interface should provide:
 - `.env` files must not be committed.
 - Inputs must be validated at API boundaries.
 - Logs must not include secret values.
+- Prototype 1 additions (spec §27): no arbitrary file serving, path traversal prevention, allowlisted audio formats, file-size limits, generated managed filenames, no raw local paths or stack traces in client responses, and no raw prompt retention by default.
 
 ### Maintainability
 

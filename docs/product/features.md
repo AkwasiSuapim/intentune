@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current, Planned, and Future**
+**Current, Planned, Superseded, and Future.** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 ## Current Features
 
@@ -20,6 +20,25 @@
 - Formal `Catalog` port with a `CsvCatalog` implementation, and catalog-backed application orchestration (`recommend_from_catalog()`)
 - Pytest coverage
 - Model card and README
+- Mock-driven React frontend: mobile-first listening sessions, intent strip, hero and compact recommendations, Why this fits, Like / Not for me / Save, quick actions and Tune, playlist picker, session drawer, responsive tablet/desktop layouts. Nothing is persisted and there is no audio.
+
+## Planned Prototype 1 Features
+
+**Planned (approved).** From the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §3:
+
+- Local single-listener identity; no production authentication
+- Managed local music library fed by multiple source folders
+- SQLite persistence with SQLAlchemy repositories and versioned migrations
+- Background scanning and analysis, with progressive track readiness
+- Structured `ListeningContext` and listening sessions
+- Recommendation occurrences, feedback, and playback events
+- Continuous recommendation flow with a rolling three-candidate queue
+- Controlled exploration and repetition cooldown
+- Playlists
+- FastAPI HTTP API and local audio playback endpoint
+- Long-term evidence collection and conservative long-term adaptation
+
+The sections below predate Prototype 1. Items that Prototype 1 replaces are marked.
 
 ## Planned Core-Logic Features
 
@@ -38,10 +57,12 @@
 
 Each feature must be introduced only after its behavior and tests are defined.
 
+In Prototype 1, missing-feature handling, diversity re-ranking, and algorithm versioning arrive with Recommendation Policy v1 (B5). Plural genre and mood labels are stored per track (spec §9). Match classifications and score display are **superseded**: the approved frontend never shows scores or confidence. The remaining items are not scheduled.
+
 ## Planned Backend Features
 
 - FastAPI application
-- Versioned recommendation endpoint
+- Versioned recommendation endpoint *(superseded: Prototype 1 uses session, library, and playlist endpoints)*
 - Health endpoint
 - Structured validation errors
 - Configuration through environment variables
@@ -50,24 +71,28 @@ Each feature must be introduced only after its behavior and tests are defined.
 
 ## Planned Persistence Features
 
-- Anonymous session identifiers
+- Anonymous session identifiers *(Prototype 1: one generated local listener, UUID sessions)*
 - Feedback events
 - Recommendation history
 - Persistent user profiles
 - Database migrations
-- Optional user accounts later
+- Optional user accounts later *(Future)*
 
 ## Planned User Interface Features
 
-- Browser-based preference form
+**Superseded in part.** The frontend was built as a conversational listening session instead of a preference form (frontend phases F0–F8). Scores are never displayed.
+
+- Browser-based preference form *(superseded)*
 - Result cards
-- Scores and explanations
+- Scores and explanations *(scores superseded; explanations kept as Why this fits)*
 - Feedback controls
 - Loading states
 - Empty states
 - Error messages
 
 ## Future AI Features
+
+Deferred beyond Prototype 1 (D39). Prototype 1 supports only a limited set of deterministic commands such as "more energetic", "calmer", and "surprise me" (D30).
 
 - Conversational input
 - Current mood extraction
@@ -82,6 +107,8 @@ AI output must be validated before entering the core system.
 
 ## Future YouTube Features
 
+Deferred beyond Prototype 1 (D39).
+
 - Official YouTube Data API integration
 - Video title
 - Channel or artist name
@@ -95,9 +122,9 @@ AI output must be validated before entering the core system.
 ## Later Possibilities
 
 - Spotify integration
-- Saved recommendation collections
-- Adaptive user profiles
-- Diversity controls based on feedback
+- Saved recommendation collections *(Prototype 1: playlists, D34)*
+- Adaptive user profiles *(Prototype 1: conservative long-term adaptation, D06)*
+- Diversity controls based on feedback *(Prototype 1: exploration controls such as Surprise me and More familiar, D36)*
 - Collaborative recommendations
 - Mobile client
 - More advanced ranking models
@@ -110,3 +137,4 @@ AI output must be validated before entering the core system.
 - Large-scale custom model training
 - Automatic playlist publishing
 - Social network features
+- Prototype 1 deferrals (spec §3): production auth/OAuth/JWT, multi-user cloud system, Spotify/YouTube catalog, unrestricted LLM intent parser, vector database, Redis/Celery/Kafka, AI DJ, real-time filesystem watchers, cross-user collaborative filtering

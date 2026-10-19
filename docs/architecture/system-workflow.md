@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current and Planned**
+**Current, Planned, Superseded, and Future.** Reconciled with Prototype 1 in Phase B0 (2026-10-18). Section labels say which is which.
 
 ## Current Workflow
 
@@ -66,7 +66,110 @@ recommend_music() -> rank_candidates() -> score_candidate()
 The CLI does not use `recommend_from_catalog()` yet -- it still runs through
 the legacy `load_songs()`/`recommend_songs()` path shown above, unchanged.
 
-## First Backend Workflow
+### Current frontend workflow
+
+The React frontend runs its own loop on a mock service and never reaches the backend:
+
+```text
+User types, picks a starter or quick action, tunes, presses Next or Not for me
+   -> planCommand() (pure) produces local changes plus at most one service question
+   -> SessionService.respond() (mock: phrase tables, hand-ordered song lists)
+   -> the answer is applied to the session that asked
+   -> composeSession() turns state into approved blocks
+```
+
+Playback is a mock timer. When a song's duration runs out, the frontend sends `next`, exactly as if the user had pressed Next.
+
+## Planned Prototype 1 Workflows
+
+**Planned (approved, not implemented).** Summarized from the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md). The spec is authoritative where detail differs.
+
+### Library import and scanning (B2)
+
+```text
+source folder registered (several may coexist; one logical library)
+   -> scan
+   -> validate (allowlisted format, size limit)
+   -> SHA-256 hash
+   -> exact duplicate? -> no second logical track
+   -> copy into backend/data/media/<track_uuid>.<extension>
+   -> persist track, extract basic tags
+   -> IMPORTED: playable
+   -> queue deeper analysis
+```
+
+A lightweight incremental scan runs at startup, and the listener can trigger **Rescan Library**. There is no real-time watcher (D25).
+
+| Source file state | Action |
+|---|---|
+| unchanged | no work |
+| new | import and analyze |
+| changed | re-hash; re-import/re-analyze if content changed |
+| missing at source | source marked missing; the managed copy stays usable |
+| exact duplicate | no second logical track |
+
+### Background analysis (B3)
+
+```text
+persisted job (IMPORT_TRACK, EXTRACT_TAGS, ANALYZE_AUDIO, REANALYZE_TRACK, RESCAN_SOURCE)
+   -> bounded in-process worker (one worker initially)
+   -> features stored with source, analyzer version, confidence
+   -> track moves DISCOVERED -> IMPORTED -> ANALYZING -> READY
+```
+
+Failure states are `UNSUPPORTED`, `FAILED`, and `MISSING_MANAGED_FILE`. One failure never crashes the library. Interrupted jobs resume after restart. Unavailable features stay `NULL`; nothing is invented (D21).
+
+### Listening session (B4, B5)
+
+```text
+listener starts a fresh session and sets structured intent (ListeningContext)
+   -> eligibility filter
+   -> intent fit -> session fit -> long-term fit
+   -> combined rank (0.55 / 0.30 / 0.15, renormalized when a component is unavailable)
+   -> diversity / repetition re-rank
+   -> controlled exploration (about 90/10)
+   -> rolling top three
+   -> #2 may play first when within 0.08 of #1 and usefully novel
+```
+
+The listener presses Play once. The next candidate is prepared before the current track ends, the next track begins, and the queue is refilled and re-ranked. The frontend owns real playback position and timers; the backend records meaningful events, not per-second ticks.
+
+### Feedback and immediate adaptation (B6)
+
+```text
+LIKE / SAVE / REPLAY / SKIP / COMPLETE / NOT_FOR_ME
+   -> persist the raw event (played seconds, duration, fraction, occurrence, session)
+   -> interpret with Feedback Policy v1
+   -> update session evidence
+   -> re-rank the remaining queue
+```
+
+Explicit actions override passive playback interpretation. The first 0–8 seconds are not preference evidence. Not for me excludes the exact track for the current session and strongly down-ranks similar tracks, without changing the long-term profile (D12, D18).
+
+### Playlists (B7)
+
+Create, rename, delete, add, remove, and reorder. One occurrence of a track per playlist by default. Adding to a playlist is strong positive feedback, but recommendations are never saved automatically.
+
+### Restart (D35)
+
+```text
+app restarts
+   -> library, playlists, metadata, feedback, and history are kept
+   -> the active queue is not restored
+   -> the next listening action starts a fresh session
+```
+
+### Long-term adaptation (B10)
+
+Permanent profile change requires at least four consistent strong signals across at least two sessions, and then only a small, bounded, traceable, reversible adjustment (D06).
+
+## Superseded Workflows
+
+**Superseded by the Prototype 1 workflows above.** Kept for history.
+
+### First Backend Workflow (superseded)
+
+Replaced by the session-based routes in spec §24. There is no profile-only `POST /api/v1/recommendations` in Prototype 1.
 
 ```text
 1. Client sends POST /api/v1/recommendations
@@ -80,7 +183,9 @@ the legacy `load_songs()`/`recommend_songs()` path shown above, unchanged.
 9. API returns JSON with scores and reasons
 ```
 
-## Planned Feedback Workflow
+### Planned Feedback Workflow (superseded)
+
+Replaced by the Prototype 1 feedback workflow, which uses a different event set (LIKE, SAVE, REPLAY, SKIP, COMPLETE, NOT_FOR_ME) and changes session ranking immediately. Its rule that permanent profile adaptation waits for a tested policy carries forward as D06.
 
 ```text
 1. User receives recommendations
@@ -92,21 +197,27 @@ the legacy `load_songs()`/`recommend_songs()` path shown above, unchanged.
 7. Profile adaptation is not performed until a tested policy is introduced
 ```
 
-## Planned AI Chatbot Workflow
+## Future Workflows
+
+**Future: deferred beyond Prototype 1 (D30, D39).**
+
+### AI Chatbot Workflow (future)
+
+Prototype 1 uses a structured `ListeningContext` plus a limited set of deterministic commands ("more energetic", "calmer", "surprise me", and so on). LLM intent parsing comes later, behind an `IntentParser` port.
 
 ```text
 1. User enters a natural-language request
 2. AI adapter sends the message to an AI provider
 3. Provider returns structured intent
 4. Intent validator checks required fields and numerical ranges
-5. Invalid or incomplete output receives safe defaults or a clarification request
+5. Invalid or incomplete output receives a clarification request or a safe fallback
 6. The validated request enters the same recommendation application service
 7. The existing deterministic engine scores and ranks candidates
 ```
 
-The chatbot is an input adapter. It does not replace backend validation or ranking.
+The chatbot is an input adapter. It does not replace backend validation or ranking, and an LLM never chooses tracks directly. Step 5 originally read "receives safe defaults"; any fallback must still respect D21 and must not invent feature values.
 
-## Planned YouTube Workflow
+### YouTube Workflow (future)
 
 ```text
 1. The application receives validated user intent
@@ -123,20 +234,28 @@ The chatbot is an input adapter. It does not replace backend validation or ranki
 
 ### Invalid Input
 
-Return a structured validation error. Do not begin recommendation processing.
+Return a structured validation error (`VALIDATION_ERROR`). Do not begin recommendation processing.
 
-### Empty Catalog
+### Empty Library or No Eligible Track
 
-Return an empty recommendation list with a clear message.
+Return a controlled result rather than an error page or crash. The spec lists `RECOMMENDATION_UNAVAILABLE` among its potential error codes; exact error semantics are defined in B8.
 
-### AI Failure
+### Unsupported or Missing Audio
 
-The manual structured-input path should remain usable. AI failure should not break the core recommender.
+**Planned:** an unsupported or corrupt file fails safely, and a missing managed file makes the track ineligible, without crashing the library. Related potential codes in the spec: `UNSUPPORTED_AUDIO`, `IMPORT_FAILED`, `TRACK_UNAVAILABLE`.
 
-### YouTube Failure
+### Analysis Failure
 
-Return a provider-specific unavailable message or fall back to the internal catalog when that behavior is enabled.
+**Planned:** the track stays playable with the features it has. The job is marked failed, and the worker continues with other jobs.
 
 ### Database Failure
 
-Recommendation logic that does not require persistence may continue. Feedback or saved-history operations should return a controlled service-unavailable error.
+Recommendation logic that does not require persistence may continue. Session, feedback, playlist, or history operations return a controlled error. Clients never see stack traces or filesystem paths.
+
+### AI Failure (future)
+
+The manual structured-input path stays usable. AI failure must not break the core recommender.
+
+### YouTube Failure (future)
+
+Return a provider-specific unavailable message or fall back to the local library when that behavior is enabled.
