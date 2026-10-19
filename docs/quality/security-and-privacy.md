@@ -11,7 +11,7 @@
 | Requirement | Status at B0 |
 |---|---|
 | No secrets committed | **Current:** `.env` is gitignored; only `backend/.env.example` is committed, with no secret values |
-| Database and managed media gitignored | **Current (2026-10-18):** `.gitignore` covers `backend/data/intentune.db*` (including SQLite journal, WAL, and SHM files) and `backend/data/media/`. An older local `backend/.env` may still point at `backend/intentune.db`, which is not ignored. |
+| Database and managed media gitignored | **Current (2026-10-18):** `.gitignore` covers `backend/data/intentune.db*` (including SQLite journal, WAL, and SHM files) and `backend/data/media/`. Since B1 (2026-10-19) the database defaults to that ignored path, and tests use temporary files only. An older local `backend/.env` may still point at `backend/intentune.db`, which is not ignored. B1 does not load `.env`, but that line should be updated before anything does. |
 | No arbitrary file serving; path traversal prevention | Planned (B8): audio is served by track ID from managed media only |
 | Allowlisted audio formats; file-size limits | Planned (B2) |
 | Generated managed filenames (UUID-based) | Planned (B2) |
@@ -95,6 +95,8 @@ The first version should process prompts without automatically retaining them pe
 ## Feedback Privacy
 
 Anonymous feedback should use random session identifiers. Avoid collecting names or email addresses unless accounts become necessary. In Prototype 1, feedback belongs to one generated local listener profile (D01), and sessions use UUIDs.
+
+**Current (B1, 2026-10-19):** the local listener profile stores only a random UUID4, a default flag, and a UTC creation time. It holds no name, email, device identifier, or other personal data.
 
 ## External Providers
 

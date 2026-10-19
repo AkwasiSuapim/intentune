@@ -63,7 +63,7 @@
 - Should anonymous sessions persist across browser visits? **Resolved:** session history persists; the active queue does not (D35).
 - Should raw prompts be stored? **Resolved:** not by default (D33).
 - Which feedback actions should influence profiles? **Resolved:** session ranking changes immediately (D05); permanent change needs at least 4 consistent strong signals across at least 2 sessions (D06).
-- Where should the database file live? **Resolved:** `backend/data/intentune.db` (spec §5); `.env.example` updated 2026-10-18. Still open for B1: whether the code resolves the relative path from the working directory (SQLite's default) or from the backend root, as the CSV adapter does.
+- Where should the database file live? **Resolved:** `backend/data/intentune.db` (spec §5); `.env.example` updated 2026-10-18. **Resolved in B1 (2026-10-19, TD-012):** a relative path resolves against the backend root, as the CSV adapter does, not the working directory, and the same file is the default when `DATABASE_URL` is unset.
 
 ## Open AI Questions
 

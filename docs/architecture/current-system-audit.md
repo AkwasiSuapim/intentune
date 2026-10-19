@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day; the Dependencies and Configuration sections below reflect that.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`. The [B1 update](#b1-update-2026-10-19), Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect it.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -24,10 +24,26 @@ Backend tests per file: `test_domain_models.py` 44, `test_recommender.py` 21, `t
 
 How the backend suite must be run:
 
-- From `backend/`. Tests import `src.…`, and there is no `pytest.ini`, `pyproject.toml`, or `conftest.py`. Running `python -m pytest -q backend/tests` from the repository root fails during collection (8 import errors).
+- From `backend/`. Tests import `src.…`, and there is no `pytest.ini` or `pyproject.toml`; `backend/tests/conftest.py` (added in B1) holds database fixtures only and does not change import paths. At B0, running `python -m pytest -q backend/tests` from the repository root failed during collection (8 import errors).
 - With the backend virtual environment. On this machine the system Python has no pytest, so a bare `python -m pytest -q` outside the venv fails with `No module named pytest`.
 
 The frontend browser checks (`npm run check:browser`) were not run in B0.
+
+## B1 Update (2026-10-19)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` with `backend/.venv` active | **228 passed**: the 131 baseline tests, unchanged, plus 97 from B1 |
+| Baseline files alone | the eight B0 test files | **131 passed** |
+| Clean migration | `alembic upgrade head`, against a new database (`DATABASE_URL` set to a scratch file) | Creates `listener_profiles` and `alembic_version`; journal mode `wal` |
+| Migrations vs records | `alembic check` | "No new upgrade operations detected." |
+| Default listener | `ensure_default_listener()` in two separate processes on the same database | Both return the same generated UUID; one row stored |
+
+B1 tests per file: `test_persistence_db.py` 26, `test_listener_profile.py` 19, `test_listener_repository.py` 19, `test_architecture_boundaries.py` 15, `test_migrations.py` 14, `test_local_listener_service.py` 4.
+
+These results include the test-only [B1 hardening pass](../planning/development-phases.md#b1-hardening-pass-2026-10-19). It added recursive architecture checks and failed-migration rollback tests, and replaced brittle assertions. It found no production bug and changed no production code.
+
+The frontend was not touched or re-run in B1.
 
 ## Current Files
 
@@ -47,6 +63,16 @@ The frontend browser checks (`npm run check:browser`) were not run in B0.
 - `backend/src/intentune/ports/catalog.py`
 - `backend/src/intentune/adapters/csv_catalog.py`
 - `backend/tests/` — the eight test files listed above
+
+Added in B1 (2026-10-19):
+
+- `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/script.py.mako`
+- `backend/alembic/versions/20261019_6ef3a3452ab7_create_listener_profiles.py`
+- `backend/src/intentune/domain/listener.py` — `ListenerProfile`, `new_default_listener_profile()`
+- `backend/src/intentune/ports/listener_profiles.py`, `backend/src/intentune/ports/unit_of_work.py`
+- `backend/src/intentune/application/local_listener.py` — `ensure_default_listener()`
+- `backend/src/intentune/persistence/` — `db.py`, `models.py`, `repositories.py`, `unit_of_work.py`, `migrations.py`
+- `backend/tests/conftest.py` and the six B1 test files listed above
 
 ### Frontend
 
@@ -176,7 +202,7 @@ sqlalchemy==2.1.5
 alembic==1.20.0
 ```
 
-`pip check` reports no broken requirements. Only `pytest` is used by code today. No source or test file imports `pandas`, `fastapi`, `uvicorn`, `httpx`, `sqlalchemy`, or `alembic` yet.
+`pip check` reports no broken requirements. `pytest` is used by the tests. Since B1 (2026-10-19), `sqlalchemy` and `alembic` are used by `backend/src/intentune/persistence/`, `backend/alembic/`, and the persistence tests; no domain, port, or application module imports them, and a test enforces that. No source or test file imports `pandas`, `fastapi`, `uvicorn`, or `httpx` yet. B1 added no dependency.
 
 *Found in B0 and since fixed:* all entries were unpinned, `sqlalchemy` and `httpx` were listed but not installed, and `alembic` (required by D22) was not listed.
 
@@ -184,9 +210,9 @@ alembic==1.20.0
 
 **Current (updated 2026-10-18, B1 prerequisites):**
 
-- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. No code reads these values yet. SQLite resolves the relative path from the working directory, so running from `backend/` gives `backend/data/intentune.db`, the Prototype 1 layout (spec §5).
+- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. **Updated in B1:** `backend/src/intentune/persistence/db.py` reads `DATABASE_URL` from the process environment. It resolves a relative path against `backend/`, whatever the working directory, and defaults to `backend/data/intentune.db` when the variable is unset, the Prototype 1 layout (spec §5). The other values are still unread. No code loads `backend/.env`.
 - `.gitignore` ignores `backend/data/intentune.db*` (the database plus its SQLite journal, WAL, and SHM files) and `backend/data/media/`, as spec §5 requires. `backend/data/songs.csv` stays tracked.
-- A developer's existing, untracked `backend/.env` copied from the old template still points at `sqlite:///./intentune.db` (`backend/intentune.db`, which is not ignored) until it is updated by hand.
+- A developer's existing, untracked `backend/.env` copied from the old template still points at `sqlite:///./intentune.db` (`backend/intentune.db`, which is not ignored) until it is updated by hand. B1 does not load `.env`, so this has no effect yet. It will matter once a settings loader reads `.env`.
 - There is no CI workflow (`.github/` does not exist).
 
 *Found in B0 and since fixed:* `DATABASE_URL` pointed at `backend/intentune.db`, and `.gitignore` did not cover the database or managed media.
@@ -196,9 +222,8 @@ alembic==1.20.0
 There is currently no:
 
 - HTTP API
-- Database or persistence of any kind
+- Persistence beyond the listener profile. B1 built the SQLite foundation and the `listener_profiles` table only, and no running entry point opens the database yet.
 - Local music library, import, or audio analysis
-- Persistent listener profile
 - Listening sessions in the backend
 - Feedback store
 - Playlists in the backend
@@ -220,8 +245,8 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | Canonical models, scoring, ranking, `Catalog` port (D38) | Yes | Preserve. Extend through shared primitives in B5. |
 | `ListeningContext` as the source of intent (D29) | Model only | Not used by scoring. Used from B4/B5. |
 | Missing-feature scoring with renormalization (D21) | No: the scorer raises on missing values | B5, while keeping complete-input legacy outputs identical |
-| SQLite + SQLAlchemy + Alembic (D22) | Libraries installed and pinned (2026-10-18); no persistence code yet | B1 |
-| Local listener identity (D01) | No | B1 |
+| SQLite + SQLAlchemy + Alembic (D22) | **Yes (B1, 2026-10-19):** engine configuration, repository and unit-of-work pattern, migrations | Later phases add their tables and repositories |
+| Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup from B8 |
 | Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | No | B2 |
 | Background analysis jobs (D26, D28) | No | B3 |
 | Sessions, turns, recommendation occurrences, feedback events (D31) | No (the frontend has mock sessions only) | B4, B6 |

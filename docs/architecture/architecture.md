@@ -24,7 +24,7 @@ Microservices would add network calls, service discovery, distributed logging, a
 
 ## Current Components
 
-**Current:** the backend has a domain layer, one application service, one port, and one adapter. It has no API boundary and no persistence. The frontend is a separate React application running on a mock service; it does not call the backend.
+**Current:** the backend has a domain layer, application use cases, ports, a CSV adapter, and (since B1, 2026-10-19) a SQLite persistence package. It has no API boundary. The CLI flow below does not touch the database; the persistence path is used by tests only until the B8 startup wires it in. The frontend is a separate React application running on a mock service; it does not call the backend.
 
 ```text
 CLI (src/main.py)
@@ -45,6 +45,18 @@ Recommendation domain      Catalog port
                                |
                                v
                            backend/data/songs.csv
+
+
+ensure_default_listener() (application, B1; no caller yet)
+      |
+      v
+UnitOfWork / ListenerProfileRepository ports
+      |
+      v
+SqlAlchemyUnitOfWork / SqlAlchemyListenerProfileRepository (persistence)
+      |
+      v
+SQLite: backend/data/intentune.db (schema managed by Alembic)
 
 
 React frontend (frontend/) --> SessionService interface --> mock implementation
@@ -132,7 +144,7 @@ Validated recommendation request
 
 Contains business rules that do not depend on HTTP, databases, the filesystem, AI providers, or music providers.
 
-**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring.
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring. `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `backend/tests/test_architecture_boundaries.py` fails if a domain, port, or application module imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
@@ -147,7 +159,7 @@ Contains business rules that do not depend on HTTP, databases, the filesystem, A
 
 Coordinates complete use cases through ports.
 
-**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept, diversification, or session awareness.
+**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept, diversification, or session awareness. `src/intentune/application/local_listener.py` (B1) implements `ensure_default_listener(unit_of_work)`. It returns the default local listener, generating and committing it on first run, and depends only on the `UnitOfWork` port.
 
 **Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
 
@@ -174,7 +186,9 @@ Defines interfaces for data access and external capabilities.
 
 **Current:** `src/intentune/ports/catalog.py` defines `Catalog`, a `Protocol` with one method, `list_candidates() -> Sequence[MusicCandidate]`. It names no CSV, database, or provider concept -- any adapter that returns `MusicCandidate` objects satisfies it. `src/intentune/application/recommendation_service.py`'s `recommend_from_catalog()` depends on this port, not on `CsvCatalog` or any other concrete adapter.
 
-**Planned (Prototype 1):** `SessionRepository`, `TrackRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4).
+**Current (B1):** `src/intentune/ports/listener_profiles.py` defines `ListenerProfileRepository` (`get`, `get_default`, `add`). `src/intentune/ports/unit_of_work.py` defines `UnitOfWork`, the transaction boundary: it exposes the repositories, `commit()`, and `rollback()`, and anything left uncommitted is discarded when its `with` block ends. Repositories stage changes and never commit. See [Database Design](../design/database-design.md#repository-and-transaction-pattern).
+
+**Planned (Prototype 1):** `SessionRepository`, `TrackRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4), each added to the same unit of work.
 
 **Future:** an `IntentParser` port for LLM intent parsing (D30), and an external provider port (D39).
 
@@ -184,9 +198,11 @@ Implements ports using specific technology.
 
 **Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. It exposes both the functional `load_music_candidates()` loader and `CsvCatalog`, a small class implementing the `Catalog` port around that loader. The legacy `load_songs()` in `src/recommender.py` calls `load_music_candidates()` directly and converts the result back into the historical dictionary shape for compatibility -- the legacy path predates the port and was not rewired onto it, since that would change nothing observable and adds risk for no behavioral benefit.
 
+**Current (B1):** `src/intentune/persistence/` is the SQLite adapter package. `db.py` resolves the database URL and creates engines (foreign keys on, WAL, SQLAlchemy-emitted `BEGIN`). `models.py` holds the ORM records and the `UtcDateTime` type. `repositories.py` holds `SqlAlchemyListenerProfileRepository`, `unit_of_work.py` holds `SqlAlchemyUnitOfWork`, and `migrations.py` runs Alembic from Python. Migrations live in `backend/alembic/`. Records never leave this package; repositories return domain models. Details: [Database Design](../design/database-design.md).
+
 **Planned (Prototype 1):**
 
-- SQLite / SQLAlchemy repositories with Alembic migrations (B1)
+- Further SQLAlchemy repositories and migrations for the library, sessions, feedback, and playlists (B2–B7)
 - Managed local media: safe copy into `backend/data/media/` under generated UUID names (B2)
 - Tag extraction (`mutagen`) and deterministic signal analysis (`librosa`, only if needed) (B2, B3)
 - CSV compatibility (the existing adapter, kept)

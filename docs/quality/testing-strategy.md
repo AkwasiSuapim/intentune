@@ -23,7 +23,9 @@ From `backend/`, with the backend virtual environment active:
 python -m pytest -q
 ```
 
-The suite must run from `backend/`, because tests import `src.…` and there is no pytest configuration file. Run from the repository root, collection fails with 8 import errors. Outside the venv, the system Python on the B0 machine has no pytest.
+The suite must run from `backend/`, because tests import `src.…` and there is no pytest configuration file. `tests/conftest.py` (B1) provides database fixtures only. At B0, running from the repository root failed collection with 8 import errors. Outside the venv, the system Python on the B0 machine has no pytest.
+
+Persistence tests create their own SQLite files under pytest's `tmp_path` and upgrade them with the real migrations. They never open `backend/data/intentune.db` or depend on `DATABASE_URL`.
 
 Run the full suite after every phase (spec §28).
 
@@ -51,6 +53,14 @@ npm run check:browser   # headless-Chrome browser checks (not part of npm test)
 Backend tests per file: `test_domain_models.py` 44, `test_recommender.py` 21, `test_canonical_scoring.py` 17, `test_csv_catalog.py` 13, `test_legacy_compatibility.py` 12, `test_recommendation_service.py` 11, `test_canonical_ranking.py` 10, `test_catalog_port.py` 3.
 
 No backend or frontend test makes a network call.
+
+## After B1 (2026-10-19)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **228 passed**: the 131 baseline tests, unchanged, plus 97 from B1 |
+
+B1 tests per file: `test_persistence_db.py` 26, `test_listener_profile.py` 19, `test_listener_repository.py` 19, `test_architecture_boundaries.py` 15, `test_migrations.py` 14, `test_local_listener_service.py` 4. These counts include the test-only [B1 hardening pass](../planning/development-phases.md#b1-hardening-pass-2026-10-19). The frontend was not changed or re-run.
 
 ## Current Test Coverage
 
@@ -80,6 +90,21 @@ Added during the canonical domain refactor:
 - `tests/test_recommendation_service.py` verifies application-level orchestration and type boundaries, including `recommend_from_catalog()` against an in-memory fake catalog (ranking determinism, result limits, empty catalog, non-`Catalog` rejection).
 - `tests/test_legacy_compatibility.py` covers legacy-to-canonical conversion, the documented top-five baseline, and behavioral equivalence between legacy and canonical results across all 20 songs.
 
+Added in B1 (persistence foundation):
+
+- `tests/test_listener_profile.py`: `ListenerProfile` validation (canonical UUID, bool flag, timezone-aware UTC time, immutability) and default-listener generation.
+- `tests/test_local_listener_service.py`: pure application tests of `ensure_default_listener()` against an in-memory fake unit of work, with no SQLite.
+- `tests/test_persistence_db.py`: `DATABASE_URL` resolution (default, relative to `backend/` regardless of working directory, `.env.example` agreement, absolute and in-memory URLs, non-SQLite rejection); connection setup (foreign keys enforced and actually rejecting an orphan row, WAL, transactional DDL proven by a rolled-back `CREATE TABLE`); `UtcDateTime` round trips, offset conversion, and naive rejection.
+- `tests/test_migrations.py`:
+  - **Upgrades:** a clean upgrade from an empty database; a single head; a path with spaces and `%`.
+  - **Schema:** the `listener_profiles` columns, non-null constraints, primary key, and the unique index on the default flag, checked through stable reflected fields (names, columns, the unique flag) rather than whole reflected dictionaries or raw DDL text.
+  - **Snapshots:** a no-op re-upgrade and an upgrade–downgrade–upgrade round trip, each compared against a before/after schema snapshot; downgrade to base removing every table the ORM declares.
+  - **Code agreement:** migrations matching the ORM records (`compare_metadata`).
+  - **One default listener, by behavior:** a second default is refused on both INSERT and UPDATE, and several non-default rows are allowed.
+  - **Atomic failure:** a deliberately failing migration changes the schema, confirms the change, then raises. The schema and existing data are left unchanged. A failing upgrade from an empty database leaves no partial schema, not even `alembic_version`. Both tests fail when B1's transaction handling is removed.
+- `tests/test_listener_repository.py`: repository reads and writes against a migrated database; unit-of-work commit, rollback on exit, exception, or explicit rollback, isolation between transactions, reuse, non-re-entrancy, and refusal outside `with`; the default listener end to end, including idempotence and survival across an engine restart.
+- `tests/test_architecture_boundaries.py`: covers every Python file under `domain/`, `ports/`, and `application/`, including nested subpackages. None may import a storage or delivery framework, or the persistence or adapter packages. The domain may import nothing from `src` outside itself. Relative imports are resolved to absolute module names before checking. Self-tests cover the resolver and plant violations in a synthetic nested package to prove they are caught.
+
 ### Frontend
 
 Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure tests (composition policy, reducers, commands, mock service, service boundary), static-render tests (every block type and the unknown-block fallback), DOM tests (interaction, focus, overlays, loading/waiting/failure states), and browser checks (layout matrix, motion, contrast, axe-core audit, keyboard probe, design comparison). The frontend has not been tested on physical phones or with real screen readers.
@@ -90,7 +115,7 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 
 | Area | Phase |
 |---|---|
-| Clean migration, repository smoke tests | B1 |
+| Clean migration, repository smoke tests | B1 — **Current** (2026-10-19) |
 | Multi-folder import; exact duplicate not duplicated; managed copy survives source deletion; unsupported formats fail safely; incremental rescan | B2 |
 | Tracks usable during analysis; a failed track does not stop the worker; interrupted jobs recover; reanalysis after an analyzer version change | B3 |
 | Session domain transitions, written as pure application tests before HTTP | B4 |

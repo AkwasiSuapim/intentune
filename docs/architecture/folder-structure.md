@@ -6,7 +6,7 @@
 
 ## Current Repository Structure
 
-**Current (verified in B0).** Generated and ignored content (`.venv/`, `__pycache__/`, `node_modules/`, `dist/`, `.env`) is omitted.
+**Current (verified in B0; backend updated for B1, 2026-10-19).** Generated and ignored content (`.venv/`, `__pycache__/`, `node_modules/`, `dist/`, `.env`, `backend/data/intentune.db*`) is omitted.
 
 ```text
 intentune/
@@ -31,6 +31,12 @@ intentune/
 ├── backend/
 │   ├── .env.example
 │   ├── requirements.txt
+│   ├── alembic.ini                    (B1)
+│   ├── alembic/                       (B1)
+│   │   ├── env.py
+│   │   ├── script.py.mako
+│   │   └── versions/
+│   │       └── 20261019_6ef3a3452ab7_create_listener_profiles.py
 │   ├── data/
 │   │   └── songs.csv
 │   ├── src/
@@ -43,17 +49,29 @@ intentune/
 │   │       │   ├── __init__.py
 │   │       │   ├── models.py
 │   │       │   ├── scoring.py
-│   │       │   └── ranking.py
+│   │       │   ├── ranking.py
+│   │       │   └── listener.py        (B1)
 │   │       ├── application/
 │   │       │   ├── __init__.py
-│   │       │   └── recommendation_service.py
+│   │       │   ├── recommendation_service.py
+│   │       │   └── local_listener.py  (B1)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
-│   │       │   └── catalog.py
-│   │       └── adapters/
+│   │       │   ├── catalog.py
+│   │       │   ├── listener_profiles.py  (B1)
+│   │       │   └── unit_of_work.py    (B1)
+│   │       ├── adapters/
+│   │       │   ├── __init__.py
+│   │       │   └── csv_catalog.py
+│   │       └── persistence/           (B1)
 │   │           ├── __init__.py
-│   │           └── csv_catalog.py
+│   │           ├── db.py
+│   │           ├── models.py
+│   │           ├── repositories.py
+│   │           ├── unit_of_work.py
+│   │           └── migrations.py
 │   └── tests/
+│       ├── conftest.py                (B1: database fixtures)
 │       ├── test_recommender.py
 │       ├── test_domain_models.py
 │       ├── test_csv_catalog.py
@@ -61,7 +79,13 @@ intentune/
 │       ├── test_canonical_ranking.py
 │       ├── test_recommendation_service.py
 │       ├── test_legacy_compatibility.py
-│       └── test_catalog_port.py
+│       ├── test_catalog_port.py
+│       ├── test_listener_profile.py   (B1)
+│       ├── test_local_listener_service.py  (B1)
+│       ├── test_persistence_db.py     (B1)
+│       ├── test_migrations.py         (B1)
+│       ├── test_listener_repository.py  (B1)
+│       └── test_architecture_boundaries.py  (B1)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -77,6 +101,8 @@ intentune/
 ```
 
 `domain/scoring.py` and `domain/ranking.py` implement the current four-feature scoring rule and ranking/tie-breaking as the single source of truth; `ports/catalog.py` defines the `Catalog` protocol (`list_candidates() -> Sequence[MusicCandidate]`); `application/recommendation_service.py` is a use-case orchestrator offering both `recommend_music(candidates, profile, limit)` (candidates passed directly) and `recommend_from_catalog(catalog, profile, limit)` (candidates requested from a `Catalog` port); `adapters/csv_catalog.py` is the first adapter, converting raw CSV rows into `MusicCandidate` objects via `load_music_candidates()` and exposing `CsvCatalog`, which implements the `Catalog` port around that loader. `src/recommender.py`'s legacy dict/dataclass functions call into these rather than containing their own copy of the logic.
+
+B1 added the SQLite persistence foundation. `domain/listener.py` is the pure `ListenerProfile` model. `ports/listener_profiles.py` and `ports/unit_of_work.py` are the storage ports. `application/local_listener.py` holds the `ensure_default_listener()` use case. `persistence/` is the SQLAlchemy adapter package (engine configuration, ORM records, repository, unit of work, programmatic migrations). `backend/alembic/` holds the migrations. Persistence sits in its own package beside `adapters/`, as the execution guide suggested, because later phases add many tables and repositories to it.
 
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 
@@ -94,21 +120,11 @@ backend/data/
         <track_uuid>.<extension>                   — must be gitignored
 ```
 
-Suggested by the [backend execution guide](../agents/CLAUDE_BACKEND_EXECUTION_GUIDE.md) for B1. These are suggestions, not final names:
-
-```text
-backend/src/intentune/persistence/
-    db.py
-    models.py
-    repositories.py
-
-backend/alembic/
-backend/alembic.ini
-```
+The [backend execution guide](../agents/CLAUDE_BACKEND_EXECUTION_GUIDE.md) suggested `persistence/` with `db.py`, `models.py`, and `repositories.py`, plus `backend/alembic/` and `backend/alembic.ini`, for B1. **Implemented in B1** as shown in the current tree above, with `unit_of_work.py` and `migrations.py` added.
 
 Later phases are expected to add, under `backend/src/intentune/`:
 
-- new ports beside `ports/catalog.py`: `SessionRepository`, `TrackRepository`, `PlaylistRepository`, `FeedbackRepository` (spec §4)
+- new ports beside `ports/catalog.py` and `ports/listener_profiles.py`: `SessionRepository`, `TrackRepository`, `PlaylistRepository`, `FeedbackRepository` (spec §4), each exposed through the existing `UnitOfWork`, with SQLAlchemy implementations and migrations in `persistence/` and `backend/alembic/versions/`
 - session-domain models and Recommendation Policy v1 modules under `domain/`, with all policy constants in one versioned module (B4, B5)
 - library and analysis adapters (B2, B3)
 - a thin FastAPI package with Pydantic schemas separate from ORM and domain models (B8)
@@ -187,9 +203,13 @@ Coordinates complete use cases through ports.
 
 Interfaces that describe what the application needs from storage and external capabilities.
 
-### `backend/src/intentune/adapters/` (and the planned persistence package)
+### `backend/src/intentune/adapters/` and `backend/src/intentune/persistence/`
 
-Concrete implementations: CSV, SQLite/SQLAlchemy repositories, managed media, metadata and audio analyzers.
+Concrete implementations. `adapters/` holds the CSV catalog today and later managed media and the metadata and audio analyzers. `persistence/` (B1) holds the SQLite/SQLAlchemy engine setup, ORM records, repositories, and unit of work. Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy or Alembic.
+
+### `backend/alembic/`
+
+Alembic environment and versioned migrations (B1). Run `alembic upgrade head` from `backend/`.
 
 ### API package (planned, B8)
 
@@ -197,7 +217,7 @@ FastAPI routes, HTTP schemas, error translation, request IDs, and dependencies. 
 
 ### `backend/data/`
 
-The CSV catalog today. In Prototype 1 also the SQLite database and managed media, both gitignored.
+The CSV catalog, and from B1 the default location of the SQLite database (`intentune.db`, created by `alembic upgrade head`; gitignored). Managed media (`media/`, gitignored) arrives in B2.
 
 ### `backend/tests/`
 

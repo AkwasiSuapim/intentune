@@ -2,30 +2,65 @@
 
 ## Status
 
-**Planned (Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation, 2026-10-19), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
-**Current:** the project uses no database. The only data store is `backend/data/songs.csv`. `sqlalchemy==2.1.5` and `alembic==1.20.0` are pinned in `backend/requirements.txt` and installed in the backend virtual environment (2026-10-18), but nothing imports them yet.
+**Current:** Phase B1 built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, and Alembic migrations. The schema has one table, `listener_profiles` (see [Current Schema](#current-schema-b1)). The recommendation catalog is still `backend/data/songs.csv`; library tracks move into SQLite in B2. Nothing in the running CLI opens the database yet; the FastAPI startup (B8) will apply migrations and create the default listener.
 
-Persistence is built from Phase **B1** onward. This document records the approved concepts and the facts the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §5–§10 fixes. Exact tables, columns, types, and indexes are designed in the phase that creates them and recorded here at that time.
+This document records the approved concepts and the facts the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §5–§10 fixes. Exact tables, columns, types, and indexes are designed in the phase that creates them and recorded here at that time.
 
 ## Technology
 
-**Planned (D22, D23).**
+**Current (B1, D22, D23)** unless marked otherwise:
 
-- **SQLite** for Prototype 1 (local, single listener). PostgreSQL is Future.
-- **SQLAlchemy**, synchronous. No async SQLAlchemy without a measured need.
+- **SQLite** for Prototype 1 (local, single listener). Only SQLite URLs are accepted. PostgreSQL is Future.
+- **SQLAlchemy 2.1**, synchronous. No async SQLAlchemy without a measured need.
 - **Alembic** for versioned migrations. Never edit tables by hand.
-- UTC timestamps. SQLite foreign keys enabled. WAL mode only if verified.
+- UTC timestamps. SQLite foreign keys enforced on every connection. WAL mode on, verified by tests.
 - UUID identifiers. Never trust source filenames as internal storage names.
-- Audio files stay **outside** SQLite, in managed media.
+- Audio files stay **outside** SQLite, in managed media. *(Planned, B2.)*
 
-Location (spec §5): `backend/data/intentune.db`, with managed media in `backend/data/media/<track_uuid>.<extension>`. Both must be gitignored.
+Location (spec §5): `backend/data/intentune.db`, with managed media in `backend/data/media/<track_uuid>.<extension>`. `.gitignore` covers both, including the database's `-wal` and `-shm` files.
 
-**Current (2026-10-18):** `backend/.env.example` sets `DATABASE_URL=sqlite:///./data/intentune.db`; SQLite resolves it from the working directory, so the backend must run from `backend/` (or B1 must resolve the path explicitly). `.gitignore` ignores `backend/data/intentune.db*` and `backend/data/media/`. *Found in B0 and since fixed:* the template pointed at `backend/intentune.db`, and neither path was ignored.
+### Configuration and connections
+
+**Current (B1).** All of this lives in `backend/src/intentune/persistence/db.py`.
+
+- **Which database:** `DATABASE_URL` from the process environment. When it is unset or blank, the default is `backend/data/intentune.db`. A relative SQLite path is resolved against `backend/`, as the CSV adapter resolves `data/songs.csv`, so the location does not depend on the working directory. The value in `backend/.env.example`, `sqlite:///./data/intentune.db`, therefore means `backend/data/intentune.db` and equals the default. Nothing loads `backend/.env` yet.
+- **Transactions:** SQLAlchemy, not the `sqlite3` driver, emits `BEGIN`. On Python 3.11 the driver's legacy mode skips `BEGIN` before `SELECT` and DDL, so schema changes would autocommit and a rolled-back `CREATE TABLE` would survive. Taking over `BEGIN` is the approach SQLAlchemy documents for all Python versions. It makes DDL transactional, and a test proves the rollback.
+- **Foreign keys:** `PRAGMA foreign_keys = ON` on every connection (SQLite's default is off). Migrations turn them off, as SQLite's table-rebuild procedure requires, and run `PRAGMA foreign_key_check` before committing. Any violation fails the migration and rolls it back.
+- **Journal mode:** WAL for file databases, so readers do not block the single writer. This matters from B3, when the background worker writes while the app reads. SQLAlchemy notes that driver-independent `BEGIN` makes "database is locked" errors more likely; WAL, short transactions, and the driver's 5-second busy timeout are the mitigation.
+- **Sessions:** `create_session_factory(engine)` returns a `sessionmaker`; a unit of work opens one session per transaction.
+
+### Conventions for every table
+
+**Current (B1).** Defined in `backend/src/intentune/persistence/models.py`.
+
+- Primary keys are UUID strings in canonical lowercase hyphenated form, `String(36)`. The domain validates the form.
+- Timestamps use `UtcDateTime`. It stores the UTC wall-clock value (SQLite has no time-zone type), returns timezone-aware UTC datetimes, and rejects naive ones.
+- Constraint and index names come from one naming convention (`pk_<table>`, `fk_<table>_<column>_<referred table>`, `uq_<table>_<column>`, `ix_<column label>`, `ck_<table>_<name>`). Alembic's SQLite batch mode needs named constraints to alter or drop them later.
+- ORM classes carry a `Record` suffix (`ListenerProfileRecord`) and never leave the persistence package. Repositories convert them to and from domain models.
+
+## Current Schema (B1)
+
+**Current.** Created by migration `6ef3a3452ab7` (`backend/alembic/versions/20261019_6ef3a3452ab7_create_listener_profiles.py`).
+
+### `listener_profiles`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key (`pk_listener_profiles`). A generated UUID4. |
+| `is_default` | `BOOLEAN` | not null | Marks the default local listener. |
+| `created_at` | `DATETIME` | not null | UTC. |
+
+Index `uq_listener_profiles_is_default`: `UNIQUE (is_default) WHERE is_default = 1`. Any number of non-default rows may exist, but the database refuses a second default.
+
+The table holds no name, email, or other personal data. Taste preferences (`UserProfile`) are not stored yet; attaching long-term preferences to the listener is later work (B5/B10).
+
+Alembic also keeps its `alembic_version` table.
 
 ## Prototype 1 Concepts
 
-**Planned.** Concept names from spec §9:
+**Planned**, except `listener_profiles`, which exists (B1). Concept names from spec §9:
 
 ```text
 listener_profiles
@@ -46,7 +81,11 @@ playlist_items
 
 ### Listener profile (B1)
 
-No authentication in Prototype 1. One generated default local listener profile is created, instead of a hard-coded id such as `"user1"` (D01).
+**Current.** No authentication in Prototype 1. One generated default local listener profile is created, instead of a hard-coded id such as `"user1"` (D01).
+
+The application use case `ensure_default_listener()` (`backend/src/intentune/application/local_listener.py`) creates it, not a migration. On first run it generates a random UUID4 with the current UTC time and commits it. Later runs, including after a restart, return the same profile without writing. The partial unique index is the backstop. If two processes ever created the default at the same moment, the second would fail on the index instead of adding a duplicate, and a retry would return the first. Prototype 1 runs one backend process, so this is not expected.
+
+No entry point calls `ensure_default_listener()` yet. The B8 FastAPI startup will call it after applying migrations.
 
 ### Library sources and incremental scanning (B2)
 
@@ -149,13 +188,29 @@ Still open:
 - Whether the listener can delete history, feedback, or the whole library from inside the app, and what deletion removes.
 - Whether session history should keep any user-visible wording, given D33. See [risks and open questions](../planning/risks-and-open-questions.md).
 
+## Repository and Transaction Pattern
+
+**Current (B1).**
+
+- **Ports** (`backend/src/intentune/ports/`): `ListenerProfileRepository` (`get`, `get_default`, `add`) and `UnitOfWork`, which exposes the repositories plus `commit()` and `rollback()`. Application use cases depend only on these.
+- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository` and `SqlAlchemyUnitOfWork`.
+- A repository works inside the session it is given, never commits, and accepts and returns domain models only.
+- A unit of work is used as `with unit_of_work:`. Each block is one fresh session and transaction. `commit()` makes staged changes durable. Leaving the block always rolls back anything uncommitted, whether by an early return or an exception, then closes the session. A unit of work is not re-entrant, and it refuses use outside a `with` block. It can be reused for consecutive transactions.
+- Later phases add their repositories to the same unit of work, so one use case can change several tables atomically.
+
 ## Migration Strategy
 
-Use version-controlled Alembic migrations from the first table. A clean migration from an empty database must work and is tested in B1.
+**Current (B1).** Version-controlled Alembic migrations from the first table.
+
+- From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
+- From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.
+- `backend/alembic/env.py` uses the application's engine factory, so migrations get the same connection setup. The whole upgrade runs in one transaction (`transactional_ddl=True`), with batch mode (`render_as_batch=True`) for future SQLite `ALTER` operations.
+- Migration files are named `<YYYYMMDD>_<revision>_<slug>.py` and use plain SQLAlchemy types (`sa.DateTime`), not application types, so they never import application code.
+- Tested (`backend/tests/test_migrations.py`): a clean upgrade from an empty database, the resulting schema, a single head, a no-op re-upgrade, downgrade to base, a full round trip, a path with spaces and `%`, and migrations matching the ORM records exactly (Alembic `compare_metadata`; `alembic check` reports the same from the command line).
 
 ## Open Trade-offs
 
-- Normalized tables versus JSON columns for structured context and the rolling queue (B1/B4)
+- Normalized tables versus JSON columns for structured context and the rolling queue (B4)
 - How long raw playback events are kept as the history grows (B11)
 
 Resolved: SQLite for Prototype 1, PostgreSQL later (D22). Normalized `track_labels` for plural genres and moods (spec §9). Recommendation occurrences are stored (spec §9).

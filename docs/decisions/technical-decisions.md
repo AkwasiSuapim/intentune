@@ -178,6 +178,31 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 
 **Revisit When:** Prototype 1 meets its definition of done (spec §30), or evaluation in B11 shows a decision in the register does not hold.
 
+## TD-012: B1 SQLite Persistence Foundation
+
+**Status:** Accepted, awaiting B1 review
+
+**Date:** 2026-10-19
+
+**Context:** D22 fixes SQLite, synchronous SQLAlchemy, and Alembic, and the execution guide asks for UTC timestamps, enforced foreign keys, WAL only if verified, and one generated local listener. Several implementation details were left open, including one recorded in [risks and open questions](../planning/risks-and-open-questions.md): whether a relative database path resolves from the working directory or from the backend root.
+
+**Decision:**
+
+1. **Database location.** `DATABASE_URL` is read from the process environment. When it is unset, the default is `backend/data/intentune.db`. A relative SQLite path resolves against `backend/`, as the CSV adapter does, not against the working directory. Non-SQLite URLs are rejected. `backend/.env` is not loaded; that waits for a settings loader (B8) and would need a new dependency.
+2. **Transactions.** SQLAlchemy emits `BEGIN` (driver `isolation_level = None` plus a `begin` event), so SQLite DDL is transactional and SAVEPOINTs behave on Python 3.11. Python 3.12's `autocommit=False` connect argument is the later alternative.
+3. **Foreign keys and WAL.** Foreign keys are on for every connection. They are off during migrations, as SQLite's table-rebuild procedure requires, followed by `PRAGMA foreign_key_check` before commit. File databases use WAL, which tests verify.
+4. **Identifiers and time.** UUID strings in canonical form (`String(36)`) rather than SQLAlchemy's `Uuid` type, which stores 32 hex characters without hyphens on SQLite. UTC timestamps through a `UtcDateTime` type that rejects naive datetimes.
+5. **Layering.** `ListenerProfile` is a pure domain model. `ListenerProfileRepository` and `UnitOfWork` are ports. SQLAlchemy implementations live in `src/intentune/persistence/`, and ORM records never leave it.
+6. **Transaction pattern.** An explicit-commit unit of work. Repositories never commit. Leaving the `with` block rolls back anything uncommitted.
+7. **Default listener.** Created by the application use case `ensure_default_listener()`, not by a data migration. The database enforces at most one default with a partial unique index.
+8. **Schema discipline.** A constraint naming convention from the first table, Alembic batch mode, migrations that use plain SQLAlchemy types, and a test that migrations and ORM records agree.
+
+**Alternatives Considered:** Resolving the path from the working directory (SQLite's default; it ties correctness to where the process starts). Creating the listener inside the migration (every database would get one, but a deleted row would never come back, and tests that build schemas without migrating would lack it). A commit-on-success context manager (one less call, but a read-only or early-return path could write by accident). SQLAlchemy's `Uuid` type. Leaving the driver's legacy transaction mode (DDL would autocommit, so a failed migration could leave a half-applied schema). Async SQLAlchemy (no measured need).
+
+**Consequences:** The database location does not depend on the working directory. A failed migration rolls back completely. Domain, port, and application code stays free of SQLAlchemy, and a test enforces that. Driver-independent `BEGIN` makes "database is locked" errors more likely under concurrent writers; WAL, short transactions, and the 5-second busy timeout mitigate this until B3 measures real contention. Nothing calls `ensure_default_listener()` or applies migrations at startup until B8.
+
+**Revisit When:** the backend moves to Python 3.12 or later (decision 2); B3's worker shows lock contention (decision 3); B8 introduces settings loading (decision 1); PostgreSQL is adopted (D22).
+
 ## New Decision Template
 
 ```text

@@ -26,9 +26,9 @@
 
 **Planned (approved).** From the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §3:
 
-- Local single-listener identity; no production authentication
+- Local single-listener identity; no production authentication *(B1: the generated listener and its storage exist in the backend; nothing a listener runs reaches them yet)*
 - Managed local music library fed by multiple source folders
-- SQLite persistence with SQLAlchemy repositories and versioned migrations
+- SQLite persistence with SQLAlchemy repositories and versioned migrations *(B1: foundation built, holding the listener profile only)*
 - Background scanning and analysis, with progressive track readiness
 - Structured `ListeningContext` and listening sessions
 - Recommendation occurrences, feedback, and playback events

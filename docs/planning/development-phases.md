@@ -14,8 +14,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 
 | Phase | Scope | Status |
 |---|---|---|
-| **B0** Reconcile/freeze baseline | Inspect the repository and frontend, run tests, record the baseline, reconcile documentation. No feature code. | **Complete, awaiting review** (2026-10-18). Baseline: 131 backend tests pass. |
-| **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | Prerequisites done (2026-10-18); implementation not started |
+| **B0** Reconcile/freeze baseline | Inspect the repository and frontend, run tests, record the baseline, reconcile documentation. No feature code. | **Complete and reviewed** (2026-10-18). Baseline: 131 backend tests pass. |
+| **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | **Complete, awaiting review** (2026-10-19). 228 backend tests pass (131 baseline + 97 from B1, including the hardening pass). |
 | **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | Not started |
 | **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | Not started |
 | **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | Not started |
@@ -47,7 +47,28 @@ Done before any B1 feature code:
 - `backend/.env.example` now sets `DATABASE_URL=sqlite:///./data/intentune.db`.
 - SQLAlchemy 2.1.5, Alembic 1.20.0, and httpx 0.28.1 were installed, and every direct dependency in `backend/requirements.txt` is pinned to its verified version. `pip check` is clean, and the backend suite still passes (131).
 
-No persistence code, migration, or database file exists yet.
+At that point no persistence code, migration, or database file existed.
+
+### B1 record (2026-10-19)
+
+On branch `prototype-1`. Acceptance (execution guide §4):
+
+- **Clean migration works:** `alembic upgrade head` creates `listener_profiles` from an empty database. Tests cover a clean upgrade, downgrade, a round trip, a no-op re-upgrade, a single head, migrations matching the ORM records (`alembic check` agrees), and a failing migration rolling back completely.
+- **Repository smoke tests work:** the listener repository and unit of work run against migrated temporary SQLite files: commit, rollback on exit or exception, isolation, the one-default rule, and restart persistence.
+- **Existing suite remains green:** the 131 baseline tests pass unchanged, and no existing source module was modified.
+
+Built: synchronous SQLAlchemy engine configuration (foreign keys on, WAL, SQLAlchemy-emitted `BEGIN` for transactional DDL); `DATABASE_URL` resolution against `backend/`, with a default of `backend/data/intentune.db`; UTC timestamp type; ORM naming convention; `ListenerProfile` domain model; `ListenerProfileRepository` and `UnitOfWork` ports with SQLAlchemy implementations; the `ensure_default_listener()` use case, which generates one default local listener; Alembic setup and the first migration. No dependency was added. Decisions: [TD-012](../decisions/technical-decisions.md#td-012-b1-sqlite-persistence-foundation). Schema: [Database Design](../design/database-design.md#current-schema-b1).
+
+Not done in B1, by scope: nothing calls `ensure_default_listener()` or applies migrations at startup yet (B8), and `.env` is not loaded.
+
+### B1 hardening pass (2026-10-19)
+
+A test-only pass after the B1 architectural review. It changed `tests/test_architecture_boundaries.py` and `tests/test_migrations.py` only.
+
+- The architecture-boundary checks scan every layer recursively, including nested subpackages. They resolve relative imports to absolute module names before checking, so `from ..persistence import db` is caught like the absolute form.
+- A deliberately failing migration changes the schema, confirms the change, and raises. The tests verify that the failed migration rolls back both schema and data, and that a failed upgrade from an empty database leaves no partial schema, not even `alembic_version`. With B1's transaction handling removed, both tests fail.
+- Brittle assertions were replaced. Exact table-set equality became checks against the tables the ORM declares and before/after schema snapshots. Whole reflected dictionaries became lookups of stable fields. The raw DDL text check on the partial unique index became behavior: a second default is refused on both INSERT and UPDATE, and several non-defaults are allowed.
+- It found no production bug and required no production-code change.
 
 ## Frontend Phases
 

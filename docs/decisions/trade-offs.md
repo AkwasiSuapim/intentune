@@ -28,7 +28,7 @@ Clear modules need separate ownership, scaling, or deployment.
 
 ## CSV Catalog Before a Database
 
-**Status:** Current today; its revisit condition is now met. Prototype 1 stores a library, sessions, feedback, and playlists, so SQLite arrives in B1 (D22). The CSV adapter stays as a compatibility source.
+**Status:** Current for the recommendation catalog; its revisit condition is met. Prototype 1 stores a library, sessions, feedback, and playlists, so SQLite arrived in B1 (2026-10-19, D22), so far holding only the local listener profile. Library tracks move into it in B2. The CSV adapter stays as a compatibility source.
 
 ### Gain
 
@@ -169,8 +169,8 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 ### SQLite + SQLAlchemy + Alembic (D22)
 
 - **Gain:** no server to run; fits one listener on one device; versioned migrations from the start.
-- **Cost:** limited write concurrency, which matters because a background worker writes while the app reads; a later move to PostgreSQL needs a migration path.
-- **Mitigation:** short transactions, one worker initially, WAL mode only if verified.
+- **Cost:** limited write concurrency, which matters because a background worker writes while the app reads; a later move to PostgreSQL needs a migration path. B1's correct transaction handling (SQLAlchemy emits `BEGIN`, so DDL is transactional) makes "database is locked" errors somewhat more likely than the driver's legacy mode would (TD-012).
+- **Mitigation:** short transactions, one worker initially, the driver's 5-second busy timeout, and WAL mode, enabled for file databases in B1 and verified by tests. Real contention is measured when B3 adds the worker.
 
 ### In-process bounded worker instead of a task queue (D28)
 
