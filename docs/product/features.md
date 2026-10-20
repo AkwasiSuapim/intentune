@@ -29,7 +29,7 @@
 - Local single-listener identity; no production authentication *(B1: the generated listener and its storage exist in the backend; nothing a listener runs reaches them yet)*
 - Managed local music library fed by multiple source folders *(B2: built and tested in the backend, with import, dedupe, tags, and incremental rescans; nothing a listener runs reaches it until B8)*
 - SQLite persistence with SQLAlchemy repositories and versioned migrations *(B1: foundation built, holding the listener profile only)*
-- Background scanning and analysis, with progressive track readiness
+- Background scanning and analysis, with progressive track readiness *(B3: background analysis built and tested, with persisted jobs, one worker, recovery, and exact level and duration measurements. Scanning stays synchronous. Nothing a listener runs starts the worker until B8.)*
 - Structured `ListeningContext` and listening sessions
 - Recommendation occurrences, feedback, and playback events
 - Continuous recommendation flow with a rolling three-candidate queue

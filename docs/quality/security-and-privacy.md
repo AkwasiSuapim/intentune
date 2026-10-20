@@ -78,7 +78,7 @@ Logs may include:
 
 **Current (B2) for the first two points; Planned for the rest.**
 
-- Imported audio is copied into `backend/data/media/` under generated names and stays on the device. Copies are verified by SHA-256 and never shared. Embedded tags are read locally; nothing is looked up online.
+- Imported audio is copied into `backend/data/media/` under generated names and stays on the device. Copies are verified by SHA-256 and never shared. Embedded tags are read locally; nothing is looked up online. *(B3)* Audio analysis reads only Intentune's managed copies, locally, with libsndfile; no audio or fingerprint leaves the device. Analysis job error messages are built from exception types and OS error text, never from file paths, so they are safe to show in a future job listing (B8).
 - Source folder paths are stored in the local database for rescanning (`library_sources.path`, plus source-relative paths in `source_files`). Tracks keep only the original file *name* for display, never a path. Raw local paths are never exposed to the frontend or written into client-facing errors (execution guide §1). How the source listing identifies folders without paths is an [open question](../planning/risks-and-open-questions.md#open-backend-questions).
 - Listening history, feedback, and playlists stay in the local SQLite database.
 

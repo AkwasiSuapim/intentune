@@ -14,9 +14,11 @@ from typing import Optional, Type
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.intentune.persistence.repositories import (
+    SqlAlchemyAnalysisJobRepository,
     SqlAlchemyLibrarySourceRepository,
     SqlAlchemyListenerProfileRepository,
     SqlAlchemySourceFileRepository,
+    SqlAlchemyTrackFeatureRepository,
     SqlAlchemyTrackRepository,
 )
 
@@ -29,6 +31,8 @@ class SqlAlchemyUnitOfWork:
         self._library_sources: Optional[SqlAlchemyLibrarySourceRepository] = None
         self._source_files: Optional[SqlAlchemySourceFileRepository] = None
         self._tracks: Optional[SqlAlchemyTrackRepository] = None
+        self._analysis_jobs: Optional[SqlAlchemyAnalysisJobRepository] = None
+        self._track_features: Optional[SqlAlchemyTrackFeatureRepository] = None
 
     @property
     def listener_profiles(self) -> SqlAlchemyListenerProfileRepository:
@@ -46,6 +50,14 @@ class SqlAlchemyUnitOfWork:
     def tracks(self) -> SqlAlchemyTrackRepository:
         return self._active(self._tracks)
 
+    @property
+    def analysis_jobs(self) -> SqlAlchemyAnalysisJobRepository:
+        return self._active(self._analysis_jobs)
+
+    @property
+    def track_features(self) -> SqlAlchemyTrackFeatureRepository:
+        return self._active(self._track_features)
+
     def __enter__(self) -> "SqlAlchemyUnitOfWork":
         if self._session is not None:
             raise RuntimeError("The unit of work is already active; it is not re-entrant")
@@ -54,6 +66,8 @@ class SqlAlchemyUnitOfWork:
         self._library_sources = SqlAlchemyLibrarySourceRepository(self._session)
         self._source_files = SqlAlchemySourceFileRepository(self._session)
         self._tracks = SqlAlchemyTrackRepository(self._session)
+        self._analysis_jobs = SqlAlchemyAnalysisJobRepository(self._session)
+        self._track_features = SqlAlchemyTrackFeatureRepository(self._session)
         return self
 
     def __exit__(
@@ -68,6 +82,8 @@ class SqlAlchemyUnitOfWork:
         self._library_sources = None
         self._source_files = None
         self._tracks = None
+        self._analysis_jobs = None
+        self._track_features = None
         if session is None:
             return
         try:

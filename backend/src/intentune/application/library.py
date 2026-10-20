@@ -12,7 +12,9 @@ Import pipeline for one file, in the guide's order:
     -> copy into managed media as <track_uuid>.<extension>, verified by hash
     -> persist the track (IMPORTED: playable) and the source-file record
     -> extract basic tags from the managed copy
-    -> deeper analysis: B3. A track with no analysis_version is waiting for it.
+    -> deeper analysis: AnalysisService.enqueue_pending() (application/analysis.py)
+       queues every track the current analyzer has not analyzed, so this
+       module does not queue jobs itself.
 
 Incremental scan rules (spec §5):
 
@@ -328,7 +330,7 @@ class LibraryService:
                 return self._reject(source, discovered, previous, SourceFileStatus.FAILED, FailureReason.CHANGED_DURING_IMPORT)
             except OSError:
                 return self._reject(source, discovered, previous, SourceFileStatus.FAILED, FailureReason.IO_ERROR)
-            restored = existing.with_status(TrackStatus.IMPORTED, self._clock())
+            restored = existing.with_status(existing.available_status, self._clock())
             outcome = ImportOutcome.REPAIRED
 
         now = self._clock()

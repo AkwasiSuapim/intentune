@@ -124,7 +124,7 @@ A lightweight incremental scan runs at startup, and the listener can trigger **R
 - **Repair:** a track marked unavailable (`MISSING_MANAGED_FILE`) gets its managed copy back when a source file with the same content is scanned again.
 - **Folder safety:** the walker skips symbolic links, never enters a folder whose real location is outside the source (this includes Windows junctions), visits each folder once, and never scans the managed media folder.
 
-Not yet: nothing runs the startup scan; the B8 startup will call `rescan_library()`. Scans run synchronously when called; background scanning is B3 (D26). "Queue deeper analysis" is B3: a track with a null `analysis_version` is waiting for analysis.
+Not yet: nothing runs the startup scan; the B8 startup will call `rescan_library()`. Scans run synchronously when called. B3 implemented background *analysis* only, so running scans in the background (D26) is not assigned to a phase yet ([open question](../planning/risks-and-open-questions.md#open-backend-questions)). "Queue deeper analysis" is B3's `AnalysisService.enqueue_pending()`: a track with no `analysis_version` for the current analyzer gets a job.
 
 ### Background analysis (B3)
 
@@ -136,6 +136,37 @@ persisted job (IMPORT_TRACK, EXTRACT_TAGS, ANALYZE_AUDIO, REANALYZE_TRACK, RESCA
 ```
 
 Failure states are `UNSUPPORTED`, `FAILED`, and `MISSING_MANAGED_FILE`. One failure never crashes the library. Interrupted jobs resume after restart. Unavailable features stay `NULL`; nothing is invented (D21).
+
+**Current (B3, 2026-10-20).** `AnalysisService` (`backend/src/intentune/application/analysis.py`) runs on one `AnalysisWorker` thread (`application/analysis_worker.py`):
+
+```text
+worker start: recover interrupted jobs
+loop:
+   claim the oldest PENDING job        (one short transaction; attempts + 1; IMPORTED track -> ANALYZING)
+   analyze the managed copy            (no transaction held; the library stays readable and writable)
+   record the outcome                  (one short transaction: job, features, track status)
+   nothing pending?  queue every track the current analyzer has not analyzed
+   still nothing?    sleep until wake() or the idle interval (30 s by default)
+```
+
+Outcomes:
+
+| Situation | Job | Track |
+|---|---|---|
+| Analyzed | `SUCCEEDED`; features replaced with provenance | `READY`, `analysis_version = name@version` |
+| Format the analyzer cannot decode (M4A for libsndfile) | `SKIPPED`, `FORMAT_NOT_SUPPORTED` | unchanged (`IMPORTED`) |
+| Job queued for a different analyzer version | `SKIPPED`, `SUPERSEDED`; re-armed when its own version runs again | unchanged |
+| Undecodable content | `FAILED`, `DECODE_ERROR`; not retried for this version | unchanged |
+| Managed copy cannot be read (`OSError`) | back to `PENDING`, then `FAILED`, `IO_ERROR` once attempts are used up (3) | unchanged |
+| Managed copy missing | `FAILED`, `MISSING_MANAGED_FILE`; re-armed once a rescan repairs the track | `MISSING_MANAGED_FILE` |
+| Any other analyzer error | `FAILED`, `ANALYZER_ERROR`; logged; the worker carries on | unchanged |
+| Process stopped mid-job | found `RUNNING` at the next start: back to `PENDING`, or `FAILED`, `INTERRUPTED` after 3 attempts | `ANALYZING` returns to its previous state |
+
+Queuing is idempotent: one job per track and analyzer version, enforced by a unique constraint. A new analyzer version therefore re-analyzes the library. The analyzer's version includes the libsndfile version, so a decoder upgrade does the same. During reanalysis a track stays `READY` with its earlier features until the new ones replace them.
+
+The B3 analyzer measures decoded duration, sample peak, and RMS level only. These are exact signal measurements, not perceptual or semantic features; see [TD-014](../decisions/technical-decisions.md#td-014-b3-background-analysis).
+
+Not yet: nothing starts the worker; the B8 startup will. Scanning itself is not a background job (see the library section above).
 
 ### Listening session (B4, B5)
 

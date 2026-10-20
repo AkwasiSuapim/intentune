@@ -37,7 +37,8 @@ intentune/
 │   │   ├── script.py.mako
 │   │   └── versions/
 │   │       ├── 20261019_6ef3a3452ab7_create_listener_profiles.py
-│   │       └── 20261019_2540be2956b8_create_managed_library.py  (B2)
+│   │       ├── 20261019_2540be2956b8_create_managed_library.py  (B2)
+│   │       └── 20261020_7a42f0b9c8bf_create_background_analysis.py  (B3)
 │   ├── data/
 │   │   └── songs.csv                  (intentune.db and media/ appear here when used; gitignored)
 │   ├── src/
@@ -53,25 +54,30 @@ intentune/
 │   │       │   ├── ranking.py
 │   │       │   ├── listener.py        (B1)
 │   │       │   ├── library.py         (B2)
-│   │       │   └── validation.py      (B2: shared validators)
+│   │       │   ├── validation.py      (B2: shared validators)
+│   │       │   └── analysis.py        (B3: jobs, features, analyzer identity)
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   ├── recommendation_service.py
 │   │       │   ├── local_listener.py  (B1)
-│   │       │   └── library.py         (B2: LibraryService)
+│   │       │   ├── library.py         (B2: LibraryService)
+│   │       │   ├── analysis.py        (B3: AnalysisService)
+│   │       │   └── analysis_worker.py (B3: AnalysisWorker thread)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
 │   │       │   ├── listener_profiles.py  (B1)
 │   │       │   ├── unit_of_work.py    (B1)
 │   │       │   ├── library.py         (B2: library repositories)
-│   │       │   └── library_files.py   (B2: folders, inspector, media)
+│   │       │   ├── library_files.py   (B2: folders, inspector, media)
+│   │       │   └── analysis.py        (B3: analyzer, job and feature repositories)
 │   │       ├── adapters/
 │   │       │   ├── __init__.py
 │   │       │   ├── csv_catalog.py
 │   │       │   ├── local_folders.py   (B2)
 │   │       │   ├── managed_media.py   (B2)
-│   │       │   └── mutagen_audio.py   (B2)
+│   │       │   ├── mutagen_audio.py   (B2)
+│   │       │   └── signal_levels.py   (B3: SignalLevelAnalyzer)
 │   │       └── persistence/           (B1)
 │   │           ├── __init__.py
 │   │           ├── db.py
@@ -100,7 +106,12 @@ intentune/
 │       ├── test_managed_media.py      (B2)
 │       ├── test_local_folders.py      (B2)
 │       ├── test_library_repositories.py  (B2)
-│       └── test_library_service.py    (B2)
+│       ├── test_library_service.py    (B2)
+│       ├── test_analysis_domain.py    (B3)
+│       ├── test_signal_levels.py      (B3)
+│       ├── test_analysis_repositories.py  (B3)
+│       ├── test_analysis_service.py   (B3)
+│       └── test_analysis_worker.py    (B3)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -125,6 +136,15 @@ B2 added the managed library:
 - **Application:** `application/library.py` holds `LibraryService`.
 - **File adapters:** `adapters/local_folders.py`, `adapters/managed_media.py`, and `adapters/mutagen_audio.py`.
 - **Persistence:** the library repositories and records joined `persistence/`, with a second migration.
+
+B3 added background analysis:
+- **Domain:** `domain/analysis.py` holds jobs, features, analyzer identity, and their rules.
+- **Ports:** `ports/analysis.py` holds the `AudioAnalyzer` port and the job and feature repositories.
+- **Application:** `application/analysis.py` holds `AnalysisService`, and `application/analysis_worker.py` holds the single worker thread.
+- **Adapter:** `adapters/signal_levels.py` holds the soundfile and numpy analyzer.
+- **Persistence:** analysis repositories and records joined `persistence/`, with a third migration.
+
+The worker lives in `application/`: it only coordinates `AnalysisService` with a thread and two events, and does no I/O itself.
 
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 
@@ -228,10 +248,10 @@ Interfaces that describe what the application needs from storage and external ca
 ### `backend/src/intentune/adapters/` and `backend/src/intentune/persistence/`
 
 Concrete implementations.
-- **`adapters/`** holds the CSV catalog and, since B2, the source-folder walker, managed media, and the mutagen audio inspector. Signal analyzers arrive in B3.
+- **`adapters/`** holds the CSV catalog; since B2, the source-folder walker, managed media, and the mutagen audio inspector; and since B3, the signal-level analyzer.
 - **`persistence/`** (B1) holds the SQLite/SQLAlchemy engine setup, ORM records, repositories, and unit of work.
 
-Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy or Alembic. Only `adapters/` imports mutagen or does file I/O.
+Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy or Alembic. Only `adapters/` imports mutagen, soundfile, or numpy, or does file I/O.
 
 ### `backend/alembic/`
 

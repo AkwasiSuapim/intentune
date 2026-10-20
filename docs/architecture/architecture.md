@@ -24,7 +24,7 @@ Microservices would add network calls, service discovery, distributed logging, a
 
 ## Current Components
 
-**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector. It also has, since B1, a SQLite persistence package. It has no API boundary. The CLI flow below does not touch the database or the library; those paths are used by tests only until the B8 startup wires them in. The frontend is a separate React application running on a mock service; it does not call the backend.
+**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector, plus, since B3 (2026-10-20), a signal-level audio analyzer. It also has, since B1, a SQLite persistence package. Since B3 it has a background analysis worker, a single in-process thread. It has no API boundary. The CLI flow below does not touch the database, the library, or the worker; those paths are used by tests only until the B8 startup wires them in. The frontend is a separate React application running on a mock service; it does not call the backend.
 
 ```text
 CLI (src/main.py)
@@ -57,9 +57,13 @@ UnitOfWork and repository ports     + SourceFolders, AudioInspector, ManagedMedi
       v                                   v
 SqlAlchemy repositories             LocalSourceFolders   MutagenAudioInspector   LocalManagedMedia
 (persistence)                       (source folders)     (mutagen)               (backend/data/media/)
-      |
-      v
-SQLite: backend/data/intentune.db (schema managed by Alembic)
+      |                                                                                 ^
+      v                                                                                 | reads managed copies
+SQLite: backend/data/intentune.db (schema managed by Alembic)                           |
+      ^                                                                                 |
+      | jobs, features, track status                                                    |
+AnalysisWorker (B3, one thread) -> AnalysisService -> AudioAnalyzer port -> SignalLevelAnalyzer (soundfile, numpy)
+                                   (no caller starts the worker yet)
 
 
 React frontend (frontend/) --> SessionService interface --> mock implementation
@@ -147,7 +151,12 @@ Validated recommendation request
 
 Contains business rules that do not depend on HTTP, databases, the filesystem, AI providers, or music providers.
 
-**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring. `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `src/intentune/domain/library.py` (B2) holds the managed-library rules. It defines the entities `LibrarySource`, `SourceFile`, `Track`, and `TrackLabel`, and the values `DiscoveredFile`, `EmbeddedTags`, `AudioProbe`, and `ScanReport`. It sets the allowlisted `AudioFormat`s and the readiness states, a relative-path rule that cannot escape a source folder, and how tag values become year and genre labels. `src/intentune/domain/validation.py` (B2) holds validators shared by the listener and library models. `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring. `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `src/intentune/domain/library.py` (B2) holds the managed-library rules. It defines the entities `LibrarySource`, `SourceFile`, `Track`, and `TrackLabel`, and the values `DiscoveredFile`, `EmbeddedTags`, `AudioProbe`, and `ScanReport`. It sets the allowlisted `AudioFormat`s and the readiness states, a relative-path rule that cannot escape a source folder, and how tag values become year and genre labels. `src/intentune/domain/validation.py` (B2) holds validators shared by the listener and library models. `src/intentune/domain/analysis.py` (B3) holds:
+- the job model and its transitions (`AnalysisJob`): succeeded, skipped, failed, retry later, after interruption, requeued;
+- `AnalyzerIdentity` (`name@version`), `AnalysisResult`, and `TrackFeature`, which carries provenance;
+- the `needs_analysis` rule.
+
+`Track` gained the `ANALYZING` and `READY` states, `available_status`, and `with_analysis()`. `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
@@ -163,6 +172,19 @@ Contains business rules that do not depend on HTTP, databases, the filesystem, A
 Coordinates complete use cases through ports.
 
 **Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept, diversification, or session awareness. `src/intentune/application/local_listener.py` (B1) implements `ensure_default_listener(unit_of_work)`. It returns the default local listener, generating and committing it on first run, and depends only on the `UnitOfWork` port. `src/intentune/application/library.py` (B2) implements `LibraryService` with the guide's B2 capabilities: register and list sources, scan a source and rescan all, import one discovered file, list and get tracks, and mark a track unavailable. It runs the validate → hash → dedupe → copy → persist → tag pipeline and the incremental-scan rules through ports only (see [System Workflow](system-workflow.md#library-import-and-scanning-b2)).
+
+`src/intentune/application/analysis.py` (B3) implements `AnalysisService`:
+- `enqueue_pending()`: idempotent queuing of every track the current analyzer has not analyzed;
+- `recover_interrupted()`;
+- `process_next()` and `run_until_idle()`;
+- `list_jobs()` and `features_for()`.
+
+It owns retries, skips, and recording outcomes; the analyzer port only measures. `src/intentune/application/analysis_worker.py` (B3) implements `AnalysisWorker`:
+- one daemon thread with `start()`, `wake()`, and `stop()`;
+- it recovers interrupted jobs on start, then processes one job at a time;
+- it queues new work when idle and survives errors (D28).
+
+See [System Workflow](system-workflow.md#background-analysis-b3).
 
 **Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
 
@@ -193,6 +215,8 @@ Defines interfaces for data access and external capabilities.
 
 **Current (B2):** `src/intentune/ports/library.py` defines `LibrarySourceRepository`, `SourceFileRepository`, and `TrackRepository`, all exposed by the same `UnitOfWork`. `src/intentune/ports/library_files.py` defines the file ports: `SourceFolders` (resolve, list, hash, and locate files in a source folder), `AudioInspector` (confirm a format by content and read tags), and `ManagedMedia` (store a verified copy, locate, check, and discard it). The library use cases touch files only through these.
 
+**Current (B3):** `src/intentune/ports/analysis.py` defines `AudioAnalyzer`. It exposes `identity`, `supports(format)`, and `analyze(path, format)`, and measures only. It is kept separate from the job system. The same module defines `AnalysisJobRepository`, including the atomic `claim_next()`, and `TrackFeatureRepository`; both are exposed by `UnitOfWork`. A unit of work is not thread-safe; each thread uses its own.
+
 **Planned (Prototype 1):** `SessionRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4), each added to the same unit of work.
 
 **Future:** an `IntentParser` port for LLM intent parsing (D30), and an external provider port (D39).
@@ -212,10 +236,18 @@ Implements ports using specific technology.
 - `adapters/managed_media.py` (`LocalManagedMedia`) writes atomic, hash-verified copies into `backend/data/media/<track_uuid>.<extension>`.
 - `adapters/mutagen_audio.py` (`MutagenAudioInspector`) validates files by content and maps ID3, Vorbis-comment, and MP4 tags. It is the only module that imports mutagen.
 
+**Current (B3):**
+
+- `adapters/signal_levels.py` (`SignalLevelAnalyzer`) decodes WAV, FLAC, Ogg Vorbis, Opus, and MP3 through soundfile (libsndfile 1.2.2) in fixed-size blocks.
+- It measures decoded duration, sample peak, and RMS level with numpy. It is the only module that imports soundfile or numpy.
+- Its version, `1+libsndfile-1.2.2`, includes the decoder version, so a decoder upgrade triggers reanalysis.
+- `persistence/` gained `SqlAlchemyAnalysisJobRepository` and `SqlAlchemyTrackFeatureRepository`, with migration `7a42f0b9c8bf`.
+- `librosa` was evaluated and not added; see [TD-014](../decisions/technical-decisions.md#td-014-b3-background-analysis).
+
 **Planned (Prototype 1):**
 
-- Further SQLAlchemy repositories and migrations for analysis jobs, sessions, feedback, and playlists (B3–B7)
-- Deterministic signal analysis (`librosa`, only if needed) (B3)
+- Further SQLAlchemy repositories and migrations for sessions, feedback, and playlists (B4–B7)
+- Estimated features (tempo, key, loudness in LUFS): a later analyzer version, once an evaluation set exists to measure their accuracy (TD-014)
 - CSV compatibility (the existing adapter, kept)
 
 **Future:** PostgreSQL repositories, an AI provider client, a YouTube Data API client, Spotify (D22, D39).

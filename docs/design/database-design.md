@@ -2,11 +2,12 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, 2026-10-20), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
 - **B2** added the managed library: `library_sources`, `source_files`, `tracks`, and `track_labels` (see [Current Schema (B2)](#current-schema-b2)).
+- **B3** added background analysis: `analysis_jobs` and `track_features`, and the `ANALYZING` and `READY` track states (see [Current Schema (B3)](#current-schema-b3)).
 - The recommendation catalog used by the CLI is still `backend/data/songs.csv`. Recommending from library tracks is B5.
 - Nothing in the running CLI opens the database yet. The FastAPI startup (B8) will apply migrations, create the default listener, and run the startup scan.
 
@@ -128,9 +129,57 @@ CHECK constraints tie the status to the other columns. An `IMPORTED` row has a `
 
 Unique `(track_id, kind, value, source)`. Partial unique index `uq_track_labels_primary` on `(track_id, kind) WHERE is_primary = 1`: at most one primary genre and one primary mood per track.
 
+## Current Schema (B3)
+
+**Current.** Created by migration `7a42f0b9c8bf` (`backend/alembic/versions/20261020_7a42f0b9c8bf_create_background_analysis.py`), which revises `2540be2956b8`.
+
+### `tracks` (changed)
+
+`status` may now also be `ANALYZING` (first analysis running) or `READY` (analyzed). `analysis_version` holds the analyzer key `name@version` once analyzed. SQLite cannot alter a CHECK constraint, so the migration rebuilds `tracks` in batch mode. The test suite checks that the rebuild keeps every other constraint and every row. Downgrading returns `ANALYZING` and `READY` tracks to `IMPORTED` and clears `analysis_version`.
+
+### `analysis_jobs`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `track_id` | `VARCHAR(36)` | not null | Foreign key to `tracks`. |
+| `kind` | `VARCHAR(16)` | not null | `ANALYZE_AUDIO` (the only kind in B3). |
+| `analyzer` | `VARCHAR(128)` | not null | Analyzer key, `name@version`. |
+| `status` | `VARCHAR(16)` | not null | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, or `SKIPPED`. |
+| `attempts` | `INTEGER` | not null | `>= 0`; counted when the job is claimed. |
+| `failure_reason` | `VARCHAR(32)` | null | Required for `FAILED` and `SKIPPED`; forbidden for `SUCCEEDED`; kept on a `PENDING` job to show why it is being retried. |
+| `error_message` | `TEXT` | null | Short, built from exception types and OS error text only; never contains a file path. |
+| `created_at`, `updated_at` | `DATETIME` | not null | |
+| `started_at`, `finished_at` | `DATETIME` | null | Last claim and last finish. |
+
+- **Uniqueness:** `(track_id, kind, analyzer)`. One job per track and analyzer version makes queuing idempotent at the database level.
+- **Index:** `ix_analysis_jobs_status_created_at` serves "oldest pending job first".
+- **Reasons:**
+  - `SKIPPED` jobs: `FORMAT_NOT_SUPPORTED` or `SUPERSEDED`;
+  - `FAILED` jobs: `DECODE_ERROR`, `IO_ERROR`, `MISSING_MANAGED_FILE`, `INTERRUPTED`, or `ANALYZER_ERROR`.
+
+### `track_features`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `track_id` | `VARCHAR(36)` | not null | Foreign key to `tracks`. Unique with `name`: one current value per feature. |
+| `name` | `VARCHAR(64)` | not null | `decoded_duration_seconds`, `sample_peak`, or `rms_level`. No other name is accepted; `energy`, `danceability`, and `tempo_bpm` are refused by the CHECK. |
+| `value` | `FLOAT` | not null | Finite and non-negative (validated by the domain). Levels are linear fractions of digital full scale. |
+| `analyzer_name`, `analyzer_version` | `VARCHAR(64)` | not null | Provenance (D20). |
+| `confidence` | `FLOAT` | null | 0–1 for estimates; null for exact measurements, which is every B3 feature. |
+| `computed_at` | `DATETIME` | not null | |
+
+Reanalysis replaces one analyzer's features for a track in the same transaction that marks the job `SUCCEEDED`. A failed reanalysis leaves the earlier features in place.
+
 ## Prototype 1 Concepts
 
-**Planned**, except `listener_profiles` (B1) and `library_sources`, `tracks`, and `track_labels` (B2), which exist. B2 also added `source_files`, which is not in this list. Concept names from spec §9:
+**Planned**, except these, which exist:
+- `listener_profiles` (B1);
+- `library_sources`, `tracks`, and `track_labels` (B2);
+- `analysis_jobs` and `track_features` (B3).
+
+B2 also added `source_files`, which is not in this list. Concept names from spec §9:
 
 ```text
 listener_profiles
@@ -164,13 +213,17 @@ No entry point calls `ensure_default_listener()` yet. The B8 FastAPI startup wil
 - file size and modification time, in `source_files`;
 - SHA-256, in `source_files.sha256` and `tracks.sha256`;
 - import status, in `source_files.status`;
-- analysis version, in `tracks.analysis_version`, which is null until B3.
+- analysis version, in `tracks.analysis_version`, set by B3's analysis once a track is analyzed (null before).
 
 SHA-256 identifies exact duplicates (D24). The scan rules are in [System Workflow](../architecture/system-workflow.md#library-import-and-scanning-b2).
 
 ### Tracks, features, and labels (B2, B3)
 
-**Current (B2):** `tracks` and `track_labels`, with title, artist, album, year, declared genre, duration, format, and provenance-tagged genre labels. **Planned (B3):** `track_features` and analyzed values. Artwork is not extracted yet (an [open question](../planning/risks-and-open-questions.md#open-backend-questions)).
+**Current (B2):** `tracks` and `track_labels`, with title, artist, album, year, declared genre, duration, format, and provenance-tagged genre labels.
+
+**Current (B3):** `track_features` holds three exact signal measurements: decoded duration, sample peak, and RMS level.
+
+**Not yet produced:** BPM, key, mode, loudness in LUFS, and every semantic feature in the desired list above. They stay absent (D21); see [TD-014](../decisions/technical-decisions.md#td-014-b3-background-analysis). Artwork is not extracted yet (an [open question](../planning/risks-and-open-questions.md#open-backend-questions)).
 
 Desired track data (spec §6):
 
@@ -198,13 +251,23 @@ Readiness states (spec §7): `DISCOVERED`, `IMPORTED`, `ANALYZING`, `READY`, and
 **Current (B2):** the states are split between files and tracks, because a file that fails validation never becomes a track.
 - **Source files:** `UNSUPPORTED` and `FAILED` (plus `IMPORTED` and `MISSING`).
 - **Tracks:** `IMPORTED` and `MISSING_MANAGED_FILE`.
-- **Not written yet:** `DISCOVERED`, since B2 records a file only once it has been processed, and `ANALYZING` and `READY`, which arrive with B3. B3 extends the CHECK constraints in a migration.
+- **Not written yet:** `DISCOVERED`, since B2 records a file only once it has been processed.
+- **Since B3:** tracks also take `ANALYZING` and `READY`.
+  - `IMPORTED → ANALYZING` when its first analysis is claimed, then `READY` on success, or back to `IMPORTED` on failure or skip.
+  - A `READY` track stays `READY` during reanalysis.
+  - Every track state except `MISSING_MANAGED_FILE` is playable.
 
 The managed media path is internal. It is never returned to the frontend.
 
 ### Analysis jobs (B3)
 
-Job state is persisted so interrupted work resumes after restart (D28). Suggested job kinds: `IMPORT_TRACK`, `EXTRACT_TAGS`, `ANALYZE_AUDIO`, `REANALYZE_TRACK`, `RESCAN_SOURCE`. Jobs are idempotent and transactions stay short.
+**Current.** Job state is persisted, so interrupted work resumes after restart (D28). The spec suggests these job kinds: `IMPORT_TRACK`, `EXTRACT_TAGS`, `ANALYZE_AUDIO`, `REANALYZE_TRACK`, `RESCAN_SOURCE`.
+- **Implemented in B3:** only `ANALYZE_AUDIO`. Reanalysis is an `ANALYZE_AUDIO` job for a new analyzer version, so `REANALYZE_TRACK` is not needed.
+- **Not implemented:** import, tag extraction, and rescans stay synchronous `LibraryService` calls, because B3 is analysis only.
+- **Idempotency:** jobs are unique per track and analyzer version.
+- **Short transactions:** analysis runs between two of them, claim and finish.
+
+Lifecycle, retries, and recovery: [System Workflow](../architecture/system-workflow.md#background-analysis-b3).
 
 ### Listening sessions (B4)
 
@@ -274,22 +337,25 @@ Still open:
 
 ## Repository and Transaction Pattern
 
-**Current (B1; library repositories added in B2).**
+**Current (B1; library repositories added in B2; analysis repositories in B3).**
 
 - **Ports** (`backend/src/intentune/ports/`):
   - `ListenerProfileRepository` (`get`, `get_default`, `add`);
   - *(B2, `ports/library.py`)* `LibrarySourceRepository` (`get`, `get_by_path`, `list_all`, `add`, `save`), `SourceFileRepository` (`list_for_source`, `add`, `save`), and `TrackRepository` (`get`, `get_by_sha256`, `list_all`, `ids_with_status`, `add`, `save`; a track's labels are saved with it);
+  - *(B3, `ports/analysis.py`)* `AnalysisJobRepository` (`get`, `list_all`, `list_for_analyzer`, `add`, `save`, `claim_next`) and `TrackFeatureRepository` (`list_for_track`, `replace_for_analyzer`).
+
+    `claim_next` is a single `UPDATE … WHERE id = (oldest pending) AND status = 'PENDING' RETURNING id`, so two workers can never claim the same job. It needs SQLite 3.35 or later; this machine runs 3.45.1.
   - `UnitOfWork`, which exposes all of these plus `commit()` and `rollback()`.
 
   Application use cases depend only on these ports.
-- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, and `SqlAlchemyUnitOfWork`.
+- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, `SqlAlchemyAnalysisJobRepository`, `SqlAlchemyTrackFeatureRepository`, and `SqlAlchemyUnitOfWork`. A unit of work is not thread-safe; the analysis worker uses its own.
 - A repository works inside the session it is given, never commits, and accepts and returns domain models only.
 - A unit of work is used as `with unit_of_work:`. Each block is one fresh session and transaction. `commit()` makes staged changes durable. Leaving the block always rolls back anything uncommitted, whether by an early return or an exception, then closes the session. A unit of work is not re-entrant, and it refuses use outside a `with` block. It can be reused for consecutive transactions.
 - Later phases add their repositories to the same unit of work, so one use case can change several tables atomically.
 
 ## Migration Strategy
 
-**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2).
+**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3). That rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
 
 - From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
 - From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.

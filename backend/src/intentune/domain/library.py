@@ -18,8 +18,10 @@ States, from spec §7:
   change while the file stays the same), FAILED (a read, write, or consistency
   problem worth retrying on the next scan), or MISSING (no longer at the source).
 - A **track** is one distinct piece of content in managed media. B2 creates
-  tracks as IMPORTED: playable, with basic metadata. MISSING_MANAGED_FILE means
-  its managed copy is gone. ANALYZING and READY arrive with analysis in B3.
+  tracks as IMPORTED: playable, with basic metadata. B3's background analysis
+  moves it to ANALYZING while its first analysis runs and to READY once
+  analyzed (analysis_version names the analyzer). MISSING_MANAGED_FILE means
+  its managed copy is gone. Every state except MISSING_MANAGED_FILE is playable.
 
 Nothing here invents a value: a tag that is absent stays None (D21).
 """
@@ -101,6 +103,8 @@ class FailureReason(str, Enum):
 
 class TrackStatus(str, Enum):
     IMPORTED = "IMPORTED"
+    ANALYZING = "ANALYZING"
+    READY = "READY"
     MISSING_MANAGED_FILE = "MISSING_MANAGED_FILE"
 
 
@@ -476,6 +480,16 @@ class Track:
 
     def with_status(self, status: TrackStatus, now: datetime) -> "Track":
         return replace(self, status=status, updated_at=now)
+
+    @property
+    def available_status(self) -> TrackStatus:
+        """The status this track has whenever its managed copy is present: READY if analyzed, else IMPORTED."""
+        return TrackStatus.READY if self.analysis_version is not None else TrackStatus.IMPORTED
+
+    def with_analysis(self, analysis_version: str, now: datetime) -> "Track":
+        """This track analyzed by analysis_version. A track whose managed copy is missing stays MISSING_MANAGED_FILE."""
+        status = self.status if self.status is TrackStatus.MISSING_MANAGED_FILE else TrackStatus.READY
+        return replace(self, status=status, analysis_version=analysis_version, updated_at=now)
 
 
 def new_track_id() -> str:

@@ -38,6 +38,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
+from src.intentune.domain.analysis import AnalysisFailureReason, AnalysisJobKind, AnalysisJobStatus, FeatureName
 from src.intentune.domain.library import AudioFormat, FailureReason, LabelKind, SourceFileStatus, SourceStatus, TrackStatus
 
 NAMING_CONVENTION = {
@@ -204,3 +205,55 @@ class SourceFileRecord(Base):
     track_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("tracks.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+# --- Background analysis (B3) -----------------------------------------------------
+
+
+class AnalysisJobRecord(Base):
+    """A persisted background job (D28). At most one job per track, kind, and analyzer version."""
+
+    __tablename__ = "analysis_jobs"
+    __table_args__ = (
+        CheckConstraint(_one_of("kind", AnalysisJobKind), name="kind"),
+        CheckConstraint(_one_of("status", AnalysisJobStatus), name="status"),
+        CheckConstraint(_one_of("failure_reason", AnalysisFailureReason, nullable=True), name="failure_reason"),
+        CheckConstraint("attempts >= 0", name="attempts"),
+        CheckConstraint("status <> 'SUCCEEDED' OR failure_reason IS NULL", name="succeeded_has_no_reason"),
+        CheckConstraint("status NOT IN ('FAILED', 'SKIPPED') OR failure_reason IS NOT NULL", name="finished_has_reason"),
+        UniqueConstraint("track_id", "kind", "analyzer", name="uq_analysis_jobs_track_kind_analyzer"),
+        Index("ix_analysis_jobs_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    track_id: Mapped[str] = mapped_column(String(36), ForeignKey("tracks.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    analyzer: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    failure_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
+
+
+class TrackFeatureRecord(Base):
+    """One measured feature of one track, with provenance (D20). One current value per feature per track."""
+
+    __tablename__ = "track_features"
+    __table_args__ = (
+        CheckConstraint(_one_of("name", FeatureName), name="name"),
+        CheckConstraint("confidence IS NULL OR confidence BETWEEN 0 AND 1", name="confidence"),
+        UniqueConstraint("track_id", "name", name="uq_track_features_track_id_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    track_id: Mapped[str] = mapped_column(String(36), ForeignKey("tracks.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    analyzer_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    analyzer_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)

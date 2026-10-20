@@ -16,8 +16,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 |---|---|---|
 | **B0** Reconcile/freeze baseline | Inspect the repository and frontend, run tests, record the baseline, reconcile documentation. No feature code. | **Complete and reviewed** (2026-10-18). Baseline: 131 backend tests pass. |
 | **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | **Complete and committed** (2026-10-19, `f000bb2`). 228 backend tests pass (131 baseline + 97 from B1, including the hardening pass). |
-| **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | **Complete, awaiting review** (2026-10-19). 404 backend tests pass and 1 is skipped (405 collected; B2 adds 177). |
-| **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | Not started |
+| **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | **Complete and committed** (2026-10-19, `079c6f4`). 404 backend tests pass and 1 is skipped (405 collected; B2 adds 177). |
+| **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | **Complete, awaiting review** (2026-10-20). 518 backend tests pass and 1 is skipped (519 collected; B3 adds 114). |
 | **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | Not started |
 | **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | Not started |
 | **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | Not started |
@@ -95,8 +95,38 @@ Also built and tested:
 
 Not done in B2, by scope:
 - No startup scan or API route calls the library (B8).
-- Scans run synchronously (background scanning and analysis are B3); "queue deeper analysis" is represented by a null `analysis_version`.
+- Scans run synchronously; "queue deeper analysis" is represented by a null `analysis_version`. *(Updated in B3: B3 built background analysis, including that queue, but not background scanning. D26's background scanning is not assigned to a phase yet.)*
 - Artwork is not extracted; how it would be served is an open question.
+
+### B3 record (2026-10-20)
+
+On branch `prototype-1`, on top of `079c6f4`. B3 was scoped to background analysis only. The guide's required tests (execution guide §6), each in `backend/tests/test_analysis_service.py` or `test_analysis_worker.py`:
+
+- **Ready tracks are usable during analysis.** While a job runs, the track can be read and listed, and a rescan (a write) succeeds, because no transaction is held during analysis. A READY track being re-analyzed stays READY with its earlier features.
+- **A failed track does not kill the worker.** An analyzer error on one track is recorded as `ANALYZER_ERROR`, and the other tracks are analyzed. The worker thread also survives errors outside any job, such as a locked database.
+- **Interrupted jobs recover.** A job left RUNNING returns to PENDING with its attempt counted, and fails as `INTERRUPTED` after 3 attempts. Manually verified with a real hard process exit.
+- **Reanalysis works after an analyzer version change.** A new version queues every track, replaces features and `analysis_version`, and keeps the earlier jobs as history. Jobs queued for another version are superseded, and re-armed when their own version runs.
+
+Also built and tested:
+- idempotent queuing, enforced by a unique constraint;
+- the atomic single-statement claim;
+- retry of read errors, and no retry of decode errors;
+- skipping formats the analyzer cannot decode (M4A);
+- handling of a missing managed copy, re-queued after repair;
+- no file paths in stored error messages;
+- the worker's start, wake, stop, and restart.
+
+**Measurements.** The analyzer measures decoded duration, sample peak, and RMS level. These are exact signal measurements, verified against known tones and against a whole-file computation on the same decoded samples.
+
+**Dependencies.** `soundfile==0.14.0` was added and `numpy==2.4.6` pinned. `librosa` was evaluated in a throwaway venv and not added.
+
+Decisions: [TD-014](../decisions/technical-decisions.md#td-014-b3-background-analysis). Schema: [Database Design](../design/database-design.md#current-schema-b3). Workflow: [System Workflow](../architecture/system-workflow.md#background-analysis-b3).
+
+Not done in B3, by scope:
+- Nothing starts the worker (B8).
+- No tempo, key, loudness in LUFS, or semantic features: estimates need an evaluation set (B11).
+- No background scanning; it is not assigned to a phase.
+- No `IMPORT_TRACK`, `EXTRACT_TAGS`, or `RESCAN_SOURCE` job kinds.
 
 ## Frontend Phases
 

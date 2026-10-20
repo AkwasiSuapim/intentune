@@ -3,7 +3,8 @@
 The domain is pure (spec §4), and the application layer reaches storage only
 through ports. Only src/intentune/persistence/ (and backend/alembic/) may
 import SQLAlchemy or Alembic, only src/intentune/adapters/ may import mutagen,
-and file I/O (os, shutil, pathlib, ...) happens only in adapters.
+soundfile, or numpy, and file I/O (os, shutil, pathlib, ...) happens only in
+adapters.
 
 Every .py file under a layer is checked, including files in subpackages, and
 relative imports are resolved to absolute module names before checking, so
@@ -18,7 +19,7 @@ import pytest
 
 _BACKEND = Path(__file__).resolve().parents[1]
 _INNER_LAYERS = ("domain", "ports", "application")
-_FRAMEWORKS = {"sqlalchemy", "alembic", "sqlite3", "fastapi", "starlette", "pydantic", "mutagen"}
+_FRAMEWORKS = {"sqlalchemy", "alembic", "sqlite3", "fastapi", "starlette", "pydantic", "mutagen", "soundfile", "numpy"}
 _FILESYSTEM = {"os", "shutil", "pathlib", "glob", "io", "tempfile", "stat"}
 _OUTER_PACKAGES = ("src.intentune.persistence", "src.intentune.adapters")
 

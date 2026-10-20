@@ -59,6 +59,34 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 177 tests: six new files and three new architecture checks (mutagen and filesystem modules forbidden in inner layers). The suite is 404 passed and 1 skipped (a symbolic-link test this machine cannot run); the 228 earlier tests are unchanged.
 - TD-013 records the B2 implementation decisions.
 
+### Added — Phase B3: Background analysis (2026-10-20)
+
+- `src/intentune/domain/analysis.py`:
+  - **Jobs:** analysis jobs and their transitions; retry, interruption, and re-arming rules.
+  - **Identity and features:** analyzer identity (`name@version`), measured features with provenance, and the needs-analysis rule.
+- **Track states:** `ANALYZING` and `READY` join the library domain. A repaired analyzed track returns to `READY`.
+- `AnalysisService` (`src/intentune/application/analysis.py`):
+  - **Queuing:** idempotent `enqueue_pending()`.
+  - **Recovery:** `recover_interrupted()`.
+  - **Processing:** `process_next()` and `run_until_idle()`, with analysis outside any transaction.
+  - **Outcomes:** retries for read errors; no retry for decode errors; skips for unsupported formats and superseded versions; missing-copy handling; path-free error messages.
+- `AnalysisWorker` (`src/intentune/application/analysis_worker.py`): one background thread that recovers on start, processes one job at a time, queues new work when idle, survives errors, and stops after the current job.
+- Ports `AudioAnalyzer`, `AnalysisJobRepository` (with an atomic `claim_next`), and `TrackFeatureRepository` (`src/intentune/ports/analysis.py`).
+- `SignalLevelAnalyzer` (`src/intentune/adapters/signal_levels.py`):
+  - **Measures:** decoded duration, sample peak, and RMS level, all exact, read in blocks through soundfile and numpy.
+  - **Not:** loudness in LUFS, tempo, key, or any semantic feature.
+  - **Version:** `1+libsndfile-1.2.2`.
+- Migration `7a42f0b9c8bf`: `analysis_jobs`, `track_features`, and a rebuild of `tracks` allowing the new states; its downgrade keeps every track.
+- `soundfile==0.14.0` and `numpy==2.4.6` pinned in `backend/requirements.txt`. `librosa` was evaluated and not added (TD-014).
+- 114 tests: five new files, plus three in existing files. The suite is 518 passed and 1 skipped.
+- TD-014 records the B3 implementation decisions.
+
+### Fixed — during B3 (2026-10-20)
+
+- A newer analyzer version could be permanently blocked from re-analyzing a track after an older version had marked its queued job SUPERSEDED. Found in manual verification; superseded jobs are now re-armed by their own version.
+- Schema-snapshot tests compared DDL text exactly, but Alembic's batch rebuild emits a rebuilt table's constraints in a varying order. They now compare each table's clauses as a set.
+- `docs/quality/testing-strategy.md` had a duplicated `### Frontend` heading from the B2 edit.
+
 ### Added — Frontend (F0–F8)
 
 *Recorded during B0 from the Git history (2026-10-13 to 2026-10-15); the changelog had no frontend entries before.*
@@ -109,7 +137,8 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Found in B0 and fixed the same day as B1 prerequisites: `.gitignore` did not ignore the planned database or managed media; `DATABASE_URL` in `backend/.env.example` resolved to `backend/intentune.db`; `backend/requirements.txt` was unpinned, listed `sqlalchemy` and `httpx` without them being installed, and did not list `alembic`. Transitive dependencies are still not locked.
 - The frontend runs only on mock data, has no audio playback, and is not connected to the backend.
 - B1 persistence is not wired into any running entry point. Nothing applies migrations or calls `ensure_default_listener()` at startup until B8. `backend/.env` is not loaded, so a different database must be chosen through the `DATABASE_URL` environment variable.
-- B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously until B3. Artwork is not extracted. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
+- B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously; background scanning (D26) is not assigned to a phase, since B3 covered analysis only. Artwork is not extracted.
+- B3's worker is not started by any running entry point until B8. Only exact signal measurements exist (duration, peak, RMS level); BPM, key, loudness in LUFS, and semantic features stay `NULL`. M4A tracks are never analyzed, because libsndfile cannot decode them. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
 
 ### Current Baseline
 

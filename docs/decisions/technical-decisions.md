@@ -199,7 +199,7 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 
 **Alternatives Considered:** Resolving the path from the working directory (SQLite's default; it ties correctness to where the process starts). Creating the listener inside the migration (every database would get one, but a deleted row would never come back, and tests that build schemas without migrating would lack it). A commit-on-success context manager (one less call, but a read-only or early-return path could write by accident). SQLAlchemy's `Uuid` type. Leaving the driver's legacy transaction mode (DDL would autocommit, so a failed migration could leave a half-applied schema). Async SQLAlchemy (no measured need).
 
-**Consequences:** The database location does not depend on the working directory. A failed migration rolls back completely. Domain, port, and application code stays free of SQLAlchemy, and a test enforces that. Driver-independent `BEGIN` makes "database is locked" errors more likely under concurrent writers; WAL, short transactions, and the 5-second busy timeout mitigate this until B3 measures real contention. Nothing calls `ensure_default_listener()` or applies migrations at startup until B8.
+**Consequences:** The database location does not depend on the working directory. A failed migration rolls back completely. Domain, port, and application code stays free of SQLAlchemy, and a test enforces that. Driver-independent `BEGIN` makes "database is locked" errors more likely under concurrent writers; WAL, short transactions, and the 5-second busy timeout mitigate this until B3 measures real contention. Nothing calls `ensure_default_listener()` or applies migrations at startup until B8. *(B3 update, 2026-10-20: the worker holds no transaction while analyzing; claim and finish are one short transaction each, and a rescan during analysis succeeds in the tests. Contention under real load was not measured; that moves to B11.)*
 
 **Revisit When:** the backend moves to Python 3.12 or later (decision 2); B3's worker shows lock contention (decision 3); B8 introduces settings loading (decision 1); PostgreSQL is adopted (D22).
 
@@ -236,10 +236,68 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 - Scans are safe to repeat and cheap when nothing changed.
 - One bad file never stops a scan.
 - Content changed at the source leaves its previous version in the library, using disk space until a removal feature exists.
-- Scans run synchronously until B3.
+- Scans run synchronously. *(B3 built background analysis only, so background scanning (D26) is not assigned to a phase yet.)*
 - Orphaned `.partial` files are possible after a crash mid-copy, and a crash between copy and commit can leave an unreferenced managed file. Neither is ever served; cleanup is not built yet.
 
 **Revisit When:** B3 adds background jobs (decisions 3, 11); B8 decides how sources and artwork are presented (decision 8); real libraries show many content changes at the source (decision 6) or large orphan counts (decision 5).
+
+## TD-014: B3 Background Analysis
+
+**Status:** Accepted, awaiting B3 review
+
+**Date:** 2026-10-20
+
+**Context:** D19–D21, D26–D28, and the execution guide §6 ask for persisted analysis jobs, a bounded in-process worker, recovery, versioned provenance, and tracks that stay usable. Two constraints shaped the choices. "Safe initial features" are duration, tempo, levels, key, and onsets, but semantic features must come from a validated model or stay `NULL`. And `librosa` may be added "only if needed".
+
+**Decision:**
+
+1. **Measurements.** Analyzer revision 1 measures decoded duration, sample peak, and RMS level over every decoded sample, all exact. Levels are stored as linear fractions of full scale, because digital silence is a real level (0.0) with no finite dBFS value.
+   - These are not loudness in LUFS, not "energy", and not any perceptual or semantic attribute.
+   - Tempo, key, and onset estimates are not produced. They are estimates whose error depends on algorithm and genre, and Intentune has no evaluation set to measure that error yet (B11).
+2. **Decoder.** `soundfile==0.14.0` (libsndfile 1.2.2), verified in a throwaway Python 3.11.9 venv on this Windows machine.
+   - It decodes WAV, FLAC, Ogg Vorbis, Opus, and MP3, and adds only `cffi` and `pycparser`. `numpy` was already installed (through pandas) and is now pinned.
+   - **`librosa` was not added.** A dry run showed 20 extra packages, including `numba`, `llvmlite`, `scipy`, `scikit-learn`, and network-capable `pooch` and `requests`, for capabilities B3 does not use. `scipy` (for an ITU-R BS.1770 loudness filter) was not added either.
+   - libsndfile cannot decode M4A; those jobs are SKIPPED, `FORMAT_NOT_SUPPORTED`.
+3. **Versioning.** The analyzer's identity is `intentune.signal-levels@1+libsndfile-1.2.2`. Lossy formats decode slightly differently across decoder builds, so a libsndfile upgrade changes the version and re-analyzes the library. `tracks.analysis_version` stores the key.
+4. **Jobs.**
+   - **Uniqueness:** one `analysis_jobs` row per track, kind, and analyzer key, so queuing is idempotent.
+   - **Kinds:** only `ANALYZE_AUDIO`; a new version is a new job, so `REANALYZE_TRACK` is unnecessary.
+   - **Claims:** a single `UPDATE … RETURNING` statement that counts the attempt.
+   - **Attempts:** at most 3; interruptions count too.
+5. **Queuing.** `enqueue_pending()` sweeps all tracks instead of the import queuing each one. It covers new tracks, pre-B3 tracks, repaired tracks, and version changes with one rule (`needs_analysis`), and leaves B2's import pipeline unchanged.
+6. **Outcomes.**
+   - Decode errors are deterministic and not retried.
+   - Read errors (`OSError`) are retried.
+   - A missing managed copy marks the track `MISSING_MANAGED_FILE` and is re-queued after repair.
+   - A job for another analyzer version is SUPERSEDED, and re-armed when its own version runs (a fix found in manual verification).
+   - Unexpected analyzer errors are logged, recorded, and isolated.
+   - Stored messages never contain paths.
+7. **Track states.** IMPORTED → ANALYZING → READY on first analysis. A READY track stays READY during reanalysis, with its earlier features, until the new ones replace them in the same transaction that completes the job. A failure or skip restores the previous state. A repaired analyzed track returns to READY.
+8. **Worker.** `AnalysisWorker` is one daemon thread with its own unit of work, two events (stop and wake), and a 30-second idle sweep. It is not a process pool or task queue (D28). Analysis runs outside any transaction; claim and finish are each one short transaction.
+9. **Layering.** The `AudioAnalyzer` port only measures. The job lifecycle lives in `AnalysisService`. soundfile and numpy stay in one adapter, enforced by the architecture test.
+
+**Alternatives Considered:**
+- `librosa` for tempo and onsets, which is heavier and estimates without an evaluation set.
+- `scipy` plus a BS.1770 implementation for LUFS, a defensible standard, but not needed in B3 and a large dependency.
+- PyAV or FFmpeg for M4A, a much larger dependency or an external binary.
+- Storing dBFS, which has no finite value for silence.
+- Queuing inside B2's import transaction, which would miss pre-B3 and repaired tracks without a sweep anyway.
+- Several worker threads (SQLite has one writer; no measured need).
+- Keeping only failed jobs re-armable, which blocked reanalysis after a rollback.
+
+**Consequences:**
+- Every track has exact level and duration measurements once analyzed, except M4A.
+- Recommendation features in the spec (BPM, key, energy, and so on) remain `NULL`.
+- The analysis library can be re-run safely at any time.
+- Old jobs stay as history.
+- A crash leaves at most one job RUNNING, recovered on the next start.
+- Two processes with different analyzer versions would keep superseding each other's jobs; Prototype 1 runs one process.
+
+**Revisit When:**
+- An evaluation set exists (B11): estimated features as a new analyzer version.
+- B8 starts the worker at startup.
+- M4A becomes common in real libraries.
+- Measured analysis throughput (B11) calls for more than one worker.
 
 ## New Decision Template
 

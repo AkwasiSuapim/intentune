@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2`. The [B1 update](#b1-update-2026-10-19), [B2 update](#b2-update-2026-10-19), Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect both.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4`. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), and [B3](#b3-update-2026-10-20) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all three.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -61,6 +61,25 @@ Found and fixed during B2:
 - **Junctions:** on Python 3.11, `os.walk` enters Windows junctions and `Path.is_symlink()` reports them as ordinary folders. The walker now enters a folder only if its resolved location is inside the source.
 - **Flush order:** without ORM relationships, a flush could insert a child row before the parent row it references. Repositories now flush a parent row as soon as it is added.
 
+## B3 Update (2026-10-20)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **518 passed, 1 skipped** (519 collected): 405 from B0–B2, plus 114 from B3. The skip is the same symbolic-link test as in B2. |
+| Migration | `alembic upgrade head`, then `alembic check`; downgrade to `2540be2956b8` and back | The `tracks` rebuild keeps all five CHECK constraints, the primary key, and the unique hash, with only `status` widened. No drift. The round trip is clean. |
+| Dependency check | A throwaway venv (Python 3.11.9): install `soundfile`; dry-run `librosa` | `soundfile` 0.14.0 adds `cffi` and `pycparser`, bundles libsndfile 1.2.2, and decodes WAV, FLAC, Ogg Vorbis, Opus, and MP3 (not M4A). `librosa` 0.11.0 would add 20 packages, including `numba`, `llvmlite`, `scipy`, `scikit-learn`, `pooch`, and `requests`. Not needed for B3's measurements, so not added. |
+| End to end | A scratch script with a scratch database, music, and media: real tones in five formats, the real worker thread and analyzer | All five tracks READY. Lossless WAV and FLAC: peak 0.5000 and RMS 0.3536 for a 0.5-amplitude tone, as expected. Lossy formats differ slightly, as decoded. |
+| Real crash | A second process claims a job, then exits hard with `os._exit` (no cleanup) | The job was left RUNNING; a fresh worker in a new process recovered it, and it completed on attempt 2. An accidental second crash of the scratch script (worker thread mid-job) was recovered too. |
+| Reanalysis | An analyzer version bump on the same database | Every track re-queued and re-analyzed; tracks stayed READY throughout; the v1 job history was kept. |
+| Mutation checks | Disabled in turn: attempt counting, queue idempotency, recovery, superseding, the worker loop's error guard | Each disabled mechanism makes its tests fail. |
+
+B3 tests per file: `test_analysis_domain.py` 45, `test_analysis_repositories.py` 23, `test_analysis_service.py` 19, `test_signal_levels.py` 14, `test_analysis_worker.py` 10. `test_library_repositories.py` gained 2 (its track-status test now covers four states), and `test_migrations.py` gained 1.
+
+Found and fixed during B3:
+- **Reanalysis could be blocked for good.** An older analyzer that processed a newer version's queued job marked it SKIPPED / SUPERSEDED, and the newer version could then never queue it again. Found in manual verification. Superseded jobs are now re-armed by their own version, with a regression test.
+- **Constraint order after a table rebuild.** Alembic's batch rebuild emits a rebuilt table's constraints in a varying order, because it copies them from an unordered set. The B1 schema-snapshot tests compared DDL text exactly; they now compare each table's clauses as a set and stay exact about each definition.
+- **Two test expectations were wrong.** A lossy-format test assumed the decoded peak stays near the source amplitude; Opus overshoots this tone's abrupt start to about 0.67. The test now checks block-by-block results against a whole-file computation on the same decoded samples. A B2 test used `READY` as its example of an undefined status, and it is now defined.
+
 ## Current Files
 
 ### Backend
@@ -98,6 +117,25 @@ Added in B2 (2026-10-19):
 - `backend/src/intentune/application/library.py` — `LibraryService`
 - `backend/src/intentune/adapters/local_folders.py`, `managed_media.py`, `mutagen_audio.py`
 - the six B2 test files listed above
+
+Added in B3 (2026-10-20):
+
+- `backend/alembic/versions/20261020_7a42f0b9c8bf_create_background_analysis.py`
+- `backend/src/intentune/domain/analysis.py`
+- `backend/src/intentune/ports/analysis.py`
+- `backend/src/intentune/application/analysis.py` (`AnalysisService`) and `analysis_worker.py` (`AnalysisWorker`)
+- `backend/src/intentune/adapters/signal_levels.py` (`SignalLevelAnalyzer`)
+- the five B3 test files listed above
+
+Changed in B3:
+- `domain/library.py`: two track states, `available_status`, `with_analysis()`.
+- `application/library.py`: a repaired analyzed track returns to READY.
+- `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: analysis records and repositories.
+- `tests/conftest.py`: `AudioSamples.tone()`.
+- `tests/test_migrations.py`: order-insensitive snapshots and a downgrade test.
+- `tests/test_library_repositories.py`: one example value.
+- `tests/test_architecture_boundaries.py`: soundfile and numpy rules.
+- `requirements.txt`: `numpy`, `soundfile`.
 
 Changed in B2:
 - `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: library records and repositories.
@@ -233,9 +271,13 @@ httpx==0.28.1
 sqlalchemy==2.1.5
 alembic==1.20.0
 mutagen==1.48.1        (added in B2)
+numpy==2.4.6           (B3: already installed through pandas; now used directly, so pinned)
+soundfile==0.14.0      (added in B3)
 ```
 
 `pip check` reports no broken requirements. `pytest` is used by the tests. Since B1 (2026-10-19), `sqlalchemy` and `alembic` are used by `backend/src/intentune/persistence/`, `backend/alembic/`, and the persistence tests; no domain, port, or application module imports them, and a test enforces that. No source or test file imports `pandas`, `fastapi`, `uvicorn`, or `httpx` yet. B1 added no dependency. B2 added `mutagen==1.48.1`, installed in `backend/.venv` and pinned in `backend/requirements.txt`, as the execution guide prescribes for this phase. `pip check` stays clean. Only `backend/src/intentune/adapters/mutagen_audio.py` and the tests import it.
+
+B3 added `soundfile==0.14.0` (with its dependencies `cffi` and `pycparser`, not pinned, like other transitive dependencies) and pinned `numpy==2.4.6`. Only `backend/src/intentune/adapters/signal_levels.py` and the tests import them. `librosa` was evaluated and not added (see the B3 update).
 
 *Found in B0 and since fixed:* all entries were unpinned, `sqlalchemy` and `httpx` were listed but not installed, and `alembic` (required by D22) was not listed.
 
@@ -257,7 +299,8 @@ There is currently no:
 - HTTP API
 - Persistence beyond the listener profile and the managed library. B1 and B2 built those tables only, and no running entry point opens the database yet.
 - Running library features. The managed library (register sources, scan, import, dedupe, tags) exists as a tested application service, but nothing a listener runs calls it until B8.
-- Audio analysis, background jobs, or artwork
+- Running background analysis. The worker and analyzer exist and are tested, but nothing starts the worker until B8.
+- Estimated or semantic audio features (tempo, key, loudness in LUFS, energy, mood, and so on), background scanning, or artwork
 - Listening sessions in the backend
 - Feedback store
 - Playlists in the backend
@@ -281,8 +324,8 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | Missing-feature scoring with renormalization (D21) | No: the scorer raises on missing values | B5, while keeping complete-input legacy outputs identical |
 | SQLite + SQLAlchemy + Alembic (D22) | **Yes (B1, 2026-10-19):** engine configuration, repository and unit-of-work pattern, migrations | Later phases add their tables and repositories |
 | Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup from B8 |
-| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan and API routes in B8; background scanning in B3 |
-| Background analysis jobs (D26, D28) | No | B3 |
+| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan and API routes in B8; background *scanning* (D26) is not assigned to a phase (B3 covered analysis only) |
+| Background analysis jobs (D26, D28) | **Yes (B3, 2026-10-20):** persisted jobs, one worker thread, recovery, provenance-tagged signal measurements | Worker started at app startup in B8; estimated features need an evaluation set first |
 | Sessions, turns, recommendation occurrences, feedback events (D31) | No (the frontend has mock sessions only) | B4, B6 |
 | Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | No | B5 |
 | Playlists (D34) | No (frontend-local only) | B7 |

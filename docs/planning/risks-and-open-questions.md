@@ -55,6 +55,9 @@
 - Where do the frontend's typed messages and quick-action labels become structured turn variants, given that React must not parse language and the backend accepts only limited deterministic commands (D30)?
 - The B9 guidance is to satisfy the existing frontend service interface. That interface has no methods for reactions, playback events, or playlist CRUD, which Prototype 1 requires. How far may B9 extend it?
 - How is artwork extracted in B2 served to the frontend? The route list has no artwork route. *B2 (2026-10-19) does not extract artwork. Extraction waits until there is a way to serve it, so B8 should settle this first.*
+- *(Raised in B3, 2026-10-20.)* D26 says scanning **and** analysis run in the background. B3 was scoped to analysis only, so scans still run synchronously when called. Which phase makes scanning non-blocking? B8 could run a scan off the request thread, or a `RESCAN_SOURCE` job kind could be added.
+- *(Raised in B3.)* Tempo, key, and loudness in LUFS are planned features, but they are estimates (LUFS is a standard, but needs a K-weighting filter). Which algorithms, and evaluated against what, before they are trusted? This needs the B11 evaluation set. Semantic features (energy, mood, danceability, valence, acousticness) still need a validated model, or stay `NULL` (D21).
+- *(Raised in B3.)* libsndfile cannot decode M4A (AAC/ALAC), so M4A tracks are imported and playable but never analyzed. Is a larger decoder (for example PyAV) worth it, given how common M4A is in real libraries?
 - How does `GET /api/v1/library/sources` let the listener recognize a folder they registered, given the rule that raw local paths are never exposed to the frontend? `POST /api/v1/library/sources` necessarily receives a path from the client.
 
 ## Open Persistence Questions

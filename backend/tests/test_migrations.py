@@ -43,16 +43,31 @@ def _table_names(database_url):
         engine.dispose()
 
 
+def _definition(object_type, sql):
+    """A table's definition as an unordered set of its column and constraint clauses; other SQL unchanged.
+
+    Alembic's batch mode rebuilds a table from SQLAlchemy's constraint *set*,
+    so a rebuilt table (B3's tracks) lists the same constraints in a varying
+    order. Comparing clauses as a set keeps every definition exact while
+    ignoring that order.
+    """
+    if object_type != "table" or sql is None:
+        return sql
+    body = sql[sql.index("(") + 1 : sql.rindex(")")]
+    return frozenset(clause.strip().rstrip(",").strip() for clause in body.splitlines() if clause.strip())
+
+
 def _schema_snapshot(database_url):
     """Every table, index, and trigger definition SQLite holds, for before/after comparison."""
     engine = create_database_engine(database_url)
     try:
         with engine.connect() as connection:
-            return connection.exec_driver_sql(
+            rows = connection.exec_driver_sql(
                 "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"
             ).all()
     finally:
         engine.dispose()
+    return [(object_type, name, table, _definition(object_type, sql)) for object_type, name, table, sql in rows]
 
 
 def test_migration_history_has_a_single_head(database_url):
@@ -168,6 +183,40 @@ def test_database_allows_several_non_default_listeners(engine):
 
     with engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT COUNT(*) FROM listener_profiles").scalar() == 2
+
+
+def test_downgrading_background_analysis_keeps_tracks_and_returns_them_to_imported(migrated_database_url):
+    """B3's migration rebuilt tracks to allow ANALYZING and READY; its downgrade must keep every track."""
+    track_id = "3f2c4a8e-1b7d-4c55-9e0a-6d1f2b3c4d5e"
+    engine = create_database_engine(migrated_database_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO tracks (id, sha256, size_bytes, audio_format, status, original_filename, analysis_version, created_at, updated_at) "
+                "VALUES (?, ?, 10, 'flac', 'READY', 'song.flac', 'a@1', '2026-10-20 09:00:00', '2026-10-20 09:00:00')",
+                (track_id, "a" * 64),
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO analysis_jobs (id, track_id, kind, analyzer, status, attempts, created_at, updated_at) "
+                "VALUES ('9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', ?, 'ANALYZE_AUDIO', 'a@1', 'SUCCEEDED', 1, '2026-10-20 09:00:00', '2026-10-20 09:00:00')",
+                (track_id,),
+            )
+    finally:
+        engine.dispose()
+
+    command.downgrade(alembic_config(migrated_database_url), "2540be2956b8")
+
+    engine = create_database_engine(migrated_database_url)
+    try:
+        with engine.connect() as connection:
+            rows = connection.exec_driver_sql("SELECT id, status, analysis_version FROM tracks").all()
+        assert rows == [(track_id, "IMPORTED", None)]
+        assert {"analysis_jobs", "track_features"}.isdisjoint(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+    command.upgrade(alembic_config(migrated_database_url), "head")
+    assert _current_revision(migrated_database_url) == _head_revision(migrated_database_url)
 
 
 def test_migrated_database_uses_wal_and_leaves_no_foreign_key_violations(engine):

@@ -176,8 +176,9 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 ### In-process bounded worker instead of a task queue (D28)
 
 - **Gain:** no Redis or Celery; simple to run and debug.
-- **Cost:** shutting the process down interrupts active work.
+- **Cost:** shutting the process down interrupts active work. One worker analyzes one track at a time.
 - **Mitigation:** job state persisted in SQLite; idempotent jobs that resume after restart.
+- **Status:** Current since B3 (2026-10-20): one `AnalysisWorker` thread. A hard exit mid-job was verified to recover on the next start, with the attempt counted and a limit of 3 (TD-014).
 
 ### SHA-256 exact deduplication (D24)
 

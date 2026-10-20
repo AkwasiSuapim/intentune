@@ -257,7 +257,7 @@ def test_database_accepts_every_domain_track_status(engine, status):
         _insert_track(connection, str(uuid.uuid4()), "a", status=status)
 
 
-@pytest.mark.parametrize("column, value", [("audio_format", "exe"), ("status", "READY"), ("status", "imported")])
+@pytest.mark.parametrize("column, value", [("audio_format", "exe"), ("status", "FINISHED"), ("status", "imported")])
 def test_database_rejects_values_the_domain_does_not_define(engine, column, value):
     with pytest.raises(IntegrityError):
         with engine.begin() as connection:

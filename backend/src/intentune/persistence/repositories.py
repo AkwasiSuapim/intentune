@@ -7,11 +7,13 @@ persistence package.
 """
 
 from collections import defaultdict
-from typing import Dict, Iterable, List, Optional, Set
+from datetime import datetime
+from typing import Dict, Iterable, List, Optional, Sequence, Set
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from src.intentune.domain.analysis import AnalysisJob, AnalysisJobKind, AnalysisJobStatus, TrackFeature
 from src.intentune.domain.library import (
     LibrarySource,
     SourceFile,
@@ -22,9 +24,11 @@ from src.intentune.domain.library import (
 from src.intentune.domain.listener import ListenerProfile
 from src.intentune.domain.validation import new_uuid
 from src.intentune.persistence.models import (
+    AnalysisJobRecord,
     LibrarySourceRecord,
     ListenerProfileRecord,
     SourceFileRecord,
+    TrackFeatureRecord,
     TrackLabelRecord,
     TrackRecord,
 )
@@ -287,3 +291,147 @@ class SqlAlchemyTrackRepository:
         for label_record in self._session.scalars(statement):
             labels[label_record.track_id].append(_track_label_from_record(label_record))
         return [_track_from_record(record, labels[record.id]) for record in records]
+
+
+# --- Background analysis (B3) -----------------------------------------------------
+
+
+def _analysis_job_from_record(record: AnalysisJobRecord) -> AnalysisJob:
+    return AnalysisJob(
+        job_id=record.id,
+        track_id=record.track_id,
+        kind=record.kind,
+        analyzer=record.analyzer,
+        status=record.status,
+        attempts=record.attempts,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        failure_reason=record.failure_reason,
+        error_message=record.error_message,
+    )
+
+
+def _apply_analysis_job(record: AnalysisJobRecord, job: AnalysisJob) -> None:
+    record.status = job.status.value
+    record.attempts = job.attempts
+    record.failure_reason = job.failure_reason.value if job.failure_reason is not None else None
+    record.error_message = job.error_message
+    record.updated_at = job.updated_at
+    record.started_at = job.started_at
+    record.finished_at = job.finished_at
+
+
+class SqlAlchemyAnalysisJobRepository:
+    """AnalysisJobRepository port implementation (see ports/analysis.py)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, job_id: str) -> Optional[AnalysisJob]:
+        record = self._session.get(AnalysisJobRecord, job_id)
+        return _analysis_job_from_record(record) if record is not None else None
+
+    def list_all(self, status: Optional[AnalysisJobStatus] = None) -> List[AnalysisJob]:
+        statement = select(AnalysisJobRecord).order_by(AnalysisJobRecord.created_at, AnalysisJobRecord.id)
+        if status is not None:
+            statement = statement.where(AnalysisJobRecord.status == AnalysisJobStatus(status).value)
+        return [_analysis_job_from_record(record) for record in self._session.scalars(statement)]
+
+    def list_for_analyzer(self, kind: AnalysisJobKind, analyzer: str) -> List[AnalysisJob]:
+        statement = (
+            select(AnalysisJobRecord)
+            .where(AnalysisJobRecord.kind == AnalysisJobKind(kind).value, AnalysisJobRecord.analyzer == analyzer)
+            .order_by(AnalysisJobRecord.created_at, AnalysisJobRecord.id)
+        )
+        return [_analysis_job_from_record(record) for record in self._session.scalars(statement)]
+
+    def add(self, job: AnalysisJob) -> None:
+        record = AnalysisJobRecord(
+            id=job.job_id,
+            track_id=job.track_id,
+            kind=job.kind.value,
+            analyzer=job.analyzer,
+            created_at=job.created_at,
+        )
+        _apply_analysis_job(record, job)
+        self._session.add(record)
+
+    def save(self, job: AnalysisJob) -> None:
+        _apply_analysis_job(_require_record(self._session.get(AnalysisJobRecord, job.job_id), "analysis job", job.job_id), job)
+
+    def claim_next(self, now: datetime) -> Optional[AnalysisJob]:
+        """One UPDATE ... RETURNING: no other worker can claim the same job between the read and the write."""
+        self._session.flush()
+        oldest_pending = (
+            select(AnalysisJobRecord.id)
+            .where(AnalysisJobRecord.status == AnalysisJobStatus.PENDING.value)
+            .order_by(AnalysisJobRecord.created_at, AnalysisJobRecord.id)
+            .limit(1)
+            .scalar_subquery()
+        )
+        statement = (
+            update(AnalysisJobRecord)
+            .where(AnalysisJobRecord.id == oldest_pending, AnalysisJobRecord.status == AnalysisJobStatus.PENDING.value)
+            .values(
+                status=AnalysisJobStatus.RUNNING.value,
+                attempts=AnalysisJobRecord.attempts + 1,
+                started_at=now,
+                finished_at=None,
+                failure_reason=None,
+                error_message=None,
+                updated_at=now,
+            )
+            .returning(AnalysisJobRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        claimed_id = self._session.execute(statement).scalar_one_or_none()
+        if claimed_id is None:
+            return None
+        record = self._session.get(AnalysisJobRecord, claimed_id, populate_existing=True)
+        return _analysis_job_from_record(record)
+
+
+def _track_feature_from_record(record: TrackFeatureRecord) -> TrackFeature:
+    return TrackFeature(
+        name=record.name,
+        value=record.value,
+        analyzer_name=record.analyzer_name,
+        analyzer_version=record.analyzer_version,
+        computed_at=record.computed_at,
+        confidence=record.confidence,
+    )
+
+
+class SqlAlchemyTrackFeatureRepository:
+    """TrackFeatureRepository port implementation (see ports/analysis.py)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_for_track(self, track_id: str) -> List[TrackFeature]:
+        statement = select(TrackFeatureRecord).where(TrackFeatureRecord.track_id == track_id).order_by(TrackFeatureRecord.name)
+        return [_track_feature_from_record(record) for record in self._session.scalars(statement)]
+
+    def replace_for_analyzer(self, track_id: str, analyzer_name: str, features: Sequence[TrackFeature]) -> None:
+        self._session.execute(
+            delete(TrackFeatureRecord).where(
+                TrackFeatureRecord.track_id == track_id, TrackFeatureRecord.analyzer_name == analyzer_name
+            )
+        )
+        for feature in features:
+            if feature.analyzer_name != analyzer_name:
+                raise ValueError("every replacement feature must come from the analyzer being replaced")
+            self._session.add(
+                TrackFeatureRecord(
+                    id=new_uuid(),
+                    track_id=track_id,
+                    name=feature.name.value,
+                    value=feature.value,
+                    analyzer_name=feature.analyzer_name,
+                    analyzer_version=feature.analyzer_version,
+                    confidence=feature.confidence,
+                    computed_at=feature.computed_at,
+                )
+            )

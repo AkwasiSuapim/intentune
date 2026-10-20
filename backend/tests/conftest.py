@@ -10,7 +10,9 @@ import struct
 import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TCON, TDRC, TIT2, TPE1
 from mutagen.wave import WAVE
@@ -78,12 +80,39 @@ def _id3_frames(title=None, artist=None, album=None, date=None, genre=None):
     return frames
 
 
+_ENCODINGS = {
+    ".wav": ("WAV", "PCM_16"),
+    ".flac": ("FLAC", "PCM_16"),
+    ".ogg": ("OGG", "VORBIS"),
+    ".opus": ("OGG", "OPUS"),
+    ".mp3": ("MP3", "MPEG_LAYER_III"),
+}
+
+
 class AudioSamples:
     """Writes small, valid audio files with optional embedded tags.
 
+    mp3(), wav(), and flac() build minimal files by hand for the library tests.
     Tag keywords: title, artist, album, date, genre (a string or a list).
     Different seeds give different content, so different SHA-256 hashes.
+
+    tone() encodes a real sine tone with libsndfile (WAV, FLAC, Ogg Vorbis,
+    Opus, MP3), for analysis tests that decode actual audio.
     """
+
+    @staticmethod
+    def tone(path, amplitude=0.5, seconds=1.0, frequency=1000.0, channels=2, sample_rate=None, spike=None):
+        """A sine tone of the given peak amplitude. spike=(frame, value) overwrites one frame on every channel."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        audio_format, subtype = _ENCODINGS[path.suffix.lower()]
+        rate = sample_rate or (48000 if path.suffix.lower() == ".opus" else 44100)
+        times = np.arange(int(rate * seconds)) / rate
+        signal = amplitude * np.sin(2 * np.pi * frequency * times)
+        if spike is not None:
+            signal[spike[0]] = spike[1]
+        soundfile.write(str(path), np.repeat(signal[:, None], channels, axis=1), rate, format=audio_format, subtype=subtype)
+        return path
 
     @staticmethod
     def mp3(path, seed=1, frames=40, **tags):
