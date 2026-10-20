@@ -203,6 +203,44 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 
 **Revisit When:** the backend moves to Python 3.12 or later (decision 2); B3's worker shows lock contention (decision 3); B8 introduces settings loading (decision 1); PostgreSQL is adopted (D22).
 
+## TD-013: B2 Managed Local Library
+
+**Status:** Accepted, awaiting B2 review
+
+**Date:** 2026-10-19
+
+**Context:** D02, D03, D24, and D25 and the execution guide §5 fix the library's behavior: several source folders, managed copies, SHA-256 dedupe, an incremental rescan, and the validate → hash → dedupe → copy → persist → tag → analyze pipeline. Several implementation details were left open.
+
+**Decision:**
+
+1. **Formats.** The allowlist is MP3, M4A, FLAC, Ogg (Vorbis or Opus), Opus, and WAV. The extension only selects candidates; mutagen must confirm the content is that format. Files with other extensions are ignored and counted, not recorded. Allowlisted files that fail validation are recorded as UNSUPPORTED.
+2. **Size limit.** 1 GiB per file by default (`LibraryPolicy`).
+3. **File and track states.** Readiness is split between files and tracks. Source files are IMPORTED, UNSUPPORTED (not retried until the file changes), FAILED (retried on every scan), or MISSING. Tracks are IMPORTED or MISSING_MANAGED_FILE. DISCOVERED, ANALYZING, and READY are not written yet.
+4. **Scan state.** A new table, `source_files`, holds the incremental-scan state the spec requires: size, mtime, hash, status, failure reason, and track link. Tracks store no path; the managed copy is `<track_uuid>.<extension>`.
+5. **Copy safety.** The copy is written to a temporary file while hashing, flushed, and moved into place only if it matches the earlier hash.
+6. **Changed content.** A source file whose content changes becomes a new track. The old track stays, because managed copies outlive their sources (D02).
+7. **Repair.** A track marked MISSING_MANAGED_FILE is repaired when a source file with its content is scanned again.
+8. **Tags.** Tags are read from the managed copy after the track is stored. A failure leaves the track playable. Title, artist, album, year, and declared genres are read, with genres split on `;` and stored as `track_labels` (source `embedded_tags`, no confidence). Artwork is not extracted.
+9. **Folder walking.** No symbolic links are followed. A folder is entered only if its resolved location is inside the source, which also covers Windows junctions. Each folder is visited once, and managed media is excluded.
+10. **Layering.** `LibraryService` uses ports only, and file I/O lives in adapters. CHECK constraints guard every enumerated column. Domain validators shared with the listener model moved to `domain/validation.py`.
+11. **Analysis hand-off.** "Queue deeper analysis" is not built in B2. A null `analysis_version` marks a track as waiting; B3 creates the job queue (D28).
+
+**Alternatives Considered:**
+- Recording a row for every non-audio file (noise from covers and notes).
+- Storing a managed path column (redundant, and a path to leak).
+- Re-importing changed content over the old track (would rewrite a managed copy in place).
+- Following symbolic links (could escape the source or loop).
+- Building a placeholder analysis queue in B2 (half of B3, without its design).
+
+**Consequences:**
+- Scans are safe to repeat and cheap when nothing changed.
+- One bad file never stops a scan.
+- Content changed at the source leaves its previous version in the library, using disk space until a removal feature exists.
+- Scans run synchronously until B3.
+- Orphaned `.partial` files are possible after a crash mid-copy, and a crash between copy and commit can leave an unreferenced managed file. Neither is ever served; cleanup is not built yet.
+
+**Revisit When:** B3 adds background jobs (decisions 3, 11); B8 decides how sources and artwork are presented (decision 8); real libraries show many content changes at the source (decision 6) or large orphan counts (decision 5).
+
 ## New Decision Template
 
 ```text

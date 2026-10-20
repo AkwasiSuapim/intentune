@@ -12,9 +12,9 @@
 |---|---|
 | No secrets committed | **Current:** `.env` is gitignored; only `backend/.env.example` is committed, with no secret values |
 | Database and managed media gitignored | **Current (2026-10-18):** `.gitignore` covers `backend/data/intentune.db*` (including SQLite journal, WAL, and SHM files) and `backend/data/media/`. Since B1 (2026-10-19) the database defaults to that ignored path, and tests use temporary files only. An older local `backend/.env` may still point at `backend/intentune.db`, which is not ignored. B1 does not load `.env`, but that line should be updated before anything does. |
-| No arbitrary file serving; path traversal prevention | Planned (B8): audio is served by track ID from managed media only |
-| Allowlisted audio formats; file-size limits | Planned (B2) |
-| Generated managed filenames (UUID-based) | Planned (B2) |
+| No arbitrary file serving; path traversal prevention | **Partly current (B2):** managed paths are built only from a validated UUID and an allowlisted format. Source-relative paths are validated so they cannot escape their folder, and are re-checked against the real location. The scanner follows no links and enters no folder outside the source (including Windows junctions). Audio serving by track ID is still Planned (B8). |
+| Allowlisted audio formats; file-size limits | **Current (B2):** MP3, M4A, FLAC, Ogg, Opus, and WAV, confirmed by content, not extension; 1 GiB per file by default |
+| Generated managed filenames (UUID-based) | **Current (B2):** `<track_uuid>.<extension>`; source file names are never used for storage |
 | No raw local paths in API responses or errors | Planned (B8) |
 | No stack traces in client errors | Planned (B8) |
 | Text-length validation | Planned (B8) |
@@ -76,10 +76,10 @@ Logs may include:
 
 ## Local Music and Library Privacy
 
-**Planned (Prototype 1).**
+**Current (B2) for the first two points; Planned for the rest.**
 
-- Imported audio is copied into `backend/data/media/` under generated names and stays on the device.
-- Source folder paths are stored in the local database for rescanning. Raw local paths are never exposed to the frontend or written into client-facing errors (execution guide §1). How the source listing identifies folders without paths is an [open question](../planning/risks-and-open-questions.md#open-backend-questions).
+- Imported audio is copied into `backend/data/media/` under generated names and stays on the device. Copies are verified by SHA-256 and never shared. Embedded tags are read locally; nothing is looked up online.
+- Source folder paths are stored in the local database for rescanning (`library_sources.path`, plus source-relative paths in `source_files`). Tracks keep only the original file *name* for display, never a path. Raw local paths are never exposed to the frontend or written into client-facing errors (execution guide §1). How the source listing identifies folders without paths is an [open question](../planning/risks-and-open-questions.md#open-backend-questions).
 - Listening history, feedback, and playlists stay in the local SQLite database.
 
 ## User Prompt Privacy

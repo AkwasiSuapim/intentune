@@ -35,6 +35,30 @@ All meaningful product, architecture, and behavior changes should be recorded he
   - The pass found no production bug and required no production-code change.
 - TD-012 records the B1 implementation decisions.
 
+### Added — Phase B2: Managed local library (2026-10-19)
+
+- `src/intentune/domain/library.py`:
+  - **Models:** library sources, source files, tracks, and provenance-tagged labels.
+  - **Rules:** the format allowlist (MP3, M4A, FLAC, Ogg, Opus, WAV), a relative-path rule that cannot escape a source folder, and tag interpretation (year from date tags, genres split on `;`).
+  - **States:** file and track readiness.
+  - **Values:** scan reports.
+
+  Shared validators moved to `src/intentune/domain/validation.py`.
+- `LibraryService` (`src/intentune/application/library.py`):
+  - **Capabilities:** register and list sources, scan one source or rescan all, import one file, list and get tracks, mark a track unavailable.
+  - **Import pipeline:** validate → hash → dedupe → copy → persist → tag.
+  - **Incremental scans:** unchanged files skipped; FAILED files retried; changed content imported as a new track; missing files and folders recorded while managed copies stay usable; unavailable tracks repaired.
+- Ports `LibrarySourceRepository`, `SourceFileRepository`, `TrackRepository` (`src/intentune/ports/library.py`) and `SourceFolders`, `AudioInspector`, `ManagedMedia` (`src/intentune/ports/library_files.py`). The library repositories are exposed through `UnitOfWork`.
+- Adapters:
+  - `LocalSourceFolders`: link-, junction-, and loop-safe folder walking that excludes managed media.
+  - `LocalManagedMedia`: atomic, SHA-256-verified copies to `backend/data/media/<track_uuid>.<extension>`.
+  - `MutagenAudioInspector`: validation by content, and ID3, Vorbis-comment, and MP4 tag mapping.
+  - SQLAlchemy repositories for sources, source files, and tracks.
+- Migration `2540be2956b8`: `library_sources`, `source_files`, `tracks`, `track_labels`, with CHECK constraints on every enumerated column and one primary label per kind.
+- `mutagen==1.48.1` in `backend/requirements.txt`.
+- 177 tests: six new files and three new architecture checks (mutagen and filesystem modules forbidden in inner layers). The suite is 404 passed and 1 skipped (a symbolic-link test this machine cannot run); the 228 earlier tests are unchanged.
+- TD-013 records the B2 implementation decisions.
+
 ### Added — Frontend (F0–F8)
 
 *Recorded during B0 from the Git history (2026-10-13 to 2026-10-15); the changelog had no frontend entries before.*
@@ -85,6 +109,7 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Found in B0 and fixed the same day as B1 prerequisites: `.gitignore` did not ignore the planned database or managed media; `DATABASE_URL` in `backend/.env.example` resolved to `backend/intentune.db`; `backend/requirements.txt` was unpinned, listed `sqlalchemy` and `httpx` without them being installed, and did not list `alembic`. Transitive dependencies are still not locked.
 - The frontend runs only on mock data, has no audio playback, and is not connected to the backend.
 - B1 persistence is not wired into any running entry point. Nothing applies migrations or calls `ensure_default_listener()` at startup until B8. `backend/.env` is not loaded, so a different database must be chosen through the `DATABASE_URL` environment variable.
+- B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously until B3. Artwork is not extracted. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
 
 ### Current Baseline
 

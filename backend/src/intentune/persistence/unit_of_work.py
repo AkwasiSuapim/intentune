@@ -13,7 +13,12 @@ from typing import Optional, Type
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.intentune.persistence.repositories import SqlAlchemyListenerProfileRepository
+from src.intentune.persistence.repositories import (
+    SqlAlchemyLibrarySourceRepository,
+    SqlAlchemyListenerProfileRepository,
+    SqlAlchemySourceFileRepository,
+    SqlAlchemyTrackRepository,
+)
 
 
 class SqlAlchemyUnitOfWork:
@@ -21,18 +26,34 @@ class SqlAlchemyUnitOfWork:
         self._session_factory = session_factory
         self._session: Optional[Session] = None
         self._listener_profiles: Optional[SqlAlchemyListenerProfileRepository] = None
+        self._library_sources: Optional[SqlAlchemyLibrarySourceRepository] = None
+        self._source_files: Optional[SqlAlchemySourceFileRepository] = None
+        self._tracks: Optional[SqlAlchemyTrackRepository] = None
 
     @property
     def listener_profiles(self) -> SqlAlchemyListenerProfileRepository:
-        if self._listener_profiles is None:
-            raise RuntimeError("The unit of work is not active; use it in a 'with' block")
-        return self._listener_profiles
+        return self._active(self._listener_profiles)
+
+    @property
+    def library_sources(self) -> SqlAlchemyLibrarySourceRepository:
+        return self._active(self._library_sources)
+
+    @property
+    def source_files(self) -> SqlAlchemySourceFileRepository:
+        return self._active(self._source_files)
+
+    @property
+    def tracks(self) -> SqlAlchemyTrackRepository:
+        return self._active(self._tracks)
 
     def __enter__(self) -> "SqlAlchemyUnitOfWork":
         if self._session is not None:
             raise RuntimeError("The unit of work is already active; it is not re-entrant")
         self._session = self._session_factory()
         self._listener_profiles = SqlAlchemyListenerProfileRepository(self._session)
+        self._library_sources = SqlAlchemyLibrarySourceRepository(self._session)
+        self._source_files = SqlAlchemySourceFileRepository(self._session)
+        self._tracks = SqlAlchemyTrackRepository(self._session)
         return self
 
     def __exit__(
@@ -44,6 +65,9 @@ class SqlAlchemyUnitOfWork:
         session = self._session
         self._session = None
         self._listener_profiles = None
+        self._library_sources = None
+        self._source_files = None
+        self._tracks = None
         if session is None:
             return
         try:
@@ -61,3 +85,9 @@ class SqlAlchemyUnitOfWork:
         if self._session is None:
             raise RuntimeError("The unit of work is not active; use it in a 'with' block")
         return self._session
+
+    @staticmethod
+    def _active(repository):
+        if repository is None:
+            raise RuntimeError("The unit of work is not active; use it in a 'with' block")
+        return repository

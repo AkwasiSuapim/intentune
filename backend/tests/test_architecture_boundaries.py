@@ -2,7 +2,8 @@
 
 The domain is pure (spec §4), and the application layer reaches storage only
 through ports. Only src/intentune/persistence/ (and backend/alembic/) may
-import SQLAlchemy or Alembic.
+import SQLAlchemy or Alembic, only src/intentune/adapters/ may import mutagen,
+and file I/O (os, shutil, pathlib, ...) happens only in adapters.
 
 Every .py file under a layer is checked, including files in subpackages, and
 relative imports are resolved to absolute module names before checking, so
@@ -17,7 +18,8 @@ import pytest
 
 _BACKEND = Path(__file__).resolve().parents[1]
 _INNER_LAYERS = ("domain", "ports", "application")
-_FRAMEWORKS = {"sqlalchemy", "alembic", "sqlite3", "fastapi", "starlette", "pydantic"}
+_FRAMEWORKS = {"sqlalchemy", "alembic", "sqlite3", "fastapi", "starlette", "pydantic", "mutagen"}
+_FILESYSTEM = {"os", "shutil", "pathlib", "glob", "io", "tempfile", "stat"}
 _OUTER_PACKAGES = ("src.intentune.persistence", "src.intentune.adapters")
 
 
@@ -66,6 +68,12 @@ def _framework_violations(imports):
     )
 
 
+def _filesystem_violations(imports):
+    return sorted(
+        f"{path} imports {name}" for path, names in imports.items() for name in names if name.split(".")[0] in _FILESYSTEM
+    )
+
+
 def _outer_package_violations(imports):
     return sorted(
         f"{path} imports {name}"
@@ -93,6 +101,14 @@ def test_inner_layers_import_no_storage_or_delivery_framework(layer):
 
     assert imports, f"no Python files found under {layer}/"
     assert _framework_violations(imports) == []
+
+
+@pytest.mark.parametrize("layer", _INNER_LAYERS)
+def test_inner_layers_do_no_file_io(layer):
+    imports = _imports_by_file(_BACKEND, layer)
+
+    assert imports, f"no Python files found under {layer}/"
+    assert _filesystem_violations(imports) == []
 
 
 @pytest.mark.parametrize("layer", _INNER_LAYERS)
@@ -146,7 +162,7 @@ def _write(path, source):
 def test_violations_in_nested_subpackages_and_relative_imports_are_caught(tmp_path):
     intentune = tmp_path / "src" / "intentune"
     _write(intentune / "domain" / "session" / "__init__.py", "")
-    _write(intentune / "domain" / "session" / "state.py", "import sqlalchemy\nfrom ...ports import catalog\n")
+    _write(intentune / "domain" / "session" / "state.py", "import sqlalchemy\nfrom ...ports import catalog\nfrom os import path\n")
     _write(intentune / "domain" / "session" / "clean.py", "from ..models import MusicCandidate\n")
     _write(intentune / "application" / "use_cases" / "deep" / "start.py", "from ....persistence.db import create_database_engine\n")
     _write(intentune / "ports" / "nested" / "repo.py", "from ... import adapters\n")
@@ -156,6 +172,10 @@ def test_violations_in_nested_subpackages_and_relative_imports_are_caught(tmp_pa
     ports = _imports_by_file(tmp_path, "ports")
 
     assert _framework_violations(domain) == ["src/intentune/domain/session/state.py imports sqlalchemy"]
+    assert _filesystem_violations(domain) == [
+        "src/intentune/domain/session/state.py imports os",
+        "src/intentune/domain/session/state.py imports os.path",
+    ]
     assert _outside_domain_violations(domain) == [
         "src/intentune/domain/session/state.py imports src.intentune.ports",
         "src/intentune/domain/session/state.py imports src.intentune.ports.catalog",

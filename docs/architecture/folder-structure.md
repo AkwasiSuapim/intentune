@@ -36,9 +36,10 @@ intentune/
 │   │   ├── env.py
 │   │   ├── script.py.mako
 │   │   └── versions/
-│   │       └── 20261019_6ef3a3452ab7_create_listener_profiles.py
+│   │       ├── 20261019_6ef3a3452ab7_create_listener_profiles.py
+│   │       └── 20261019_2540be2956b8_create_managed_library.py  (B2)
 │   ├── data/
-│   │   └── songs.csv
+│   │   └── songs.csv                  (intentune.db and media/ appear here when used; gitignored)
 │   ├── src/
 │   │   ├── __init__.py
 │   │   ├── main.py
@@ -50,19 +51,27 @@ intentune/
 │   │       │   ├── models.py
 │   │       │   ├── scoring.py
 │   │       │   ├── ranking.py
-│   │       │   └── listener.py        (B1)
+│   │       │   ├── listener.py        (B1)
+│   │       │   ├── library.py         (B2)
+│   │       │   └── validation.py      (B2: shared validators)
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   ├── recommendation_service.py
-│   │       │   └── local_listener.py  (B1)
+│   │       │   ├── local_listener.py  (B1)
+│   │       │   └── library.py         (B2: LibraryService)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
 │   │       │   ├── listener_profiles.py  (B1)
-│   │       │   └── unit_of_work.py    (B1)
+│   │       │   ├── unit_of_work.py    (B1)
+│   │       │   ├── library.py         (B2: library repositories)
+│   │       │   └── library_files.py   (B2: folders, inspector, media)
 │   │       ├── adapters/
 │   │       │   ├── __init__.py
-│   │       │   └── csv_catalog.py
+│   │       │   ├── csv_catalog.py
+│   │       │   ├── local_folders.py   (B2)
+│   │       │   ├── managed_media.py   (B2)
+│   │       │   └── mutagen_audio.py   (B2)
 │   │       └── persistence/           (B1)
 │   │           ├── __init__.py
 │   │           ├── db.py
@@ -71,7 +80,7 @@ intentune/
 │   │           ├── unit_of_work.py
 │   │           └── migrations.py
 │   └── tests/
-│       ├── conftest.py                (B1: database fixtures)
+│       ├── conftest.py                (B1: database fixtures; B2: generated audio files, library fixture)
 │       ├── test_recommender.py
 │       ├── test_domain_models.py
 │       ├── test_csv_catalog.py
@@ -85,7 +94,13 @@ intentune/
 │       ├── test_persistence_db.py     (B1)
 │       ├── test_migrations.py         (B1)
 │       ├── test_listener_repository.py  (B1)
-│       └── test_architecture_boundaries.py  (B1)
+│       ├── test_architecture_boundaries.py  (B1)
+│       ├── test_library_domain.py     (B2)
+│       ├── test_mutagen_audio.py      (B2)
+│       ├── test_managed_media.py      (B2)
+│       ├── test_local_folders.py      (B2)
+│       ├── test_library_repositories.py  (B2)
+│       └── test_library_service.py    (B2)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -103,6 +118,13 @@ intentune/
 `domain/scoring.py` and `domain/ranking.py` implement the current four-feature scoring rule and ranking/tie-breaking as the single source of truth; `ports/catalog.py` defines the `Catalog` protocol (`list_candidates() -> Sequence[MusicCandidate]`); `application/recommendation_service.py` is a use-case orchestrator offering both `recommend_music(candidates, profile, limit)` (candidates passed directly) and `recommend_from_catalog(catalog, profile, limit)` (candidates requested from a `Catalog` port); `adapters/csv_catalog.py` is the first adapter, converting raw CSV rows into `MusicCandidate` objects via `load_music_candidates()` and exposing `CsvCatalog`, which implements the `Catalog` port around that loader. `src/recommender.py`'s legacy dict/dataclass functions call into these rather than containing their own copy of the logic.
 
 B1 added the SQLite persistence foundation. `domain/listener.py` is the pure `ListenerProfile` model. `ports/listener_profiles.py` and `ports/unit_of_work.py` are the storage ports. `application/local_listener.py` holds the `ensure_default_listener()` use case. `persistence/` is the SQLAlchemy adapter package (engine configuration, ORM records, repository, unit of work, programmatic migrations). `backend/alembic/` holds the migrations. Persistence sits in its own package beside `adapters/`, as the execution guide suggested, because later phases add many tables and repositories to it.
+
+B2 added the managed library:
+- **Domain:** `domain/library.py` holds the pure library rules; `domain/validation.py` holds validators shared by the listener and library models.
+- **Ports:** `ports/library.py` (repositories) and `ports/library_files.py` (source folders, audio inspector, managed media).
+- **Application:** `application/library.py` holds `LibraryService`.
+- **File adapters:** `adapters/local_folders.py`, `adapters/managed_media.py`, and `adapters/mutagen_audio.py`.
+- **Persistence:** the library repositories and records joined `persistence/`, with a second migration.
 
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 
@@ -205,7 +227,11 @@ Interfaces that describe what the application needs from storage and external ca
 
 ### `backend/src/intentune/adapters/` and `backend/src/intentune/persistence/`
 
-Concrete implementations. `adapters/` holds the CSV catalog today and later managed media and the metadata and audio analyzers. `persistence/` (B1) holds the SQLite/SQLAlchemy engine setup, ORM records, repositories, and unit of work. Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy or Alembic.
+Concrete implementations.
+- **`adapters/`** holds the CSV catalog and, since B2, the source-folder walker, managed media, and the mutagen audio inspector. Signal analyzers arrive in B3.
+- **`persistence/`** (B1) holds the SQLite/SQLAlchemy engine setup, ORM records, repositories, and unit of work.
+
+Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy or Alembic. Only `adapters/` imports mutagen or does file I/O.
 
 ### `backend/alembic/`
 
@@ -217,7 +243,7 @@ FastAPI routes, HTTP schemas, error translation, request IDs, and dependencies. 
 
 ### `backend/data/`
 
-The CSV catalog, and from B1 the default location of the SQLite database (`intentune.db`, created by `alembic upgrade head`; gitignored). Managed media (`media/`, gitignored) arrives in B2.
+The CSV catalog, and the default locations of the SQLite database (`intentune.db`, from B1, created by `alembic upgrade head`) and managed media (`media/`, from B2, created on first import). Both are gitignored.
 
 ### `backend/tests/`
 

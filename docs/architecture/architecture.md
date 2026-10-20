@@ -24,7 +24,7 @@ Microservices would add network calls, service discovery, distributed logging, a
 
 ## Current Components
 
-**Current:** the backend has a domain layer, application use cases, ports, a CSV adapter, and (since B1, 2026-10-19) a SQLite persistence package. It has no API boundary. The CLI flow below does not touch the database; the persistence path is used by tests only until the B8 startup wires it in. The frontend is a separate React application running on a mock service; it does not call the backend.
+**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector. It also has, since B1, a SQLite persistence package. It has no API boundary. The CLI flow below does not touch the database or the library; those paths are used by tests only until the B8 startup wires them in. The frontend is a separate React application running on a mock service; it does not call the backend.
 
 ```text
 CLI (src/main.py)
@@ -47,13 +47,16 @@ Recommendation domain      Catalog port
                            backend/data/songs.csv
 
 
-ensure_default_listener() (application, B1; no caller yet)
-      |
-      v
-UnitOfWork / ListenerProfileRepository ports
-      |
-      v
-SqlAlchemyUnitOfWork / SqlAlchemyListenerProfileRepository (persistence)
+ensure_default_listener() (B1)      LibraryService (B2): register/list sources,
+      |                             scan, rescan, import file, list/get track,
+      |                             mark unavailable          (no caller yet)
+      |                                   |
+      v                                   v
+UnitOfWork and repository ports     + SourceFolders, AudioInspector, ManagedMedia ports
+      |                                   |
+      v                                   v
+SqlAlchemy repositories             LocalSourceFolders   MutagenAudioInspector   LocalManagedMedia
+(persistence)                       (source folders)     (mutagen)               (backend/data/media/)
       |
       v
 SQLite: backend/data/intentune.db (schema managed by Alembic)
@@ -144,7 +147,7 @@ Validated recommendation request
 
 Contains business rules that do not depend on HTTP, databases, the filesystem, AI providers, or music providers.
 
-**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring. `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `backend/tests/test_architecture_boundaries.py` fails if a domain, port, or application module imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, or the persistence or adapter packages.
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring. `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `src/intentune/domain/library.py` (B2) holds the managed-library rules. It defines the entities `LibrarySource`, `SourceFile`, `Track`, and `TrackLabel`, and the values `DiscoveredFile`, `EmbeddedTags`, `AudioProbe`, and `ScanReport`. It sets the allowlisted `AudioFormat`s and the readiness states, a relative-path rule that cannot escape a source folder, and how tag values become year and genre labels. `src/intentune/domain/validation.py` (B2) holds validators shared by the listener and library models. `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
@@ -159,7 +162,7 @@ Contains business rules that do not depend on HTTP, databases, the filesystem, A
 
 Coordinates complete use cases through ports.
 
-**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept, diversification, or session awareness. `src/intentune/application/local_listener.py` (B1) implements `ensure_default_listener(unit_of_work)`. It returns the default local listener, generating and committing it on first run, and depends only on the `UnitOfWork` port.
+**Current:** `src/intentune/application/recommendation_service.py` implements `recommend_music(candidates, profile, limit)`, which validates its inputs and delegates to canonical ranking, and `recommend_from_catalog(catalog, profile, limit)`, which requests candidates from a `Catalog` port (see below) and delegates to `recommend_music()`. Neither has a request/response concept, diversification, or session awareness. `src/intentune/application/local_listener.py` (B1) implements `ensure_default_listener(unit_of_work)`. It returns the default local listener, generating and committing it on first run, and depends only on the `UnitOfWork` port. `src/intentune/application/library.py` (B2) implements `LibraryService` with the guide's B2 capabilities: register and list sources, scan a source and rescan all, import one discovered file, list and get tracks, and mark a track unavailable. It runs the validate → hash → dedupe → copy → persist → tag pipeline and the incremental-scan rules through ports only (see [System Workflow](system-workflow.md#library-import-and-scanning-b2)).
 
 **Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
 
@@ -188,7 +191,9 @@ Defines interfaces for data access and external capabilities.
 
 **Current (B1):** `src/intentune/ports/listener_profiles.py` defines `ListenerProfileRepository` (`get`, `get_default`, `add`). `src/intentune/ports/unit_of_work.py` defines `UnitOfWork`, the transaction boundary: it exposes the repositories, `commit()`, and `rollback()`, and anything left uncommitted is discarded when its `with` block ends. Repositories stage changes and never commit. See [Database Design](../design/database-design.md#repository-and-transaction-pattern).
 
-**Planned (Prototype 1):** `SessionRepository`, `TrackRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4), each added to the same unit of work.
+**Current (B2):** `src/intentune/ports/library.py` defines `LibrarySourceRepository`, `SourceFileRepository`, and `TrackRepository`, all exposed by the same `UnitOfWork`. `src/intentune/ports/library_files.py` defines the file ports: `SourceFolders` (resolve, list, hash, and locate files in a source folder), `AudioInspector` (confirm a format by content and read tags), and `ManagedMedia` (store a verified copy, locate, check, and discard it). The library use cases touch files only through these.
+
+**Planned (Prototype 1):** `SessionRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4), each added to the same unit of work.
 
 **Future:** an `IntentParser` port for LLM intent parsing (D30), and an external provider port (D39).
 
@@ -200,11 +205,17 @@ Implements ports using specific technology.
 
 **Current (B1):** `src/intentune/persistence/` is the SQLite adapter package. `db.py` resolves the database URL and creates engines (foreign keys on, WAL, SQLAlchemy-emitted `BEGIN`). `models.py` holds the ORM records and the `UtcDateTime` type. `repositories.py` holds `SqlAlchemyListenerProfileRepository`, `unit_of_work.py` holds `SqlAlchemyUnitOfWork`, and `migrations.py` runs Alembic from Python. Migrations live in `backend/alembic/`. Records never leave this package; repositories return domain models. Details: [Database Design](../design/database-design.md).
 
+**Current (B2):**
+
+- `persistence/` gained `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, and `SqlAlchemyTrackRepository`, with migration `2540be2956b8`.
+- `adapters/local_folders.py` (`LocalSourceFolders`) walks source folders safely. It skips links, stays inside the source even through Windows junctions, protects against loops, and excludes managed media.
+- `adapters/managed_media.py` (`LocalManagedMedia`) writes atomic, hash-verified copies into `backend/data/media/<track_uuid>.<extension>`.
+- `adapters/mutagen_audio.py` (`MutagenAudioInspector`) validates files by content and maps ID3, Vorbis-comment, and MP4 tags. It is the only module that imports mutagen.
+
 **Planned (Prototype 1):**
 
-- Further SQLAlchemy repositories and migrations for the library, sessions, feedback, and playlists (B2–B7)
-- Managed local media: safe copy into `backend/data/media/` under generated UUID names (B2)
-- Tag extraction (`mutagen`) and deterministic signal analysis (`librosa`, only if needed) (B2, B3)
+- Further SQLAlchemy repositories and migrations for analysis jobs, sessions, feedback, and playlists (B3–B7)
+- Deterministic signal analysis (`librosa`, only if needed) (B3)
 - CSV compatibility (the existing adapter, kept)
 
 **Future:** PostgreSQL repositories, an AI provider client, a YouTube Data API client, Spotify (D22, D39).

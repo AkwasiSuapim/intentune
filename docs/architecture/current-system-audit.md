@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`. The [B1 update](#b1-update-2026-10-19), Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect it.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2`. The [B1 update](#b1-update-2026-10-19), [B2 update](#b2-update-2026-10-19), Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect both.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -45,6 +45,22 @@ These results include the test-only [B1 hardening pass](../planning/development-
 
 The frontend was not touched or re-run in B1.
 
+## B2 Update (2026-10-19)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **404 passed, 1 skipped** (405 collected): 228 from B0 and B1, plus 177 from B2. The skip is the symbolic-link-to-file test, which needs link privileges this Windows machine does not grant; the folder-link and loop tests run here using junctions. |
+| Migration | `alembic upgrade head` on a new database; downgrade to `6ef3a3452ab7` and back | Creates the four library tables; round trip clean |
+| Migrations vs records | `alembic check` | "No new upgrade operations detected." |
+| End to end | A scratch script, with a scratch database, music folders, and media folder: register two folders, scan, delete an original, rescan | Two tracks imported; a cross-source duplicate linked, not duplicated; a broken `.mp3` recorded as unsupported; a `.txt` ignored; tags read; after deletion the file is recorded MISSING and the managed copy remains |
+| Mutation checks | Each mechanism disabled in turn: incremental skip, SHA-256 dedupe, media-folder exclusion, copy hash verification | Each disabled mechanism makes its tests fail |
+
+B2 tests per file: `test_library_domain.py` 78, `test_library_repositories.py` 28, `test_mutagen_audio.py` 20, `test_library_service.py` 18, `test_local_folders.py` 16, `test_managed_media.py` 14. `test_architecture_boundaries.py` gained 3 (now 18).
+
+Found and fixed during B2:
+- **Junctions:** on Python 3.11, `os.walk` enters Windows junctions and `Path.is_symlink()` reports them as ordinary folders. The walker now enters a folder only if its resolved location is inside the source.
+- **Flush order:** without ORM relationships, a flush could insert a child row before the parent row it references. Repositories now flush a parent row as soon as it is added.
+
 ## Current Files
 
 ### Backend
@@ -73,6 +89,22 @@ Added in B1 (2026-10-19):
 - `backend/src/intentune/application/local_listener.py` — `ensure_default_listener()`
 - `backend/src/intentune/persistence/` — `db.py`, `models.py`, `repositories.py`, `unit_of_work.py`, `migrations.py`
 - `backend/tests/conftest.py` and the six B1 test files listed above
+
+Added in B2 (2026-10-19):
+
+- `backend/alembic/versions/20261019_2540be2956b8_create_managed_library.py`
+- `backend/src/intentune/domain/library.py`, `backend/src/intentune/domain/validation.py`
+- `backend/src/intentune/ports/library.py`, `backend/src/intentune/ports/library_files.py`
+- `backend/src/intentune/application/library.py` — `LibraryService`
+- `backend/src/intentune/adapters/local_folders.py`, `managed_media.py`, `mutagen_audio.py`
+- the six B2 test files listed above
+
+Changed in B2:
+- `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: library records and repositories.
+- `domain/listener.py`: uses the shared validators; no behavior change.
+- `tests/conftest.py`: audio-file builders and a library fixture.
+- `tests/test_architecture_boundaries.py`: mutagen and filesystem rules.
+- `requirements.txt`: `mutagen`.
 
 ### Frontend
 
@@ -200,9 +232,10 @@ uvicorn[standard]==0.54.0
 httpx==0.28.1
 sqlalchemy==2.1.5
 alembic==1.20.0
+mutagen==1.48.1        (added in B2)
 ```
 
-`pip check` reports no broken requirements. `pytest` is used by the tests. Since B1 (2026-10-19), `sqlalchemy` and `alembic` are used by `backend/src/intentune/persistence/`, `backend/alembic/`, and the persistence tests; no domain, port, or application module imports them, and a test enforces that. No source or test file imports `pandas`, `fastapi`, `uvicorn`, or `httpx` yet. B1 added no dependency.
+`pip check` reports no broken requirements. `pytest` is used by the tests. Since B1 (2026-10-19), `sqlalchemy` and `alembic` are used by `backend/src/intentune/persistence/`, `backend/alembic/`, and the persistence tests; no domain, port, or application module imports them, and a test enforces that. No source or test file imports `pandas`, `fastapi`, `uvicorn`, or `httpx` yet. B1 added no dependency. B2 added `mutagen==1.48.1`, installed in `backend/.venv` and pinned in `backend/requirements.txt`, as the execution guide prescribes for this phase. `pip check` stays clean. Only `backend/src/intentune/adapters/mutagen_audio.py` and the tests import it.
 
 *Found in B0 and since fixed:* all entries were unpinned, `sqlalchemy` and `httpx` were listed but not installed, and `alembic` (required by D22) was not listed.
 
@@ -222,8 +255,9 @@ alembic==1.20.0
 There is currently no:
 
 - HTTP API
-- Persistence beyond the listener profile. B1 built the SQLite foundation and the `listener_profiles` table only, and no running entry point opens the database yet.
-- Local music library, import, or audio analysis
+- Persistence beyond the listener profile and the managed library. B1 and B2 built those tables only, and no running entry point opens the database yet.
+- Running library features. The managed library (register sources, scan, import, dedupe, tags) exists as a tested application service, but nothing a listener runs calls it until B8.
+- Audio analysis, background jobs, or artwork
 - Listening sessions in the backend
 - Feedback store
 - Playlists in the backend
@@ -247,7 +281,7 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | Missing-feature scoring with renormalization (D21) | No: the scorer raises on missing values | B5, while keeping complete-input legacy outputs identical |
 | SQLite + SQLAlchemy + Alembic (D22) | **Yes (B1, 2026-10-19):** engine configuration, repository and unit-of-work pattern, migrations | Later phases add their tables and repositories |
 | Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup from B8 |
-| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | No | B2 |
+| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan and API routes in B8; background scanning in B3 |
 | Background analysis jobs (D26, D28) | No | B3 |
 | Sessions, turns, recommendation occurrences, feedback events (D31) | No (the frontend has mock sessions only) | B4, B6 |
 | Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | No | B5 |

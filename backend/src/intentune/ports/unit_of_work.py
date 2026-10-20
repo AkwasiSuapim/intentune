@@ -7,13 +7,15 @@ exception -- discards every staged change. Nothing is written by accident.
 
 Each ``with`` block is a fresh transaction. A unit of work is not re-entrant.
 
-Prototype 1 phases add repositories here as they create them (tracks and
-sources in B2, sessions in B4, and so on). B1 has only listener profiles.
+Prototype 1 phases add repositories here as they create them: listener
+profiles in B1; library sources, source files, and tracks in B2; sessions in
+B4, and so on.
 """
 
 from types import TracebackType
 from typing import Optional, Protocol, Type
 
+from src.intentune.ports.library import LibrarySourceRepository, SourceFileRepository, TrackRepository
 from src.intentune.ports.listener_profiles import ListenerProfileRepository
 
 
@@ -23,6 +25,18 @@ class UnitOfWork(Protocol):
     @property
     def listener_profiles(self) -> ListenerProfileRepository:
         """The listener-profile repository for the active transaction."""
+        ...
+
+    @property
+    def library_sources(self) -> LibrarySourceRepository:
+        ...
+
+    @property
+    def source_files(self) -> SourceFileRepository:
+        ...
+
+    @property
+    def tracks(self) -> TrackRepository:
         ...
 
     def __enter__(self) -> "UnitOfWork":

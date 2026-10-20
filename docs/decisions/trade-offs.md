@@ -163,7 +163,8 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 ### Managed copies of imported music (D02, D23)
 
 - **Gain:** the library keeps working when the original files move or are deleted; storage names are generated, so filenames never become identifiers.
-- **Cost:** uses extra disk space, roughly one more copy of every imported track.
+- **Cost:** uses extra disk space, roughly one more copy of every imported track. Since B2, content that changes at the source adds a new copy and keeps the old one, until a removal feature exists (TD-013).
+- **Status:** Current since B2 (2026-10-19).
 - **Revisit when:** disk use becomes a problem for real libraries (B11).
 
 ### SQLite + SQLAlchemy + Alembic (D22)
@@ -181,7 +182,8 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 ### SHA-256 exact deduplication (D24)
 
 - **Gain:** simple, exact, and testable.
-- **Cost:** the same song in two encodings (for example, an MP3 and a FLAC) counts as two tracks.
+- **Cost:** the same song in two encodings (for example, an MP3 and a FLAC) counts as two tracks. So does the same audio with different embedded tags, since tags are part of the file's bytes.
+- **Status:** Current since B2 (2026-10-19).
 - **Revisit when:** duplicate transcodes become common; perceptual fingerprinting is deferred.
 
 ### Missing features stay missing (D21)

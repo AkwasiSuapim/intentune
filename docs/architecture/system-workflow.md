@@ -82,7 +82,7 @@ Playback is a mock timer. When a song's duration runs out, the frontend sends `n
 
 ## Planned Prototype 1 Workflows
 
-**Planned (approved, not implemented).** Summarized from the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md). The spec is authoritative where detail differs.
+**Planned (approved), except where a section says Current.** Summarized from the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md). The spec is authoritative where detail differs.
 
 ### Library import and scanning (B2)
 
@@ -107,6 +107,24 @@ A lightweight incremental scan runs at startup, and the listener can trigger **R
 | changed | re-hash; re-import/re-analyze if content changed |
 | missing at source | source marked missing; the managed copy stays usable |
 | exact duplicate | no second logical track |
+
+**Current (B2, 2026-10-19).** `LibraryService` (`backend/src/intentune/application/library.py`) implements this pipeline and the table above, with these specifics:
+
+- **Validate:**
+  - The extension must be allowlisted (`mp3`, `m4a`, `flac`, `ogg`, `opus`, `wav`); files with other extensions are ignored and counted.
+  - The file must be at most 1 GiB by default.
+  - mutagen must confirm the content is that format. MP3 bytes named `.flac`, or text named `.mp3`, are recorded as UNSUPPORTED.
+- **Copy:** the managed copy is written to a temporary file while being hashed, and moved into place only if its SHA-256 matches. A file that changes mid-import is recorded as FAILED and leaves nothing behind.
+- **Tags:** title, artist, album, year, and genres are read from the managed copy after the track is stored. If reading fails, the track stays IMPORTED and playable without them.
+- **Retries:**
+  - FAILED files (I/O errors, changed during import) are retried on the next scan even if unchanged.
+  - UNSUPPORTED files are not retried until they change.
+  - A changed file whose content is unchanged is re-hashed but not re-imported.
+  - A changed file whose content differs becomes a new track; the old track stays in the library.
+- **Repair:** a track marked unavailable (`MISSING_MANAGED_FILE`) gets its managed copy back when a source file with the same content is scanned again.
+- **Folder safety:** the walker skips symbolic links, never enters a folder whose real location is outside the source (this includes Windows junctions), visits each folder once, and never scans the managed media folder.
+
+Not yet: nothing runs the startup scan; the B8 startup will call `rescan_library()`. Scans run synchronously when called; background scanning is B3 (D26). "Queue deeper analysis" is B3: a track with a null `analysis_version` is waiting for analysis.
 
 ### Background analysis (B3)
 

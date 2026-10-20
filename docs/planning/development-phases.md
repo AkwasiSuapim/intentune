@@ -15,8 +15,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | Phase | Scope | Status |
 |---|---|---|
 | **B0** Reconcile/freeze baseline | Inspect the repository and frontend, run tests, record the baseline, reconcile documentation. No feature code. | **Complete and reviewed** (2026-10-18). Baseline: 131 backend tests pass. |
-| **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | **Complete, awaiting review** (2026-10-19). 228 backend tests pass (131 baseline + 97 from B1, including the hardening pass). |
-| **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | Not started |
+| **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | **Complete and committed** (2026-10-19, `f000bb2`). 228 backend tests pass (131 baseline + 97 from B1, including the hardening pass). |
+| **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | **Complete, awaiting review** (2026-10-19). 404 backend tests pass and 1 is skipped (405 collected; B2 adds 177). |
 | **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | Not started |
 | **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | Not started |
 | **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | Not started |
@@ -69,6 +69,34 @@ A test-only pass after the B1 architectural review. It changed `tests/test_archi
 - A deliberately failing migration changes the schema, confirms the change, and raises. The tests verify that the failed migration rolls back both schema and data, and that a failed upgrade from an empty database leaves no partial schema, not even `alembic_version`. With B1's transaction handling removed, both tests fail.
 - Brittle assertions were replaced. Exact table-set equality became checks against the tables the ORM declares and before/after schema snapshots. Whole reflected dictionaries became lookups of stable fields. The raw DDL text check on the partial unique index became behavior: a second default is refused on both INSERT and UPDATE, and several non-defaults are allowed.
 - It found no production bug and required no production-code change.
+
+### B2 record (2026-10-19)
+
+On branch `prototype-1`, on top of `f000bb2`. The guide's required proofs (execution guide §5), each tested in `backend/tests/test_library_service.py` with real files, real adapters, and a migrated database:
+
+- **Multiple sources coexist:** two registered folders feed one library, and registering the second leaves the first intact.
+- **An exact duplicate is not duplicated:** the same content twice in one folder and again in another folder gives one track and one managed file, with every source file linked to it.
+- **The managed copy survives deletion of the original:** the managed bytes are unchanged, the track stays IMPORTED, and the rescan records the file as MISSING.
+- **Unsupported formats fail safely:** a text file named `.mp3`, MP3 bytes named `.flac`, and an oversized file are recorded as UNSUPPORTED with a reason, with no track and no managed file. Non-audio files are ignored. The good file still imports, and the scan completes.
+- **Rescan is incremental:** an unchanged rescan hashes, probes, and copies nothing (counted by spies). A touched file with the same content is re-hashed only, and changed content becomes a new track.
+
+Also built and tested:
+- source path normalization, with registration made idempotent;
+- missing-source handling;
+- retry of FAILED files;
+- rejection of a file that changes mid-import, leaving no partial copy;
+- tolerance of tag-read failures;
+- mark-unavailable and repair;
+- exclusion of managed media from scans;
+- link, junction, and loop safety in the folder walker;
+- CHECK constraints on every enumerated column.
+
+`mutagen==1.48.1` was added. Decisions: [TD-013](../decisions/technical-decisions.md#td-013-b2-managed-local-library). Schema: [Database Design](../design/database-design.md#current-schema-b2). Workflow: [System Workflow](../architecture/system-workflow.md#library-import-and-scanning-b2).
+
+Not done in B2, by scope:
+- No startup scan or API route calls the library (B8).
+- Scans run synchronously (background scanning and analysis are B3); "queue deeper analysis" is represented by a null `analysis_version`.
+- Artwork is not extracted; how it would be served is an open question.
 
 ## Frontend Phases
 
