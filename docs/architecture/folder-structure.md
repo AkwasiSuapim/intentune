@@ -38,7 +38,8 @@ intentune/
 │   │   └── versions/
 │   │       ├── 20261019_6ef3a3452ab7_create_listener_profiles.py
 │   │       ├── 20261019_2540be2956b8_create_managed_library.py  (B2)
-│   │       └── 20261020_7a42f0b9c8bf_create_background_analysis.py  (B3)
+│   │       ├── 20261020_7a42f0b9c8bf_create_background_analysis.py  (B3)
+│   │       └── 20261020_dd7360f46b8b_create_listening_sessions.py  (B4)
 │   ├── data/
 │   │   └── songs.csv                  (intentune.db and media/ appear here when used; gitignored)
 │   ├── src/
@@ -55,14 +56,16 @@ intentune/
 │   │       │   ├── listener.py        (B1)
 │   │       │   ├── library.py         (B2)
 │   │       │   ├── validation.py      (B2: shared validators)
-│   │       │   └── analysis.py        (B3: jobs, features, analyzer identity)
+│   │       │   ├── analysis.py        (B3: jobs, features, analyzer identity)
+│   │       │   └── session.py         (B4: sessions, turns, occurrences, feedback events)
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   ├── recommendation_service.py
 │   │       │   ├── local_listener.py  (B1)
 │   │       │   ├── library.py         (B2: LibraryService)
 │   │       │   ├── analysis.py        (B3: AnalysisService)
-│   │       │   └── analysis_worker.py (B3: AnalysisWorker thread)
+│   │       │   ├── analysis_worker.py (B3: AnalysisWorker thread)
+│   │       │   └── sessions.py        (B4: SessionService)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
@@ -70,7 +73,8 @@ intentune/
 │   │       │   ├── unit_of_work.py    (B1)
 │   │       │   ├── library.py         (B2: library repositories)
 │   │       │   ├── library_files.py   (B2: folders, inspector, media)
-│   │       │   └── analysis.py        (B3: analyzer, job and feature repositories)
+│   │       │   ├── analysis.py        (B3: analyzer, job and feature repositories)
+│   │       │   └── sessions.py        (B4: session, turn, occurrence, feedback repositories)
 │   │       ├── adapters/
 │   │       │   ├── __init__.py
 │   │       │   ├── csv_catalog.py
@@ -111,7 +115,10 @@ intentune/
 │       ├── test_signal_levels.py      (B3)
 │       ├── test_analysis_repositories.py  (B3)
 │       ├── test_analysis_service.py   (B3)
-│       └── test_analysis_worker.py    (B3)
+│       ├── test_analysis_worker.py    (B3)
+│       ├── test_session_domain.py     (B4)
+│       ├── test_session_repositories.py  (B4)
+│       └── test_session_service.py    (B4)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -145,6 +152,14 @@ B3 added background analysis:
 - **Persistence:** analysis repositories and records joined `persistence/`, with a third migration.
 
 The worker lives in `application/`: it only coordinates `AnalysisService` with a thread and two events, and does no I/O itself.
+
+B4 added the session domain:
+- **Domain:** `domain/session.py`.
+- **Ports:** `ports/sessions.py`.
+- **Application:** `application/sessions.py` (`SessionService`).
+- **Persistence:** session records, repositories, and the context JSON codec joined `persistence/`, with a fourth migration.
+
+No new adapter or dependency.
 
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 

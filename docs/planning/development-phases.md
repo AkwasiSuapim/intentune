@@ -17,8 +17,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B0** Reconcile/freeze baseline | Inspect the repository and frontend, run tests, record the baseline, reconcile documentation. No feature code. | **Complete and reviewed** (2026-10-18). Baseline: 131 backend tests pass. |
 | **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | **Complete and committed** (2026-10-19, `f000bb2`). 228 backend tests pass (131 baseline + 97 from B1, including the hardening pass). |
 | **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | **Complete and committed** (2026-10-19, `079c6f4`). 404 backend tests pass and 1 is skipped (405 collected; B2 adds 177). |
-| **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | **Complete, awaiting review** (2026-10-20). 518 backend tests pass and 1 is skipped (519 collected; B3 adds 114). |
-| **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | Not started |
+| **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | **Complete and committed** (2026-10-20, `e2991cb`). 518 backend tests pass and 1 is skipped (519 collected; B3 adds 114). |
+| **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | **Complete, awaiting review** (2026-10-20). 618 backend tests pass and 1 is skipped (619 collected; B4 adds 100). |
 | **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | Not started |
 | **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | Not started |
 | **B7** Playlists | CRUD, add/remove/reorder, persistence | Not started |
@@ -127,6 +127,26 @@ Not done in B3, by scope:
 - No tempo, key, loudness in LUFS, or semantic features: estimates need an evaluation set (B11).
 - No background scanning; it is not assigned to a phase.
 - No `IMPORT_TRACK`, `EXTRACT_TAGS`, or `RESCAN_SOURCE` job kinds.
+
+### B4 record (2026-10-20)
+
+On branch `prototype-1`, on top of `e2991cb`. The guide's B4 rules (execution guide §7), each tested:
+
+- **The four concepts are introduced**, with repositories: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (`domain/session.py`, `ports/sessions.py`, `persistence/`).
+- **The algorithm `Recommendation` stays separate from the surfaced `RecommendationOccurrence`.** `SessionService.queue_recommendations()` takes in-memory `Recommendation`s, including those from the existing `rank_candidates()`, and records occurrences that copy track, rank, score, and algorithm.
+- **The session owns current state; history is separate.** The session row holds status and context. The current track and queue are occurrence rows (one PLAYING; QUEUED in order). Turns, occurrences, and feedback events are append-only history.
+- **No raw natural-language prompt is persisted.** Turns carry a kind and structured context only. The tables have no text column, and a test pins their exact column sets.
+- **App restart:** history is retained, the active queue is not resumed, and a new listening action creates a fresh session. `end_sessions_from_previous_run()` was verified with a real hard process exit, and starting a session always ends the previous active one.
+- **Pure application tests before HTTP:** `tests/test_session_service.py` drives the use cases directly.
+
+Decisions: [TD-015](../decisions/technical-decisions.md#td-015-b4-session-domain). Schema: [Database Design](../design/database-design.md#current-schema-b4). Workflow: [System Workflow](../architecture/system-workflow.md#listening-session-b4-b5).
+
+Not done in B4, by scope:
+- No recommendation production, queue refill, or three-candidate rule (B5).
+- No effects of turns on ranking (B5, B6).
+- No recording or interpreting of feedback events (B6; the table and repository exist).
+- No mapping of typed text to turns (open question).
+- No routes (B8).
 
 ## Frontend Phases
 

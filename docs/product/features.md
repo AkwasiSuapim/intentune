@@ -30,8 +30,8 @@
 - Managed local music library fed by multiple source folders *(B2: built and tested in the backend, with import, dedupe, tags, and incremental rescans; nothing a listener runs reaches it until B8)*
 - SQLite persistence with SQLAlchemy repositories and versioned migrations *(B1: foundation built, holding the listener profile only)*
 - Background scanning and analysis, with progressive track readiness *(B3: background analysis built and tested, with persisted jobs, one worker, recovery, and exact level and duration measurements. Scanning stays synchronous. Nothing a listener runs starts the worker until B8.)*
-- Structured `ListeningContext` and listening sessions
-- Recommendation occurrences, feedback, and playback events
+- Structured `ListeningContext` and listening sessions *(B4: session state machine, turns, and the restart rule built and tested in the backend; nothing a listener runs reaches them until B8)*
+- Recommendation occurrences, feedback, and playback events *(B4: occurrences, plus the raw-feedback table; recording feedback is B6)*
 - Continuous recommendation flow with a rolling three-candidate queue
 - Controlled exploration and repetition cooldown
 - Playlists

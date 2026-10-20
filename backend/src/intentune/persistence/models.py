@@ -27,6 +27,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
@@ -40,6 +41,7 @@ from sqlalchemy.types import TypeDecorator
 
 from src.intentune.domain.analysis import AnalysisFailureReason, AnalysisJobKind, AnalysisJobStatus, FeatureName
 from src.intentune.domain.library import AudioFormat, FailureReason, LabelKind, SourceFileStatus, SourceStatus, TrackStatus
+from src.intentune.domain.session import FeedbackEventType, OccurrenceStatus, SessionEndReason, SessionStatus, TurnKind
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -257,3 +259,143 @@ class TrackFeatureRecord(Base):
     analyzer_version: Mapped[str] = mapped_column(String(64), nullable=False)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     computed_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+# --- Listening sessions (B4) --------------------------------------------------------
+#
+# The session row is the current state; turns, occurrences, and feedback
+# events are the history (D31). The current track and the queue are the
+# session's PLAYING and QUEUED occurrences, so they are rows with constraints,
+# not a list stored in the session. The ListeningContext is stored as JSON
+# (context_json): it is always read and written whole and never queried by
+# field. Composite foreign keys keep a turn's or event's occurrence inside
+# the same session.
+
+
+class ListeningSessionRecord(Base):
+    __tablename__ = "listening_sessions"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", SessionStatus), name="status"),
+        CheckConstraint(_one_of("end_reason", SessionEndReason, nullable=True), name="end_reason"),
+        CheckConstraint(
+            "(status = 'ACTIVE' AND ended_at IS NULL AND end_reason IS NULL) "
+            "OR (status = 'ENDED' AND ended_at IS NOT NULL AND end_reason IS NOT NULL)",
+            name="end_matches_status",
+        ),
+        Index(
+            "uq_listening_sessions_one_active",
+            "listener_profile_id",
+            unique=True,
+            sqlite_where=text("status = 'ACTIVE'"),
+        ),
+        Index("ix_listening_sessions_listener_started", "listener_profile_id", "started_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    listener_profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("listener_profiles.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    end_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    context_json: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
+
+
+class RecommendationOccurrenceRecord(Base):
+    __tablename__ = "recommendation_occurrences"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", OccurrenceStatus), name="status"),
+        CheckConstraint("rank >= 1", name="rank"),
+        CheckConstraint("score IS NULL OR score BETWEEN 0 AND 1", name="score"),
+        CheckConstraint("queue_position IS NULL OR queue_position >= 0", name="queue_position"),
+        CheckConstraint("(status = 'QUEUED') = (queue_position IS NOT NULL)", name="queue_position_while_queued"),
+        CheckConstraint("(status IN ('PLAYING', 'PLAYED')) = (started_at IS NOT NULL)", name="started_when_played"),
+        CheckConstraint(
+            "(status IN ('PLAYED', 'REPLACED', 'DISCARDED')) = (finished_at IS NOT NULL)", name="finished_when_done"
+        ),
+        UniqueConstraint("id", "session_id", name="uq_recommendation_occurrences_id_session"),
+        Index(
+            "uq_recommendation_occurrences_one_playing",
+            "session_id",
+            unique=True,
+            sqlite_where=text("status = 'PLAYING'"),
+        ),
+        Index(
+            "uq_recommendation_occurrences_queue_position",
+            "session_id",
+            "queue_position",
+            unique=True,
+            sqlite_where=text("queue_position IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("listening_sessions.id"), nullable=False)
+    track_id: Mapped[str] = mapped_column(String(36), ForeignKey("tracks.id"), nullable=False, index=True)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    queue_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    surfaced_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
+
+
+class SessionTurnRecord(Base):
+    __tablename__ = "session_turns"
+    __table_args__ = (
+        CheckConstraint(_one_of("kind", TurnKind), name="kind"),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint("(kind = 'INITIAL_INTENT') = (sequence = 1)", name="initial_intent_first"),
+        CheckConstraint(
+            "kind NOT IN ('NOT_FOR_ME', 'MORE_LIKE_THIS') OR occurrence_id IS NOT NULL", name="target_when_required"
+        ),
+        UniqueConstraint("session_id", "sequence", name="uq_session_turns_session_sequence"),
+        ForeignKeyConstraint(
+            ["occurrence_id", "session_id"],
+            ["recommendation_occurrences.id", "recommendation_occurrences.session_id"],
+            name="fk_session_turns_occurrence_same_session",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("listening_sessions.id"), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    context_json: Mapped[str] = mapped_column(Text, nullable=False)
+    occurrence_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class FeedbackEventRecord(Base):
+    """A raw listening fact (spec §9). Interpretation is never stored here."""
+
+    __tablename__ = "feedback_events"
+    __table_args__ = (
+        CheckConstraint(_one_of("event_type", FeedbackEventType), name="event_type"),
+        CheckConstraint("played_seconds IS NULL OR played_seconds >= 0", name="played_seconds"),
+        CheckConstraint("duration_seconds IS NULL OR duration_seconds > 0", name="duration_seconds"),
+        CheckConstraint("played_fraction IS NULL OR played_fraction BETWEEN 0 AND 1", name="played_fraction"),
+        CheckConstraint("(played_seconds IS NULL) = (duration_seconds IS NULL)", name="playback_facts_together"),
+        CheckConstraint("(played_fraction IS NULL) = (played_seconds IS NULL)", name="fraction_with_facts"),
+        CheckConstraint(
+            "event_type NOT IN ('SKIP', 'COMPLETE') OR played_seconds IS NOT NULL", name="playback_facts_when_required"
+        ),
+        ForeignKeyConstraint(
+            ["occurrence_id", "session_id"],
+            ["recommendation_occurrences.id", "recommendation_occurrences.session_id"],
+            name="fk_feedback_events_occurrence_same_session",
+        ),
+        Index("ix_feedback_events_session_occurred", "session_id", "occurred_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("listening_sessions.id"), nullable=False)
+    occurrence_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    played_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    played_fraction: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)

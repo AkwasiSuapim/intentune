@@ -183,6 +183,30 @@ listener starts a fresh session and sets structured intent (ListeningContext)
 
 The listener presses Play once. The next candidate is prepared before the current track ends, the next track begins, and the queue is refilled and re-ranked. The frontend owns real playback position and timers; the backend records meaningful events, not per-second ticks.
 
+**Current (B4, 2026-10-20): the session state machine and history, without the ranking above.** `SessionService` (`backend/src/intentune/application/sessions.py`):
+
+```text
+start_session(listener, context)    -> ACTIVE session + INITIAL_INTENT turn
+                                       (the listener's previous ACTIVE session ends: REPLACED_BY_NEW_SESSION)
+queue_recommendations(recs, algo)   -> the given Recommendations become QUEUED occurrences, in list order;
+                                       whatever was still queued becomes REPLACED
+advance() / play(occurrence)        -> PLAYING -> PLAYED; the next (or the chosen) queued occurrence -> PLAYING
+apply_turn(kind, ...)               -> a turn with the context left in force:
+                                         REFINE replaces the context
+                                         NEXT finishes the current track and starts the next queued one
+                                         NOT_FOR_ME / MORE_LIKE_THIS name their occurrence (the playing one by default)
+                                         SURPRISE_ME / MORE_FAMILIAR / TRY_SOMETHING_DIFFERENT are recorded only
+end_session()                       -> ENDED_BY_LISTENER; queued -> DISCARDED, playing -> PLAYED
+```
+
+An ended session refuses every command and stays readable (`get_session`, `history`, `list_sessions`).
+
+What B4 does not do:
+- **Recommendations:** it does not produce them, refill the queue, or keep it at three. That is B5.
+- **Turn effects:** it does not act on what turns mean (exclusion, affinity, exploration), which is B5 and B6.
+- **Feedback:** it does not record feedback events. That is B6, though B4 created their table.
+- **Text:** it does not turn typed text into turns (an [open question](../planning/risks-and-open-questions.md#open-backend-questions)).
+
 ### Feedback and immediate adaptation (B6)
 
 ```text
@@ -207,6 +231,8 @@ app restarts
    -> the active queue is not restored
    -> the next listening action starts a fresh session
 ```
+
+**Current (B4) for sessions.** `SessionService.end_sessions_from_previous_run()` ends every session a previous run left `ACTIVE`, with reason `APP_RESTARTED`. Queued occurrences become `DISCARDED` and the playing one `PLAYED`; turns, occurrences, and events are kept. The next `start_session()` creates a fresh session. This was verified with a real hard process exit mid-session. Nothing calls it at startup until B8.
 
 ### Long-term adaptation (B10)
 

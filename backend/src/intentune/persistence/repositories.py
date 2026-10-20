@@ -6,6 +6,8 @@ accepts and returns domain models only, so ORM records stay inside the
 persistence package.
 """
 
+import dataclasses
+import json
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Sequence, Set
@@ -14,6 +16,15 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from src.intentune.domain.analysis import AnalysisJob, AnalysisJobKind, AnalysisJobStatus, TrackFeature
+from src.intentune.domain.models import ListeningContext
+from src.intentune.domain.session import (
+    FeedbackEvent,
+    ListeningSession,
+    OccurrenceStatus,
+    RecommendationOccurrence,
+    SessionStatus,
+    SessionTurn,
+)
 from src.intentune.domain.library import (
     LibrarySource,
     SourceFile,
@@ -25,8 +36,12 @@ from src.intentune.domain.listener import ListenerProfile
 from src.intentune.domain.validation import new_uuid
 from src.intentune.persistence.models import (
     AnalysisJobRecord,
+    FeedbackEventRecord,
     LibrarySourceRecord,
     ListenerProfileRecord,
+    ListeningSessionRecord,
+    RecommendationOccurrenceRecord,
+    SessionTurnRecord,
     SourceFileRecord,
     TrackFeatureRecord,
     TrackLabelRecord,
@@ -435,3 +450,250 @@ class SqlAlchemyTrackFeatureRepository:
                     computed_at=feature.computed_at,
                 )
             )
+
+
+# --- Listening sessions (B4) --------------------------------------------------------
+
+_CONTEXT_FORMAT = 1
+_CONTEXT_FIELDS = tuple(field.name for field in dataclasses.fields(ListeningContext))
+
+
+def context_to_json(context: ListeningContext) -> str:
+    """A ListeningContext as compact, key-sorted JSON tagged with its storage format."""
+    values = {}
+    for name in _CONTEXT_FIELDS:
+        value = getattr(context, name)
+        values[name] = list(value) if isinstance(value, tuple) else value
+    return json.dumps({"format": _CONTEXT_FORMAT, "context": values}, sort_keys=True, separators=(",", ":"))
+
+
+def context_from_json(text: str) -> ListeningContext:
+    """The ListeningContext a stored JSON value describes. Unknown formats or fields are refused, not ignored."""
+    payload = json.loads(text)
+    if not isinstance(payload, dict) or payload.get("format") != _CONTEXT_FORMAT or not isinstance(payload.get("context"), dict):
+        raise ValueError("stored listening context has an unknown format")
+    unknown = set(payload["context"]) - set(_CONTEXT_FIELDS)
+    if unknown:
+        raise ValueError(f"stored listening context has unknown fields: {sorted(unknown)}")
+    return ListeningContext(**payload["context"])
+
+
+def _session_from_record(record: ListeningSessionRecord) -> ListeningSession:
+    return ListeningSession(
+        session_id=record.id,
+        listener_profile_id=record.listener_profile_id,
+        status=record.status,
+        current_context=context_from_json(record.context_json),
+        started_at=record.started_at,
+        updated_at=record.updated_at,
+        ended_at=record.ended_at,
+        end_reason=record.end_reason,
+    )
+
+
+def _apply_session(record: ListeningSessionRecord, session: ListeningSession) -> None:
+    record.status = session.status.value
+    record.end_reason = session.end_reason.value if session.end_reason is not None else None
+    record.context_json = context_to_json(session.current_context)
+    record.updated_at = session.updated_at
+    record.ended_at = session.ended_at
+
+
+class SqlAlchemyListeningSessionRepository:
+    """ListeningSessionRepository port implementation (see ports/sessions.py)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, session_id: str) -> Optional[ListeningSession]:
+        record = self._session.get(ListeningSessionRecord, session_id)
+        return _session_from_record(record) if record is not None else None
+
+    def get_active_for_listener(self, listener_profile_id: str) -> Optional[ListeningSession]:
+        statement = select(ListeningSessionRecord).where(
+            ListeningSessionRecord.listener_profile_id == listener_profile_id,
+            ListeningSessionRecord.status == SessionStatus.ACTIVE.value,
+        )
+        record = self._session.scalars(statement).one_or_none()
+        return _session_from_record(record) if record is not None else None
+
+    def list_for_listener(self, listener_profile_id: str) -> List[ListeningSession]:
+        statement = (
+            select(ListeningSessionRecord)
+            .where(ListeningSessionRecord.listener_profile_id == listener_profile_id)
+            .order_by(ListeningSessionRecord.started_at.desc(), ListeningSessionRecord.id)
+        )
+        return [_session_from_record(record) for record in self._session.scalars(statement)]
+
+    def list_active(self) -> List[ListeningSession]:
+        statement = (
+            select(ListeningSessionRecord)
+            .where(ListeningSessionRecord.status == SessionStatus.ACTIVE.value)
+            .order_by(ListeningSessionRecord.started_at, ListeningSessionRecord.id)
+        )
+        return [_session_from_record(record) for record in self._session.scalars(statement)]
+
+    def add(self, session: ListeningSession) -> None:
+        record = ListeningSessionRecord(
+            id=session.session_id, listener_profile_id=session.listener_profile_id, started_at=session.started_at
+        )
+        _apply_session(record, session)
+        self._session.add(record)
+        self._session.flush()
+
+    def save(self, session: ListeningSession) -> None:
+        record = _require_record(self._session.get(ListeningSessionRecord, session.session_id), "session", session.session_id)
+        _apply_session(record, session)
+        self._session.flush()
+
+
+def _turn_from_record(record: SessionTurnRecord) -> SessionTurn:
+    return SessionTurn(
+        turn_id=record.id,
+        session_id=record.session_id,
+        sequence=record.sequence,
+        kind=record.kind,
+        context=context_from_json(record.context_json),
+        created_at=record.created_at,
+        occurrence_id=record.occurrence_id,
+    )
+
+
+class SqlAlchemySessionTurnRepository:
+    """SessionTurnRepository port implementation (see ports/sessions.py). Turns are history: added, never changed."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_for_session(self, session_id: str) -> List[SessionTurn]:
+        statement = select(SessionTurnRecord).where(SessionTurnRecord.session_id == session_id).order_by(SessionTurnRecord.sequence)
+        return [_turn_from_record(record) for record in self._session.scalars(statement)]
+
+    def add(self, turn: SessionTurn) -> None:
+        self._session.add(
+            SessionTurnRecord(
+                id=turn.turn_id,
+                session_id=turn.session_id,
+                sequence=turn.sequence,
+                kind=turn.kind.value,
+                context_json=context_to_json(turn.context),
+                occurrence_id=turn.occurrence_id,
+                created_at=turn.created_at,
+            )
+        )
+        self._session.flush()
+
+
+def _occurrence_from_record(record: RecommendationOccurrenceRecord) -> RecommendationOccurrence:
+    return RecommendationOccurrence(
+        occurrence_id=record.id,
+        session_id=record.session_id,
+        track_id=record.track_id,
+        rank=record.rank,
+        algorithm=record.algorithm,
+        status=record.status,
+        surfaced_at=record.surfaced_at,
+        updated_at=record.updated_at,
+        score=record.score,
+        queue_position=record.queue_position,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+    )
+
+
+def _apply_occurrence(record: RecommendationOccurrenceRecord, occurrence: RecommendationOccurrence) -> None:
+    record.status = occurrence.status.value
+    record.queue_position = occurrence.queue_position
+    record.updated_at = occurrence.updated_at
+    record.started_at = occurrence.started_at
+    record.finished_at = occurrence.finished_at
+
+
+class SqlAlchemyRecommendationOccurrenceRepository:
+    """RecommendationOccurrenceRepository port implementation (see ports/sessions.py).
+
+    add() and save() flush at once, so the order of the caller's changes is the
+    order of the writes. That keeps the partial unique indexes (one PLAYING
+    occurrence per session, one occurrence per queue position) satisfied after
+    every statement, not just at commit.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, occurrence_id: str) -> Optional[RecommendationOccurrence]:
+        record = self._session.get(RecommendationOccurrenceRecord, occurrence_id)
+        return _occurrence_from_record(record) if record is not None else None
+
+    def list_for_session(self, session_id: str, status: Optional[OccurrenceStatus] = None) -> List[RecommendationOccurrence]:
+        statement = select(RecommendationOccurrenceRecord).where(RecommendationOccurrenceRecord.session_id == session_id)
+        if status is not None:
+            statement = statement.where(RecommendationOccurrenceRecord.status == OccurrenceStatus(status).value)
+        if status is OccurrenceStatus.QUEUED:
+            order = (RecommendationOccurrenceRecord.queue_position,)
+        else:
+            order = (RecommendationOccurrenceRecord.surfaced_at, RecommendationOccurrenceRecord.rank, RecommendationOccurrenceRecord.id)
+        return [_occurrence_from_record(record) for record in self._session.scalars(statement.order_by(*order))]
+
+    def add(self, occurrence: RecommendationOccurrence) -> None:
+        record = RecommendationOccurrenceRecord(
+            id=occurrence.occurrence_id,
+            session_id=occurrence.session_id,
+            track_id=occurrence.track_id,
+            rank=occurrence.rank,
+            score=occurrence.score,
+            algorithm=occurrence.algorithm,
+            surfaced_at=occurrence.surfaced_at,
+        )
+        _apply_occurrence(record, occurrence)
+        self._session.add(record)
+        self._session.flush()
+
+    def save(self, occurrence: RecommendationOccurrence) -> None:
+        record = _require_record(
+            self._session.get(RecommendationOccurrenceRecord, occurrence.occurrence_id), "occurrence", occurrence.occurrence_id
+        )
+        _apply_occurrence(record, occurrence)
+        self._session.flush()
+
+
+def _feedback_event_from_record(record: FeedbackEventRecord) -> FeedbackEvent:
+    return FeedbackEvent(
+        event_id=record.id,
+        session_id=record.session_id,
+        occurrence_id=record.occurrence_id,
+        event_type=record.event_type,
+        occurred_at=record.occurred_at,
+        played_seconds=record.played_seconds,
+        duration_seconds=record.duration_seconds,
+    )
+
+
+class SqlAlchemyFeedbackEventRepository:
+    """FeedbackEventRepository port implementation (see ports/sessions.py). Events are raw facts: added, never changed."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_for_session(self, session_id: str) -> List[FeedbackEvent]:
+        statement = (
+            select(FeedbackEventRecord)
+            .where(FeedbackEventRecord.session_id == session_id)
+            .order_by(FeedbackEventRecord.occurred_at, FeedbackEventRecord.id)
+        )
+        return [_feedback_event_from_record(record) for record in self._session.scalars(statement)]
+
+    def add(self, event: FeedbackEvent) -> None:
+        self._session.add(
+            FeedbackEventRecord(
+                id=event.event_id,
+                session_id=event.session_id,
+                occurrence_id=event.occurrence_id,
+                event_type=event.event_type.value,
+                played_seconds=event.played_seconds,
+                duration_seconds=event.duration_seconds,
+                played_fraction=event.played_fraction,
+                occurred_at=event.occurred_at,
+            )
+        )
+        self._session.flush()

@@ -80,6 +80,14 @@ Library tests never touch `backend/data/`. Source folders and managed media live
 
 The skip is the same symbolic-link test as after B2. Per-file counts are in the [B3 audit](../architecture/current-system-audit.md#b3-update-2026-10-20). Analysis tests decode real audio that libsndfile encodes on the fly, with no binary fixtures and no network. The worker tests run a real thread and wait on observable state with deadlines rather than fixed sleeps; they passed three times in a row.
 
+## After B4 (2026-10-20)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **618 passed, 1 skipped**: the 519 B0–B3 tests, unchanged, plus 100 from B4 |
+
+Per-file counts are in the [B4 audit](../architecture/current-system-audit.md#b4-update-2026-10-20). The session use cases are tested directly at the application layer, with no HTTP, as the execution guide asks ("pure application tests before HTTP"). They run against a migrated SQLite database through the real repositories, like the library and analysis tests.
+
 ## Current Test Coverage
 
 ### Backend
@@ -170,6 +178,26 @@ Added in B3 (background analysis):
 
 `tests/test_migrations.py` compares each table's DDL clauses as a set (since B3), because Alembic's batch rebuild emits constraints in a varying order. It also checks that B3's downgrade keeps every track.
 
+Added in B4 (session domain):
+
+- `tests/test_session_domain.py`:
+  - **Sessions:** lifecycle and invariants (an ended session has an end time and reason; it cannot end twice).
+  - **Turns:** the first turn, and only the first, is the initial intent; turns about a recommendation name it; a turn holds a `ListeningContext`, never a string.
+  - **Occurrences:** every transition QUEUED → PLAYING → PLAYED, REPLACED, or DISCARDED, and every impossible one refused.
+  - **Feedback events:** raw-fact rules, with SKIP and COMPLETE needing played and total seconds, and the derived, capped `played_fraction`.
+- `tests/test_session_repositories.py`:
+  - **Round trips:** sessions, turns, occurrences (queue in position order), and feedback events, with the fraction stored.
+  - **Context codec:** every field round-trips; unknown formats and fields are refused.
+  - **Database rules:** one active session per listener; one playing occurrence per session; unique queue positions; turns and events referencing only their own session's occurrences (composite foreign keys); CHECK constraints on feedback rows.
+  - **Never stored:** the exact column sets pin that no raw text or UI state can be stored.
+- `tests/test_session_service.py`:
+  - **Starting and ending:** starting ends the previous active session; ending discards the queue and keeps history; ended sessions refuse commands but stay readable.
+  - **Restart (D35):** across two engines, history is kept, the queue is not resumed, and the next session is fresh.
+  - **Queuing:** recommendations from the canonical `rank_candidates()` become occurrences while staying separate; a new queue replaces the old; unknown tracks and duplicate tracks are refused, and nothing changes.
+  - **Playback:** `advance` and `play`.
+  - **Turns:** REFINE, NEXT, NOT_FOR_ME, MORE_LIKE_THIS, and the exploration turns, with argument validation and same-session checks.
+  - **History:** raw events read back in order.
+
 ### Frontend
 
 Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure tests (composition policy, reducers, commands, mock service, service boundary), static-render tests (every block type and the unknown-block fallback), DOM tests (interaction, focus, overlays, loading/waiting/failure states), and browser checks (layout matrix, motion, contrast, axe-core audit, keyboard probe, design comparison). The frontend has not been tested on physical phones or with real screen readers.
@@ -183,7 +211,7 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | Clean migration, repository smoke tests | B1 — **Current** (2026-10-19) |
 | Multi-folder import; exact duplicate not duplicated; managed copy survives source deletion; unsupported formats fail safely; incremental rescan | B2 — **Current** (2026-10-19) |
 | Tracks usable during analysis; a failed track does not stop the worker; interrupted jobs recover; reanalysis after an analyzer version change | B3 — **Current** (2026-10-20) |
-| Session domain transitions, written as pure application tests before HTTP | B4 |
+| Session domain transitions, written as pure application tests before HTTP | B4 — **Current** (2026-10-20) |
 | Context resolution; missing-feature scoring; candidate similarity; session fit; combined weights; diversity/cooldown (recent track, repeated artist, near-duplicates); exploration gate; three-candidate selection; #2 safety threshold; conflicting current vs historical intent; finite library; exploration success and failure; **complete-input legacy outputs unchanged** | B5 |
 | Feedback thresholds, including boundary values (8 s, 15%, 40%, 75%, 90%); explicit actions overriding passive playback; playback-event behavior; Not for me excluding the track for the session only | B6 |
 | Playlist CRUD and ordering; one occurrence per playlist | B7 |

@@ -18,6 +18,10 @@ from src.intentune.persistence.repositories import (
     SqlAlchemyLibrarySourceRepository,
     SqlAlchemyListenerProfileRepository,
     SqlAlchemySourceFileRepository,
+    SqlAlchemyFeedbackEventRepository,
+    SqlAlchemyListeningSessionRepository,
+    SqlAlchemyRecommendationOccurrenceRepository,
+    SqlAlchemySessionTurnRepository,
     SqlAlchemyTrackFeatureRepository,
     SqlAlchemyTrackRepository,
 )
@@ -33,6 +37,10 @@ class SqlAlchemyUnitOfWork:
         self._tracks: Optional[SqlAlchemyTrackRepository] = None
         self._analysis_jobs: Optional[SqlAlchemyAnalysisJobRepository] = None
         self._track_features: Optional[SqlAlchemyTrackFeatureRepository] = None
+        self._listening_sessions: Optional[SqlAlchemyListeningSessionRepository] = None
+        self._session_turns: Optional[SqlAlchemySessionTurnRepository] = None
+        self._recommendation_occurrences: Optional[SqlAlchemyRecommendationOccurrenceRepository] = None
+        self._feedback_events: Optional[SqlAlchemyFeedbackEventRepository] = None
 
     @property
     def listener_profiles(self) -> SqlAlchemyListenerProfileRepository:
@@ -58,6 +66,22 @@ class SqlAlchemyUnitOfWork:
     def track_features(self) -> SqlAlchemyTrackFeatureRepository:
         return self._active(self._track_features)
 
+    @property
+    def listening_sessions(self) -> SqlAlchemyListeningSessionRepository:
+        return self._active(self._listening_sessions)
+
+    @property
+    def session_turns(self) -> SqlAlchemySessionTurnRepository:
+        return self._active(self._session_turns)
+
+    @property
+    def recommendation_occurrences(self) -> SqlAlchemyRecommendationOccurrenceRepository:
+        return self._active(self._recommendation_occurrences)
+
+    @property
+    def feedback_events(self) -> SqlAlchemyFeedbackEventRepository:
+        return self._active(self._feedback_events)
+
     def __enter__(self) -> "SqlAlchemyUnitOfWork":
         if self._session is not None:
             raise RuntimeError("The unit of work is already active; it is not re-entrant")
@@ -68,6 +92,10 @@ class SqlAlchemyUnitOfWork:
         self._tracks = SqlAlchemyTrackRepository(self._session)
         self._analysis_jobs = SqlAlchemyAnalysisJobRepository(self._session)
         self._track_features = SqlAlchemyTrackFeatureRepository(self._session)
+        self._listening_sessions = SqlAlchemyListeningSessionRepository(self._session)
+        self._session_turns = SqlAlchemySessionTurnRepository(self._session)
+        self._recommendation_occurrences = SqlAlchemyRecommendationOccurrenceRepository(self._session)
+        self._feedback_events = SqlAlchemyFeedbackEventRepository(self._session)
         return self
 
     def __exit__(
@@ -84,6 +112,10 @@ class SqlAlchemyUnitOfWork:
         self._tracks = None
         self._analysis_jobs = None
         self._track_features = None
+        self._listening_sessions = None
+        self._session_turns = None
+        self._recommendation_occurrences = None
+        self._feedback_events = None
         if session is None:
             return
         try:

@@ -52,7 +52,8 @@
 - What is the first stable API response schema? Still open: designed in B8.
 - What counts as "useful novelty" for letting candidate #2 play first (D15)? The spec does not define it.
 - How does the frontend's categorical intent (for example, five energy levels) map to `ListeningContext` numeric targets?
-- Where do the frontend's typed messages and quick-action labels become structured turn variants, given that React must not parse language and the backend accepts only limited deterministic commands (D30)?
+- Where do the frontend's typed messages and quick-action labels become structured turn variants, given that React must not parse language and the backend accepts only limited deterministic commands (D30)? *(Still open after B4: `SessionService.apply_turn()` accepts structured turn kinds and `ListeningContext` only, so the mapping has to happen before it.)*
+- *(Raised in B4, 2026-10-20.)* Which call starts a session for the listener at startup or on Play (the "next listening action" of D35)? The B8 startup must call `end_sessions_from_previous_run()` before any request is served.
 - The B9 guidance is to satisfy the existing frontend service interface. That interface has no methods for reactions, playback events, or playlist CRUD, which Prototype 1 requires. How far may B9 extend it?
 - How is artwork extracted in B2 served to the frontend? The route list has no artwork route. *B2 (2026-10-19) does not extract artwork. Extraction waits until there is a way to serve it, so B8 should settle this first.*
 - *(Raised in B3, 2026-10-20.)* D26 says scanning **and** analysis run in the background. B3 was scoped to analysis only, so scans still run synchronously when called. Which phase makes scanning non-blocking? B8 could run a scan off the request thread, or a `RESCAN_SOURCE` job kind could be added.

@@ -81,6 +81,30 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 114 tests: five new files, plus three in existing files. The suite is 518 passed and 1 skipped.
 - TD-014 records the B3 implementation decisions.
 
+### Added — Phase B4: Session domain (2026-10-20)
+
+- `src/intentune/domain/session.py`:
+  - `ListeningSession` holds current state: ACTIVE or ENDED, with an end reason, and the `ListeningContext` in force.
+  - `SessionTurn` holds steering history: eight turn kinds, each with the context left in force, and no text.
+  - `RecommendationOccurrence` is a surfaced recommendation: QUEUED → PLAYING → PLAYED, or REPLACED or DISCARDED.
+  - `FeedbackEvent` is a raw listening fact with a derived, capped `played_fraction`.
+  - The read models are `SessionState` and `SessionHistory`.
+- `SessionService` (`src/intentune/application/sessions.py`):
+  - **Lifecycle:** start (ending the listener's previous active session), end, and `end_sessions_from_previous_run()` for D35 (end left-over sessions, discard their queues, keep history).
+  - **Steering and playback:** apply a turn, queue recommendations (algorithm `Recommendation`s become persisted occurrences), play, and advance.
+  - **Reads:** session state, the session list, and full history.
+- Ports `ListeningSessionRepository`, `SessionTurnRepository`, `RecommendationOccurrenceRepository`, `FeedbackEventRepository` (`src/intentune/ports/sessions.py`), with SQLAlchemy implementations and a strict, versioned context JSON codec.
+- Migration `dd7360f46b8b`: `listening_sessions`, `session_turns`, `recommendation_occurrences`, `feedback_events`.
+  - **Uniqueness:** partial unique indexes allow one active session per listener, one playing occurrence per session, and unique queue positions.
+  - **References:** composite foreign keys keep turns and events inside their own session.
+  - **Status checks:** CHECK constraints tie every status to the columns it implies.
+- 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
+- TD-015 records the B4 implementation decisions.
+
+### Fixed — during B4 (2026-10-20)
+
+- `docs/changelog.md` had a B2 limitation sentence attached to the B3 limitation, from the B3 edit.
+
 ### Fixed — during B3 (2026-10-20)
 
 - A newer analyzer version could be permanently blocked from re-analyzing a track after an older version had marked its queued job SUPERSEDED. Found in manual verification; superseded jobs are now re-armed by their own version.
@@ -137,8 +161,9 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - Found in B0 and fixed the same day as B1 prerequisites: `.gitignore` did not ignore the planned database or managed media; `DATABASE_URL` in `backend/.env.example` resolved to `backend/intentune.db`; `backend/requirements.txt` was unpinned, listed `sqlalchemy` and `httpx` without them being installed, and did not list `alembic`. Transitive dependencies are still not locked.
 - The frontend runs only on mock data, has no audio playback, and is not connected to the backend.
 - B1 persistence is not wired into any running entry point. Nothing applies migrations or calls `ensure_default_listener()` at startup until B8. `backend/.env` is not loaded, so a different database must be chosen through the `DATABASE_URL` environment variable.
-- B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously; background scanning (D26) is not assigned to a phase, since B3 covered analysis only. Artwork is not extracted.
-- B3's worker is not started by any running entry point until B8. Only exact signal measurements exist (duration, peak, RMS level); BPM, key, loudness in LUFS, and semantic features stay `NULL`. M4A tracks are never analyzed, because libsndfile cannot decode them. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
+- B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously; background scanning (D26) is not assigned to a phase, since B3 covered analysis only. Artwork is not extracted. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
+- B3's worker is not started by any running entry point until B8. Only exact signal measurements exist (duration, peak, RMS level); BPM, key, loudness in LUFS, and semantic features stay `NULL`. M4A tracks are never analyzed, because libsndfile cannot decode them.
+- B4's session service is not called by any running entry point until B8, and nothing produces the recommendations it queues until B5. Turns are recorded but do not yet change ranking. Feedback events have a table but no recording use case (B6).
 
 ### Current Baseline
 

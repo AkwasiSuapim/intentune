@@ -18,7 +18,7 @@
 | No raw local paths in API responses or errors | Planned (B8) |
 | No stack traces in client errors | Planned (B8) |
 | Text-length validation | Planned (B8) |
-| No raw prompt retention by default (D33) | Planned (B4) |
+| No raw prompt retention by default (D33) | **Current (B4):** session turns store a kind and a structured `ListeningContext` only. No session table has a text column for a prompt, and a test pins their exact columns. No use case accepts raw text. |
 | No external sharing of imported music | Planned; Prototype 1 has no network integrations |
 | No real provider network calls in ordinary tests | **Current:** no test makes a network call |
 

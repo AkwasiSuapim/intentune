@@ -212,6 +212,7 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 
 - **Gain:** no stale queue or playback state is restored.
 - **Cost:** the listener cannot pick up a queue exactly where it stopped.
+- **Status:** Current since B4 (2026-10-20). `end_sessions_from_previous_run()` ends left-over sessions as `APP_RESTARTED`, discards their queues, and keeps their history; verified across a hard process exit (TD-015).
 
 ## Trade-off Entry Template
 

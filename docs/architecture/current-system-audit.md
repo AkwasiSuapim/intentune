@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4`. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), and [B3](#b3-update-2026-10-20) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all three.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb`. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), and [B4](#b4-update-2026-10-20) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all four.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -80,6 +80,17 @@ Found and fixed during B3:
 - **Constraint order after a table rebuild.** Alembic's batch rebuild emits a rebuilt table's constraints in a varying order, because it copies them from an unordered set. The B1 schema-snapshot tests compared DDL text exactly; they now compare each table's clauses as a set and stay exact about each definition.
 - **Two test expectations were wrong.** A lossy-format test assumed the decoded peak stays near the source amplitude; Opus overshoots this tone's abrupt start to about 0.67. The test now checks block-by-block results against a whole-file computation on the same decoded samples. A B2 test used `READY` as its example of an undefined status, and it is now defined.
 
+## B4 Update (2026-10-20)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **618 passed, 1 skipped** (619 collected): 519 from B0–B3, plus 100 from B4. The skip is the same symbolic-link test as before. |
+| Migration | `alembic upgrade head`, then `alembic check`; downgrade to `7a42f0b9c8bf` and back | Four session tables created; no drift; round trip clean |
+| Across a restart | A scratch script in two processes: start a session over real imported tracks, queue, play, refine, NEXT, NOT_FOR_ME, then `os._exit` mid-session; a second process applies the restart rule | The session ended `APP_RESTARTED`, with no queue or playing track resumed. All four turns, with their contexts, and every occurrence (PLAYED, PLAYED, DISCARDED) were kept. A fresh session started. Raw rows show only a turn kind and structured, format-versioned context JSON. |
+| Mutation checks | Disabled in turn: restart cleanup, ending the previous session on start, replacing the old queue, discarding the queue on end, NEXT advancing, the context codec keeping every field | Each disabled rule makes its tests fail |
+
+B4 tests per file: `test_session_domain.py` 47, `test_session_repositories.py` 27, `test_session_service.py` 26. No dependency was added, and no existing test changed.
+
 ## Current Files
 
 ### Backend
@@ -117,6 +128,16 @@ Added in B2 (2026-10-19):
 - `backend/src/intentune/application/library.py` — `LibraryService`
 - `backend/src/intentune/adapters/local_folders.py`, `managed_media.py`, `mutagen_audio.py`
 - the six B2 test files listed above
+
+Added in B4 (2026-10-20):
+
+- `backend/alembic/versions/20261020_dd7360f46b8b_create_listening_sessions.py`
+- `backend/src/intentune/domain/session.py`
+- `backend/src/intentune/ports/sessions.py`
+- `backend/src/intentune/application/sessions.py` (`SessionService`)
+- the three B4 test files listed above
+
+Changed in B4: `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, and `ports/unit_of_work.py` (session records, repositories, and the context JSON codec).
 
 Added in B3 (2026-10-20):
 
@@ -301,8 +322,8 @@ There is currently no:
 - Running library features. The managed library (register sources, scan, import, dedupe, tags) exists as a tested application service, but nothing a listener runs calls it until B8.
 - Running background analysis. The worker and analyzer exist and are tested, but nothing starts the worker until B8.
 - Estimated or semantic audio features (tempo, key, loudness in LUFS, energy, mood, and so on), background scanning, or artwork
-- Listening sessions in the backend
-- Feedback store
+- Running listening sessions. Since B4, the session state machine and its history exist as a tested service, but nothing calls it until B8, and nothing yet produces the recommendations it queues (B5).
+- Recording or interpreting feedback. Since B4 there is a table for raw feedback events; recording and interpretation are B6.
 - Playlists in the backend
 - Audio playback
 - Authentication (none is planned for Prototype 1, D01)
@@ -320,13 +341,13 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | Prototype 1 need | Exists today | Gap |
 |---|---|---|
 | Canonical models, scoring, ranking, `Catalog` port (D38) | Yes | Preserve. Extend through shared primitives in B5. |
-| `ListeningContext` as the source of intent (D29) | Model only | Not used by scoring. Used from B4/B5. |
+| `ListeningContext` as the source of intent (D29) | **Partly (B4):** it is a session's stored intent, kept per session and per turn | Not used by scoring yet (B5) |
 | Missing-feature scoring with renormalization (D21) | No: the scorer raises on missing values | B5, while keeping complete-input legacy outputs identical |
 | SQLite + SQLAlchemy + Alembic (D22) | **Yes (B1, 2026-10-19):** engine configuration, repository and unit-of-work pattern, migrations | Later phases add their tables and repositories |
 | Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup from B8 |
 | Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan and API routes in B8; background *scanning* (D26) is not assigned to a phase (B3 covered analysis only) |
 | Background analysis jobs (D26, D28) | **Yes (B3, 2026-10-20):** persisted jobs, one worker thread, recovery, provenance-tagged signal measurements | Worker started at app startup in B8; estimated features need an evaluation set first |
-| Sessions, turns, recommendation occurrences, feedback events (D31) | No (the frontend has mock sessions only) | B4, B6 |
+| Sessions, turns, recommendation occurrences, feedback events (D31) | **Yes (B4, 2026-10-20):** session state machine, turns, occurrences, restart rule (D35), and the raw-feedback table | Feedback recording and interpretation in B6; routes in B8 |
 | Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | No | B5 |
 | Playlists (D34) | No (frontend-local only) | B7 |
 | FastAPI routes, error envelope, audio serving | No (FastAPI listed but unused) | B8 |

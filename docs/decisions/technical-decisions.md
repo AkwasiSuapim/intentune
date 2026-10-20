@@ -299,6 +299,56 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 - M4A becomes common in real libraries.
 - Measured analysis throughput (B11) calls for more than one worker.
 
+## TD-015: B4 Session Domain
+
+**Status:** Accepted, awaiting B4 review
+
+**Date:** 2026-10-20
+
+**Context:** Spec §10 and D29–D35 fix a session model: the session owns current state while history is separate; `Recommendation` and `RecommendationOccurrence` stay distinct; no raw prompts; and no resumed queue after a restart. Left open were the storage of context and queue (an open trade-off in the database design), and how B4 divides work with B5 (ranking) and B6 (feedback).
+
+**Decision:**
+
+1. **Storage of context and queue.**
+   - The `ListeningContext` is a JSON column (`{"format": 1, "context": {...}}`). It is read and written whole and never queried by field, and loading refuses unknown formats and fields.
+   - The current track and queue are not stored on the session row. They are the session's one `PLAYING` occurrence and its `QUEUED` occurrences in position order, constrained by partial unique indexes.
+2. **One active session per listener**, enforced by a partial unique index. `start_session()` first ends the previous one as `REPLACED_BY_NEW_SESSION`. Startup calls `end_sessions_from_previous_run()`, which ends sessions as `APP_RESTARTED`, discards queued occurrences, and keeps history (D35).
+3. **Turns.**
+   - Every turn records the context in force after it, so history shows how intent changed.
+   - `REFINE` replaces the context, and `NEXT` advances the queue.
+   - `NOT_FOR_ME` and `MORE_LIKE_THIS` name an occurrence, the playing one by default.
+   - The exploration turns are recorded only.
+   - What turns mean for ranking belongs to B5 and B6. No turn carries text.
+4. **Recommendation versus occurrence.** `queue_recommendations()` takes domain `Recommendation`s and records occurrences.
+   - Each occurrence copies the track id, the algorithm's rank, its normalized score, and an algorithm label.
+   - Queue order is the given order, which may differ from rank order (B5's #2-first rule).
+   - A new queue marks what was still queued as `REPLACED`. History is never rewritten.
+5. **Feedback events.** B4 defines the raw-fact model, table, and repository, because spec §29 places `FeedbackEvent` in B4. It adds no use case to record events: the API design and the execution guide assign recording, Feedback Policy v1, and re-ranking to B6.
+6. **Integrity.**
+   - Composite foreign keys (`occurrence_id`, `session_id`) keep a turn's or event's occurrence inside its own session.
+   - CHECK constraints tie every status to the columns it implies.
+   - Occurrence writes flush immediately, so the partial unique indexes hold after every statement.
+7. **No new dependency.** `ListeningContext` and `Recommendation` (protected models) are used unchanged.
+
+**Alternatives Considered:**
+- A JSON queue on the session row (the database could not enforce it).
+- Context as columns plus child tables (more schema for a value that is always loaded whole).
+- Storing the current occurrence id on the session (a foreign-key cycle with occurrences).
+- Recording feedback in B4 (it would pre-empt B6's rules).
+- Allowing several active sessions per listener (the spec has one current state).
+
+**Consequences:**
+- Every queue change and every steering action is recoverable from history.
+- A crash can never resume a stale queue.
+- The database rejects inconsistent sessions, cross-session references, and stored text.
+- B5 must supply `Recommendation`s whose candidate ids are library track ids, and enforce the three-candidate queue.
+- B6 adds event recording on top of the existing table.
+
+**Revisit When:**
+- B5 needs to query context fields in SQL.
+- B9 shows the frontend needs more session state.
+- Multiple listeners arrive (Future).
+
 ## New Decision Template
 
 ```text

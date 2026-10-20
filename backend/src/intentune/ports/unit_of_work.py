@@ -21,6 +21,12 @@ from typing import Optional, Protocol, Type
 from src.intentune.ports.analysis import AnalysisJobRepository, TrackFeatureRepository
 from src.intentune.ports.library import LibrarySourceRepository, SourceFileRepository, TrackRepository
 from src.intentune.ports.listener_profiles import ListenerProfileRepository
+from src.intentune.ports.sessions import (
+    FeedbackEventRepository,
+    ListeningSessionRepository,
+    RecommendationOccurrenceRepository,
+    SessionTurnRepository,
+)
 
 
 class UnitOfWork(Protocol):
@@ -49,6 +55,22 @@ class UnitOfWork(Protocol):
 
     @property
     def track_features(self) -> TrackFeatureRepository:
+        ...
+
+    @property
+    def listening_sessions(self) -> ListeningSessionRepository:
+        ...
+
+    @property
+    def session_turns(self) -> SessionTurnRepository:
+        ...
+
+    @property
+    def recommendation_occurrences(self) -> RecommendationOccurrenceRepository:
+        ...
+
+    @property
+    def feedback_events(self) -> FeedbackEventRepository:
         ...
 
     def __enter__(self) -> "UnitOfWork":

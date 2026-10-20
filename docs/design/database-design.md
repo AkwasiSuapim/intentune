@@ -2,12 +2,13 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, 2026-10-20), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis and B4 session domain, 2026-10-20), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
 - **B2** added the managed library: `library_sources`, `source_files`, `tracks`, and `track_labels` (see [Current Schema (B2)](#current-schema-b2)).
 - **B3** added background analysis: `analysis_jobs` and `track_features`, and the `ANALYZING` and `READY` track states (see [Current Schema (B3)](#current-schema-b3)).
+- **B4** added the session domain: `listening_sessions`, `session_turns`, `recommendation_occurrences`, and `feedback_events` (see [Current Schema (B4)](#current-schema-b4)).
 - The recommendation catalog used by the CLI is still `backend/data/songs.csv`. Recommending from library tracks is B5.
 - Nothing in the running CLI opens the database yet. The FastAPI startup (B8) will apply migrations, create the default listener, and run the startup scan.
 
@@ -172,12 +173,84 @@ Unique `(track_id, kind, value, source)`. Partial unique index `uq_track_labels_
 
 Reanalysis replaces one analyzer's features for a track in the same transaction that marks the job `SUCCEEDED`. A failed reanalysis leaves the earlier features in place.
 
+## Current Schema (B4)
+
+**Current.** Created by migration `dd7360f46b8b` (`backend/alembic/versions/20261020_dd7360f46b8b_create_listening_sessions.py`), which revises `7a42f0b9c8bf`.
+
+The session row is the current state; turns, occurrences, and feedback events are the history (D31). The current track and the queue are not stored on the session. They are the session's one `PLAYING` occurrence and its `QUEUED` occurrences in `queue_position` order, so the database constrains them like any other rows.
+
+### `listening_sessions`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `listener_profile_id` | `VARCHAR(36)` | not null | Foreign key to `listener_profiles`. |
+| `status` | `VARCHAR(16)` | not null | `ACTIVE` or `ENDED`. |
+| `end_reason` | `VARCHAR(32)` | null | `ENDED_BY_LISTENER`, `REPLACED_BY_NEW_SESSION`, or `APP_RESTARTED`; set exactly when `ENDED` (CHECK). |
+| `context_json` | `TEXT` | not null | The `ListeningContext` in force, as JSON (see below). |
+| `started_at`, `updated_at` | `DATETIME` | not null | |
+| `ended_at` | `DATETIME` | null | Set exactly when `ENDED`. |
+
+Partial unique index `uq_listening_sessions_one_active` on `listener_profile_id WHERE status = 'ACTIVE'`: a listener has at most one active session.
+
+### `recommendation_occurrences`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key; unique together with `session_id` (target of composite foreign keys). |
+| `session_id` | `VARCHAR(36)` | not null | Foreign key to `listening_sessions`. |
+| `track_id` | `VARCHAR(36)` | not null | Foreign key to `tracks`; indexed. |
+| `rank` | `INTEGER` | not null | `>= 1`: the algorithm's rank. |
+| `score` | `FLOAT` | null | 0–1: the algorithm's normalized score. |
+| `algorithm` | `VARCHAR(64)` | not null | Which algorithm and version produced it. |
+| `status` | `VARCHAR(16)` | not null | `QUEUED`, `PLAYING`, `PLAYED`, `REPLACED`, or `DISCARDED`. |
+| `queue_position` | `INTEGER` | null | Set exactly while `QUEUED` (CHECK). |
+| `surfaced_at`, `updated_at` | `DATETIME` | not null | |
+| `started_at` | `DATETIME` | null | Set exactly when `PLAYING` or `PLAYED`. |
+| `finished_at` | `DATETIME` | null | Set exactly when `PLAYED`, `REPLACED`, or `DISCARDED`. |
+
+Partial unique indexes: `uq_recommendation_occurrences_one_playing` (one `PLAYING` per session) and `uq_recommendation_occurrences_queue_position` (`session_id`, `queue_position`). Queue order is the order given to `queue_recommendations()`, which may differ from rank order. Positions are not renumbered when a queued occurrence is played early; order is what counts.
+
+### `session_turns`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `session_id` | `VARCHAR(36)` | not null | Foreign key to `listening_sessions`. Unique with `sequence`. |
+| `sequence` | `INTEGER` | not null | From 1; the first turn, and only the first, is `INITIAL_INTENT` (CHECK). |
+| `kind` | `VARCHAR(32)` | not null | `INITIAL_INTENT`, `REFINE`, `NEXT`, `NOT_FOR_ME`, `MORE_LIKE_THIS`, `SURPRISE_ME`, `MORE_FAMILIAR`, or `TRY_SOMETHING_DIFFERENT`. |
+| `context_json` | `TEXT` | not null | The context in force after the turn. |
+| `occurrence_id` | `VARCHAR(36)` | null | The occurrence the turn is about; required for `NOT_FOR_ME` and `MORE_LIKE_THIS` (CHECK). Composite foreign key (`occurrence_id`, `session_id`), so it must belong to the same session. |
+| `created_at` | `DATETIME` | not null | |
+
+There is no column for text: raw conversational text cannot be stored (D33).
+
+### `feedback_events`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `session_id` | `VARCHAR(36)` | not null | Foreign key to `listening_sessions`. |
+| `occurrence_id` | `VARCHAR(36)` | not null | Composite foreign key (`occurrence_id`, `session_id`): an occurrence of the same session. |
+| `event_type` | `VARCHAR(16)` | not null | `LIKE`, `SAVE`, `REPLAY`, `SKIP`, `COMPLETE`, or `NOT_FOR_ME`. |
+| `played_seconds` | `FLOAT` | null | `>= 0`; required for `SKIP` and `COMPLETE`; recorded together with `duration_seconds`. |
+| `duration_seconds` | `FLOAT` | null | `> 0`. |
+| `played_fraction` | `FLOAT` | null | 0–1: `played_seconds / duration_seconds`, capped at 1.0; present exactly when the seconds are. |
+| `occurred_at` | `DATETIME` | not null | |
+
+Raw facts only; no interpreted weight is stored. B4 creates the table and repository. Recording events and interpreting them is B6.
+
+### Context storage
+
+`context_json` holds `{"format": 1, "context": {...every ListeningContext field...}}`, compact and key-sorted. Loading refuses an unknown format or an unknown field rather than ignoring it, and re-validates through `ListeningContext`. A missing field takes its default, so a field added to the model later reads as unset on older rows.
+
 ## Prototype 1 Concepts
 
 **Planned**, except these, which exist:
 - `listener_profiles` (B1);
 - `library_sources`, `tracks`, and `track_labels` (B2);
-- `analysis_jobs` and `track_features` (B3).
+- `analysis_jobs` and `track_features` (B3);
+- `listening_sessions`, `session_turns`, `recommendation_occurrences`, and `feedback_events` (B4).
 
 B2 also added `source_files`, which is not in this list. Concept names from spec §9:
 
@@ -271,6 +344,8 @@ Lifecycle, retries, and recovery: [System Workflow](../architecture/system-workf
 
 ### Listening sessions (B4)
 
+**Current (B4)**; see [Current Schema (B4)](#current-schema-b4). The spec's `current_track_occurrence_id` and `rolling_queue` are represented by occurrence status and queue position, not by session columns.
+
 A `ListeningSession` is a listening experience, not a chat thread. Minimal conceptual model (spec §10):
 
 ```text
@@ -298,7 +373,11 @@ Historical sessions persist, but the active queue is **not** restored after rest
 
 `Recommendation` is an algorithm result. `RecommendationOccurrence` records that a recommendation was surfaced or queued in a specific session at a specific moment. The two stay distinct.
 
+**Current (B4).** `SessionService.queue_recommendations()` takes domain `Recommendation` objects, which stay in memory, and records `RecommendationOccurrence` rows. Each row copies the candidate's track id, rank, normalized score, and the algorithm label.
+
 ### Feedback events (B6)
+
+**Table current since B4; recording planned for B6.**
 
 Persist the raw fact, not only the interpreted label (spec §9):
 
@@ -337,25 +416,28 @@ Still open:
 
 ## Repository and Transaction Pattern
 
-**Current (B1; library repositories added in B2; analysis repositories in B3).**
+**Current (B1; library repositories added in B2; analysis repositories in B3; session repositories in B4).**
 
 - **Ports** (`backend/src/intentune/ports/`):
   - `ListenerProfileRepository` (`get`, `get_default`, `add`);
   - *(B2, `ports/library.py`)* `LibrarySourceRepository` (`get`, `get_by_path`, `list_all`, `add`, `save`), `SourceFileRepository` (`list_for_source`, `add`, `save`), and `TrackRepository` (`get`, `get_by_sha256`, `list_all`, `ids_with_status`, `add`, `save`; a track's labels are saved with it);
   - *(B3, `ports/analysis.py`)* `AnalysisJobRepository` (`get`, `list_all`, `list_for_analyzer`, `add`, `save`, `claim_next`) and `TrackFeatureRepository` (`list_for_track`, `replace_for_analyzer`).
+  - *(B4, `ports/sessions.py`)* `ListeningSessionRepository` (`get`, `get_active_for_listener`, `list_for_listener`, `list_active`, `add`, `save`), `SessionTurnRepository` (`list_for_session`, `add`), `RecommendationOccurrenceRepository` (`get`, `list_for_session`, `add`, `save`), and `FeedbackEventRepository` (`list_for_session`, `add`). Turns and feedback events are history: added, never changed.
+
+    The occurrence repository flushes every write at once, so writes reach the database in the caller's order. That keeps the one-`PLAYING` and queue-position indexes satisfied after every statement.
 
     `claim_next` is a single `UPDATE … WHERE id = (oldest pending) AND status = 'PENDING' RETURNING id`, so two workers can never claim the same job. It needs SQLite 3.35 or later; this machine runs 3.45.1.
   - `UnitOfWork`, which exposes all of these plus `commit()` and `rollback()`.
 
   Application use cases depend only on these ports.
-- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, `SqlAlchemyAnalysisJobRepository`, `SqlAlchemyTrackFeatureRepository`, and `SqlAlchemyUnitOfWork`. A unit of work is not thread-safe; the analysis worker uses its own.
+- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, `SqlAlchemyAnalysisJobRepository`, `SqlAlchemyTrackFeatureRepository`, the four session repositories (B4), and `SqlAlchemyUnitOfWork`. A unit of work is not thread-safe; the analysis worker uses its own.
 - A repository works inside the session it is given, never commits, and accepts and returns domain models only.
 - A unit of work is used as `with unit_of_work:`. Each block is one fresh session and transaction. `commit()` makes staged changes durable. Leaving the block always rolls back anything uncommitted, whether by an early return or an exception, then closes the session. A unit of work is not re-entrant, and it refuses use outside a `with` block. It can be reused for consecutive transactions.
 - Later phases add their repositories to the same unit of work, so one use case can change several tables atomically.
 
 ## Migration Strategy
 
-**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3). That rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
+**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4). That rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
 
 - From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
 - From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.
@@ -372,10 +454,13 @@ Still open:
 
 ## Open Trade-offs
 
-- Normalized tables versus JSON columns for structured context and the rolling queue (B4)
 - How long raw playback events are kept as the history grows (B11)
 
-Resolved: SQLite for Prototype 1, PostgreSQL later (D22). Normalized `track_labels` for plural genres and moods (spec §9). Recommendation occurrences are stored (spec §9).
+Resolved:
+- SQLite for Prototype 1, PostgreSQL later (D22).
+- Normalized `track_labels` for plural genres and moods (spec §9).
+- Recommendation occurrences are stored (spec §9).
+- *(B4, TD-015)* Structured context is a versioned JSON column: always read and written whole, never queried by field. The rolling queue is normalized as occurrence rows with status and position, so the database enforces it.
 
 ## Superseded: Pre-Prototype 1 Draft
 

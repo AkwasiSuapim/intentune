@@ -24,7 +24,7 @@ Microservices would add network calls, service discovery, distributed logging, a
 
 ## Current Components
 
-**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector, plus, since B3 (2026-10-20), a signal-level audio analyzer. It also has, since B1, a SQLite persistence package. Since B3 it has a background analysis worker, a single in-process thread. It has no API boundary. The CLI flow below does not touch the database, the library, or the worker; those paths are used by tests only until the B8 startup wires them in. The frontend is a separate React application running on a mock service; it does not call the backend.
+**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector, plus, since B3 (2026-10-20), a signal-level audio analyzer. It also has, since B1, a SQLite persistence package. Since B3 it has a background analysis worker, a single in-process thread, and since B4 a listening-session service. It has no API boundary. The CLI flow below does not touch the database, the library, the worker, or sessions; those paths are used by tests only until the B8 startup wires them in. The frontend is a separate React application running on a mock service; it does not call the backend.
 
 ```text
 CLI (src/main.py)
@@ -64,6 +64,11 @@ SQLite: backend/data/intentune.db (schema managed by Alembic)                   
       | jobs, features, track status                                                    |
 AnalysisWorker (B3, one thread) -> AnalysisService -> AudioAnalyzer port -> SignalLevelAnalyzer (soundfile, numpy)
                                    (no caller starts the worker yet)
+
+SessionService (B4): start / turn / queue / play / advance / end / restart cleanup / history   (no caller yet)
+      |   takes in-memory Recommendations, records persisted RecommendationOccurrences
+      v
+UnitOfWork: listening_sessions, session_turns, recommendation_occurrences, feedback_events (+ listener_profiles, tracks)
 
 
 React frontend (frontend/) --> SessionService interface --> mock implementation
@@ -156,11 +161,20 @@ Contains business rules that do not depend on HTTP, databases, the filesystem, A
 - `AnalyzerIdentity` (`name@version`), `AnalysisResult`, and `TrackFeature`, which carries provenance;
 - the `needs_analysis` rule.
 
-`Track` gained the `ANALYZING` and `READY` states, `available_status`, and `with_analysis()`. `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
+`Track` gained the `ANALYZING` and `READY` states, `available_status`, and `with_analysis()`.
+
+`src/intentune/domain/session.py` (B4) holds:
+- `ListeningSession`: the current state, with status, end reason, and the `ListeningContext` in force;
+- `SessionTurn`: steering history with the context after each turn, and no text field;
+- `RecommendationOccurrence`: a surfaced recommendation's lifecycle, QUEUED → PLAYING → PLAYED, or REPLACED or DISCARDED;
+- `FeedbackEvent`: a raw listening fact with a derived `played_fraction`;
+- the read models `SessionState` and `SessionHistory`.
+
+Each enforces its invariants and transitions. `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
-- A listening-session domain: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (B4). The session owns current state; turns, occurrences, and feedback own history (D31).
+- A listening-session domain: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (B4). The session owns current state; turns, occurrences, and feedback own history (D31). *(Current since B4; see above.)*
 - Recommendation Policy v1 (B5): eligibility, intent fit, session fit, long-term fit, combined rank, diversity/repetition re-rank, controlled exploration, and the rolling top three. Each stage is computed separately (D07, D08). All constants live in one versioned policy module.
 - Feedback interpretation (B6) and conservative long-term adaptation (B10).
 - Existing `score_candidate()`/`rank_candidates()` are preserved. New scoring extends or refactors shared primitives so the scoring math is never duplicated, and complete-input legacy outputs stay identical (D38).
@@ -185,6 +199,14 @@ It owns retries, skips, and recording outcomes; the analyzer port only measures.
 - it queues new work when idle and survives errors (D28).
 
 See [System Workflow](system-workflow.md#background-analysis-b3).
+
+`src/intentune/application/sessions.py` (B4) implements `SessionService`, through the `UnitOfWork` port only:
+- `start_session()` ends the listener's previous active session first;
+- `apply_turn()`, `queue_recommendations()`, `play()`, `advance()`, and `end_session()`;
+- `end_sessions_from_previous_run()` for D35;
+- reads: `get_session()`, `list_sessions()`, and `history()`.
+
+Each command is one transaction and works only on an active session. It does not rank (B5) or record and interpret feedback (B6). See [System Workflow](system-workflow.md#listening-session-b4-b5).
 
 **Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
 
@@ -217,7 +239,9 @@ Defines interfaces for data access and external capabilities.
 
 **Current (B3):** `src/intentune/ports/analysis.py` defines `AudioAnalyzer`. It exposes `identity`, `supports(format)`, and `analyze(path, format)`, and measures only. It is kept separate from the job system. The same module defines `AnalysisJobRepository`, including the atomic `claim_next()`, and `TrackFeatureRepository`; both are exposed by `UnitOfWork`. A unit of work is not thread-safe; each thread uses its own.
 
-**Planned (Prototype 1):** `SessionRepository`, `PlaylistRepository`, and `FeedbackRepository` (spec §4), each added to the same unit of work.
+**Current (B4):** `src/intentune/ports/sessions.py` defines the spec's `SessionRepository` and `FeedbackRepository` as four ports: `ListeningSessionRepository`, `SessionTurnRepository`, `RecommendationOccurrenceRepository`, and `FeedbackEventRepository`. All are exposed by `UnitOfWork`.
+
+**Planned (Prototype 1):** `PlaylistRepository` (spec §4), added to the same unit of work.
 
 **Future:** an `IntentParser` port for LLM intent parsing (D30), and an external provider port (D39).
 
@@ -244,9 +268,13 @@ Implements ports using specific technology.
 - `persistence/` gained `SqlAlchemyAnalysisJobRepository` and `SqlAlchemyTrackFeatureRepository`, with migration `7a42f0b9c8bf`.
 - `librosa` was evaluated and not added; see [TD-014](../decisions/technical-decisions.md#td-014-b3-background-analysis).
 
+**Current (B4):** `persistence/` gained the four session repositories and migration `dd7360f46b8b`.
+- The `ListeningContext` is stored as strict, versioned JSON (`context_to_json` / `context_from_json`).
+- Partial unique indexes and composite same-session foreign keys enforce one active session per listener, one playing occurrence per session, unique queue positions, and turns and events that reference only their own session's occurrences.
+
 **Planned (Prototype 1):**
 
-- Further SQLAlchemy repositories and migrations for sessions, feedback, and playlists (B4–B7)
+- Further SQLAlchemy repositories and migrations for playlists (B7) and long-term adaptation records (B10)
 - Estimated features (tempo, key, loudness in LUFS): a later analyzer version, once an evaluation set exists to measure their accuracy (TD-014)
 - CSV compatibility (the existing adapter, kept)
 
