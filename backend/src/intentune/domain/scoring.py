@@ -7,10 +7,16 @@ dict inputs into MusicCandidate/UserProfile, instead of keeping a second,
 separately maintained scoring implementation.
 
 The weights, the 0.5 similarity cutoff, and the reason wording are unchanged
-from the original CodePath baseline. Tempo, valence, and acousticness are not
-scored yet -- see docs/planning/development-phases.md, "Expanded and Configurable
-Scoring Engine" for that future milestone.
+from the original CodePath baseline.
+
+The two per-feature primitives, category_match() and closeness(), are public
+so Recommendation Policy v1 (domain/policy.py) scores features with exactly
+the same rules instead of a second copy of this math (execution guide §8).
+score_candidate() itself still requires all four inputs; missing-feature
+handling lives in the policy.
 """
+
+from typing import Iterable
 
 from src.intentune.domain.models import MusicCandidate, ScoreBreakdown, ScoreComponent, UserProfile
 
@@ -23,14 +29,23 @@ MAX_SCORE = GENRE_WEIGHT + MOOD_WEIGHT + ENERGY_WEIGHT + DANCEABILITY_WEIGHT
 _SIMILARITY_CUTOFF = 0.5
 
 
-def _similarity_points(preferred_value: float, actual_value: float, weight: float) -> float:
+def category_match(value: str, preferred: Iterable[str]) -> bool:
+    """Whether a category value (genre, mood) is one of the preferred ones, ignoring case and surrounding space."""
+    return value.strip().lower() in {option.strip().lower() for option in preferred}
+
+
+def closeness(preferred_value: float, actual_value: float) -> float:
+    """How close a 0-1 feature value is to the preferred one, from 1.0 (equal) to 0.0 (0.5 or more apart)."""
     difference = abs(actual_value - preferred_value)
     if difference >= _SIMILARITY_CUTOFF:
         similarity = 0.0
     else:
         similarity = 1.0 - difference
-    similarity = max(0.0, min(1.0, similarity))
-    return similarity * weight
+    return max(0.0, min(1.0, similarity))
+
+
+def _similarity_points(preferred_value: float, actual_value: float, weight: float) -> float:
+    return closeness(preferred_value, actual_value) * weight
 
 
 def score_candidate(candidate: MusicCandidate, profile: UserProfile) -> ScoreBreakdown:
@@ -59,9 +74,7 @@ def score_candidate(candidate: MusicCandidate, profile: UserProfile) -> ScoreBre
     if candidate.danceability is None:
         raise ValueError("candidate.danceability is required for scoring")
 
-    candidate_genre = candidate.genre.strip().lower()
-    preferred_genres = {genre.strip().lower() for genre in profile.preferred_genres}
-    if candidate_genre in preferred_genres:
+    if category_match(candidate.genre, profile.preferred_genres):
         genre_component = ScoreComponent(
             feature_name="genre",
             points_earned=GENRE_WEIGHT,
@@ -76,9 +89,7 @@ def score_candidate(candidate: MusicCandidate, profile: UserProfile) -> ScoreBre
             reason="genre did not match (+0.0)",
         )
 
-    candidate_mood = candidate.mood.strip().lower()
-    preferred_moods = {mood.strip().lower() for mood in profile.preferred_moods}
-    if candidate_mood in preferred_moods:
+    if category_match(candidate.mood, profile.preferred_moods):
         mood_component = ScoreComponent(
             feature_name="mood",
             points_earned=MOOD_WEIGHT,

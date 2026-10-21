@@ -2,14 +2,15 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis and B4 session domain, 2026-10-20), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, and B5 exploration marks, 2026-10-20), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
 - **B2** added the managed library: `library_sources`, `source_files`, `tracks`, and `track_labels` (see [Current Schema (B2)](#current-schema-b2)).
 - **B3** added background analysis: `analysis_jobs` and `track_features`, and the `ANALYZING` and `READY` track states (see [Current Schema (B3)](#current-schema-b3)).
 - **B4** added the session domain: `listening_sessions`, `session_turns`, `recommendation_occurrences`, and `feedback_events` (see [Current Schema (B4)](#current-schema-b4)).
-- The recommendation catalog used by the CLI is still `backend/data/songs.csv`. Recommending from library tracks is B5.
+- **B5** added two columns to `recommendation_occurrences` (see [Current Schema (B5)](#current-schema-b5)): `surfaced_position`, which never changes, and `is_exploration`, which marks Recommendation Policy v1's exploration picks. Policy v1 ranks library tracks; it adds no other table, and its constants live in code, not in the database.
+- The recommendation catalog used by the CLI is still `backend/data/songs.csv`.
 - Nothing in the running CLI opens the database yet. The FastAPI startup (B8) will apply migrations, create the default listener, and run the startup scan.
 
 This document records the approved concepts and the facts the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) §5–§10 fixes. Exact tables, columns, types, and indexes are designed in the phase that creates them and recorded here at that time.
@@ -62,7 +63,7 @@ Location (spec §5): `backend/data/intentune.db`, with managed media in `backend
 
 Index `uq_listener_profiles_is_default`: `UNIQUE (is_default) WHERE is_default = 1`. Any number of non-default rows may exist, but the database refuses a second default.
 
-The table holds no name, email, or other personal data. Taste preferences (`UserProfile`) are not stored yet; attaching long-term preferences to the listener is later work (B5/B10).
+The table holds no name, email, or other personal data. Taste preferences (`UserProfile`) are not stored yet; attaching long-term preferences to the listener is later work (B10). *(B5: Policy v1 accepts a long-term profile, but none is stored, so its long-term stage is unavailable until B10.)*
 
 Alembic also keeps its `alembic_version` table.
 
@@ -209,7 +210,7 @@ Partial unique index `uq_listening_sessions_one_active` on `listener_profile_id 
 | `started_at` | `DATETIME` | null | Set exactly when `PLAYING` or `PLAYED`. |
 | `finished_at` | `DATETIME` | null | Set exactly when `PLAYED`, `REPLACED`, or `DISCARDED`. |
 
-Partial unique indexes: `uq_recommendation_occurrences_one_playing` (one `PLAYING` per session) and `uq_recommendation_occurrences_queue_position` (`session_id`, `queue_position`). Queue order is the order given to `queue_recommendations()`, which may differ from rank order. Positions are not renumbered when a queued occurrence is played early; order is what counts.
+Partial unique indexes: `uq_recommendation_occurrences_one_playing` (one `PLAYING` per session) and `uq_recommendation_occurrences_queue_position` (`session_id`, `queue_position`). Queue order is the order given to `queue_recommendations()`, which may differ from rank order. Positions are not renumbered when a queued occurrence is played early; order is what counts. *(B5: `queue_position` is cleared when an occurrence leaves the queue, so B5 adds `surfaced_position`, which keeps the surfaced order for good.)*
 
 ### `session_turns`
 
@@ -243,6 +244,31 @@ Raw facts only; no interpreted weight is stored. B4 creates the table and reposi
 ### Context storage
 
 `context_json` holds `{"format": 1, "context": {...every ListeningContext field...}}`, compact and key-sorted. Loading refuses an unknown format or an unknown field rather than ignoring it, and re-validates through `ListeningContext`. A missing field takes its default, so a field added to the model later reads as unset on older rows.
+
+## Current Schema (B5)
+
+**Current.** Migration `de244c476f3a` (`backend/alembic/versions/20261020_de244c476f3a_record_surfaced_position_and_exploration.py`), which revises `dd7360f46b8b`. The committed B4 migration is unchanged.
+
+### `recommendation_occurrences` (changed)
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `surfaced_position` | `INTEGER` | not null | CHECK `>= 0`. Where in its queue the occurrence was surfaced, from 0. Written once and never changed (see below). |
+| `is_exploration` | `BOOLEAN` | not null | Default `0`; CHECK `IN (0, 1)`. Whether Policy v1 surfaced the occurrence as its exploration pick. |
+
+`queue_position` keeps its B4 meaning, the current queue state: set while `QUEUED`, cleared when the occurrence leaves the queue. `surfaced_position` is the record of where it was surfaced. So an exploratory order, such as rank 2 surfaced ahead of rank 1, can be reconstructed after both have been played or replaced.
+
+What was surfaced (track, rank, score, algorithm, surfaced time, surfaced position, exploration mark) is written once by the repository's `add()`; `save()` changes only the lifecycle columns. History (`list_for_session()` without a status) reads in surfaced order, by `surfaced_at` then `surfaced_position`. In B4 it read in rank order within a queue.
+
+The migration:
+- **Adds `surfaced_position`** with a plain `ADD COLUMN` and backfills it before rebuilding the table. B4 inserted each queue's occurrences one at a time, in queue order, all with the same `surfaced_at`. So within a session and `surfaced_at`, rowid order is the surfaced order. It is read while the rowids are still the original ones.
+- **Rebuilds the table** (batch mode) to make the column not null and to add both CHECK constraints. `session_turns` and `feedback_events` reference this table; the rebuild keeps every row, and the migration's foreign-key check passes before commit.
+- **Leaves older rows unmarked:** occurrences from before B5 read `is_exploration = 0`.
+- **Downgrade** drops both columns and their constraints the same way.
+
+Policy v1 writes occurrences through `queue_recommendations()` as before: `algorithm` is the policy version (`policy-v1`), `rank` is the policy's rank, and `score` is the combined score (0–1). A pick with no meaningful score has `score` `NULL`; no value is invented for it.
+
+Within a session, `SessionService` gives every change a strictly later time (TD-016 item 13). Each surfaced queue therefore has its own `surfaced_at`, and a queue is always later than the turn before it.
 
 ## Prototype 1 Concepts
 
@@ -375,6 +401,8 @@ Historical sessions persist, but the active queue is **not** restored after rest
 
 **Current (B4).** `SessionService.queue_recommendations()` takes domain `Recommendation` objects, which stay in memory, and records `RecommendationOccurrence` rows. Each row copies the candidate's track id, rank, normalized score, and the algorithm label.
 
+**Current (B5).** Recommendation Policy v1 produces those `Recommendation`s (`RecommendationService.refresh_queue()`). An occurrence also records whether it was an exploration pick, and its surfaced position. Later evidence about exploration picks moves the exploration rate (spec §18, §20). The surfaced position keeps the order a queue was surfaced in, after the queue has moved on.
+
 ### Feedback events (B6)
 
 **Table current since B4; recording planned for B6.**
@@ -437,7 +465,7 @@ Still open:
 
 ## Migration Strategy
 
-**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4). That rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
+**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
 
 - From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
 - From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.
@@ -448,7 +476,9 @@ Still open:
   - a no-op re-upgrade, downgrade to base, and a full round trip;
   - a path with spaces and `%`;
   - migrations matching the ORM records exactly (Alembic `compare_metadata`; `alembic check` reports the same from the command line);
-  - a deliberately failing migration rolling back schema and data completely.
+  - a deliberately failing migration rolling back schema and data completely;
+  - *(B3, B5)* the table rebuilds keeping their rows, in both directions: tracks for B3, and for B5 occurrences together with the turns that reference them;
+  - *(B5)* surfaced positions recovered for pre-B5 occurrences, across two sessions and two queues, including out-of-rank order.
 
   These tests are written against whatever tables the ORM declares, so they cover each new migration without edits. The B2 library tables' constraints are tested in `backend/tests/test_library_repositories.py`.
 

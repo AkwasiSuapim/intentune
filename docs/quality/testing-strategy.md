@@ -88,6 +88,14 @@ The skip is the same symbolic-link test as after B2. Per-file counts are in the 
 
 Per-file counts are in the [B4 audit](../architecture/current-system-audit.md#b4-update-2026-10-20). The session use cases are tested directly at the application layer, with no HTTP, as the execution guide asks ("pure application tests before HTTP"). They run against a migrated SQLite database through the real repositories, like the library and analysis tests.
 
+## After B5 (2026-10-20)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **752 passed, 1 skipped**: the 619 B0–B4 tests plus 134 from B5, including the review decisions and the final policy corrections. Existing tests changed only where an occurrence now needs a surfaced position, and in the pinned occurrence column set. |
+
+Per-file counts are in the [B5 audit](../architecture/current-system-audit.md#b5-update-2026-10-20). The policy tests are pure: no database, and randomness fixed by an injected generator, so every scenario is deterministic. Control tests use a generator that fails if it is drawn from, which proves that controls decide without randomness. 63 single-rule mutations each make a test fail. They cover the policy, strictly ordered session times, the queue write, the repository, the domain validation, and the migration backfill.
+
 ## Current Test Coverage
 
 ### Backend
@@ -198,6 +206,71 @@ Added in B4 (session domain):
   - **Turns:** REFINE, NEXT, NOT_FOR_ME, MORE_LIKE_THIS, and the exploration turns, with argument validation and same-session checks.
   - **History:** raw events read back in order.
 
+Added in B5 (Recommendation Policy v1):
+
+- `tests/test_policy.py`, pure and deterministic:
+  - **Constants:** the spec values under one version; invalid constants refused.
+  - **Legacy preservation:** for every CSV song and three profiles, intent fit equals `score_candidate()`'s normalized score, over the same features.
+  - **Stages:**
+    - feature fit over common features only, with weighting and scaled tempo;
+    - `candidate_similarity()`;
+    - session fit (neutral without evidence, and the spec formula with recency, checked numerically);
+    - stage-weight renormalization;
+    - current intent winning over history, and history filling only what intent leaves open.
+  - **Acceptance scenarios:**
+    - no feedback;
+    - positive feedback;
+    - an early skip (−0.5) against Not for me (−1.0);
+    - Not for me (excluded, similar tracks lowered);
+    - conflicting intent;
+    - missing features (never filled in; tracks with no score last);
+    - a finite library (shrinking cooldown, rotation, rejected tracks not using up the cooldown, a one-track library);
+    - automatic exploration (its rate, which controls do not move; success and failure, window, cap; which track; no plausible track; unscored tracks; a short queue);
+    - listener controls as deterministic one-refresh directives, part of current intent:
+      - without a control, exploration stays in the requested genre, even when a track outside it would be plausible;
+      - Surprise me takes the last slot, preferring novelty within the genre and setting the genre aside only when the genre has none;
+      - Try something different makes a track outside the genre the next to play, even when the genre has novelty;
+      - More familiar suppresses exploration that would otherwise happen;
+      - no qualifying track means no change;
+      - the rest of the queue is unchanged;
+    - setting the genre aside without inventing a score:
+      - in genre-only libraries, the fallback rule applies, and the pick has no score;
+      - a scored track comes before one admitted by the rule;
+      - a rejected genre stays out, even when it is the only option;
+      - unknown and refused tracks are never admitted;
+    - unscored picks surfaced without a score;
+    - the #2 threshold (within and beyond the margin, inclusive at zero, nothing played, a less novel #2, a same-artist #2, an exploration pick at #2 or at #1, an unscored #2 behind a scored #1).
+  - **Diversity:** repeated artist (including the artist that just played); unknown artists never repeats; near-duplicates; a genre-only library not treated as duplicates; diversity never overriding intent.
+  - **Library tracks:** projection to candidates with only the values a track has, and availability.
+- `tests/test_queue_refresh.py`: `RecommendationService` against a migrated database, driven through `SessionService`:
+  - the queue, ranks, scores, and version stored;
+  - refinement replacing the queue;
+  - unavailable tracks;
+  - ended and unknown sessions;
+  - cooldown of the playing track;
+  - rotation of a four-track library;
+  - #2 queued first;
+  - Not for me lasting the session;
+  - More like this;
+  - the exploration mark persisted and its outcome moving the rate;
+  - controls over tagged tracks, with automatic exploration off:
+    - Try something different puts the rock track first, and Surprise me puts it last, each stored without a score;
+    - Surprise me keeps to the genre when it can;
+    - More familiar suppresses exploration once;
+  - one refresh only:
+    - the following refresh is automatic again;
+    - `decide()` does not use a control up;
+    - a refinement before the refresh supersedes any control;
+    - a newer control replaces a pending one;
+  - with the clock frozen, a control and its refresh still ordered, and acted on exactly once;
+  - a #2-first order still readable from surfaced positions after the queue moves on;
+  - signals read from real history.
+- `tests/test_migrations.py`: B5's table rebuild keeps occurrences and the turns that reference them in both directions. Pre-B5 rows read `is_exploration = 0`, and their surfaced positions are recovered from insertion order across two sessions and two queues.
+- B5 additions to the B4 session tests:
+  - `test_session_domain.py`: surfaced-position invariants, and the position outlasting the queue position through every transition;
+  - `test_session_repositories.py`: the surfaced order kept after the queue moves on; `save()` never rewriting what was surfaced; CHECK constraints on both new columns;
+  - `test_session_service.py`: the surfaced order surviving playback and replacement; with the clock frozen, every change in a session still getting a strictly later time.
+
 ### Frontend
 
 Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure tests (composition policy, reducers, commands, mock service, service boundary), static-render tests (every block type and the unknown-block fallback), DOM tests (interaction, focus, overlays, loading/waiting/failure states), and browser checks (layout matrix, motion, contrast, axe-core audit, keyboard probe, design comparison). The frontend has not been tested on physical phones or with real screen readers.
@@ -212,7 +285,7 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | Multi-folder import; exact duplicate not duplicated; managed copy survives source deletion; unsupported formats fail safely; incremental rescan | B2 — **Current** (2026-10-19) |
 | Tracks usable during analysis; a failed track does not stop the worker; interrupted jobs recover; reanalysis after an analyzer version change | B3 — **Current** (2026-10-20) |
 | Session domain transitions, written as pure application tests before HTTP | B4 — **Current** (2026-10-20) |
-| Context resolution; missing-feature scoring; candidate similarity; session fit; combined weights; diversity/cooldown (recent track, repeated artist, near-duplicates); exploration gate; three-candidate selection; #2 safety threshold; conflicting current vs historical intent; finite library; exploration success and failure; **complete-input legacy outputs unchanged** | B5 |
+| Context resolution; missing-feature scoring; candidate similarity; session fit; combined weights; diversity/cooldown (recent track, repeated artist, near-duplicates); exploration gate; three-candidate selection; #2 safety threshold; conflicting current vs historical intent; finite library; exploration success and failure; **complete-input legacy outputs unchanged** | B5 — **Current** (2026-10-20) |
 | Feedback thresholds, including boundary values (8 s, 15%, 40%, 75%, 90%); explicit actions overriding passive playback; playback-event behavior; Not for me excluding the track for the session only | B6 |
 | Playlist CRUD and ordering; one occurrence per playlist | B7 |
 | API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 |

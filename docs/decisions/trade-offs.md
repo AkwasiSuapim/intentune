@@ -156,6 +156,8 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 
 **Update (2026-10-18, B0):** that milestone is superseded by Prototype 1 Phase B5. The revisit point is now B5.
 
+**Update (2026-10-20, B5):** B5 did not widen the legacy dict API. Missing-feature scoring and the extra features live in Recommendation Policy v1, a separate path for library tracks, and the legacy four-field shape keeps its contract. The two share the feature primitives, so the scoring math is still not duplicated.
+
 ## Prototype 1 Trade-offs
 
 **Accepted (2026-10-18).** The trade-offs below carry the largest consequences. Every decision's main trade-off is in the [decision register](intentune-prototype-decision-register.md).
@@ -191,12 +193,29 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 
 - **Gain:** scores never rest on invented values.
 - **Cost:** fewer active features for partly analyzed tracks, so lower coverage and less discriminating scores until analysis finishes.
+- **Status:** Current since B5 (2026-10-20), in Policy v1. Today's library tracks carry tag labels only (genre, rarely more), so Policy v1 ranks them on genre and session evidence alone. A track that has a genre is not penalized for lacking energy. A track with nothing to compare has no meaningful score and only fills an otherwise short queue (TD-016).
 
 ### Staged ranking with fixed heuristic weights (D07–D09)
 
 - **Gain:** each stage can be explained, tested, and debugged separately.
 - **Cost:** the weights (0.55/0.30/0.15), feedback values, and thresholds are versioned heuristics, not proven values.
 - **Mitigation:** one versioned policy module; deterministic evaluation scenarios; no claim of improvement without comparison evidence.
+- **Status:** Current since B5 (2026-10-20): `RecommendationPolicy` (`policy-v1`) holds every constant, and each occurrence records the version (TD-016).
+
+### Plausible exploration within explicit intent (D13, D36, spec §19–§20)
+
+- **Gain:** automatic exploration never contradicts what the listener asked for. It stays in an explicitly requested genre. Its pick is deterministic (the best scored, plausible, novel track), so it can be explained and tested; only the decision *whether* to explore is random.
+- **Gain (B5 review):** a listener control is a one-refresh directive, part of current intent, and deterministic. Try something different leaves the genre and changes the very next track. Surprise me leaves the genre only when the genre offers no novelty. More familiar stops exploration for that refresh. None outlasts its refresh.
+- **Gain:** no score is invented. A track nothing can be compared with has no score and is surfaced without one. It reaches a control's pick only through an explicit, stated rule.
+- **Cost:** with no control, a library described by genre alone never explores within a requested genre. Outside the genre, tracks admitted by the fallback rule are indistinguishable, so which one plays comes down to the deterministic tie-break. A control that finds no qualifying track has no effect, and the next refresh does not retry it.
+- **Status:** Current since B5 (2026-10-20); the control rules were settled at the B5 review and corrected before commit (TD-016 items 11, 13, 14).
+- **Revisit when:** numeric features make partial fits possible, or B6 evidence (skips, likes) gives the fallback rule something to compare.
+
+### Shrinking cooldown for small libraries (D17)
+
+- **Gain:** a small library keeps a full three-track queue; it repeats tracks after a cooldown instead of running dry, and a graded recent-play penalty makes it rotate rather than alternate two tracks.
+- **Cost:** in a library of a few tracks, a track can return after only a few plays.
+- **Status:** Current since B5 (2026-10-20). The cooldown is 20 plays, or the number of eligible tracks minus three, whichever is smaller (at least one).
 
 ### Conservative long-term learning (D06)
 

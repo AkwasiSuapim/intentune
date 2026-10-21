@@ -250,7 +250,16 @@ def _optional_unit_score(value: object) -> Optional[float]:
 
 @dataclass(frozen=True)
 class RecommendationOccurrence:
-    """A recommendation surfaced in a session. rank and score are as the algorithm produced them."""
+    """A recommendation surfaced in a session. rank and score are as the algorithm produced them.
+
+    is_exploration marks a deliberate exploration pick (B5), so how exploration
+    went can be judged from later evidence.
+
+    surfaced_position (B5) is where in its queue the occurrence was surfaced,
+    from 0, and never changes. queue_position is the current queue state and is
+    cleared when the occurrence leaves the queue, so only surfaced_position can
+    reconstruct a surfaced order, such as rank 2 queued ahead of rank 1.
+    """
 
     occurrence_id: str
     session_id: str
@@ -260,10 +269,12 @@ class RecommendationOccurrence:
     status: OccurrenceStatus
     surfaced_at: datetime
     updated_at: datetime
+    surfaced_position: int
     score: Optional[float] = None
     queue_position: Optional[int] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    is_exploration: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_uuid(self.occurrence_id, "occurrence_id")
@@ -276,11 +287,14 @@ class RecommendationOccurrence:
         object.__setattr__(self, "status", OccurrenceStatus(self.status))
         object.__setattr__(self, "surfaced_at", require_utc_datetime(self.surfaced_at, "surfaced_at"))
         object.__setattr__(self, "updated_at", require_utc_datetime(self.updated_at, "updated_at"))
+        require_non_negative_int(self.surfaced_position, "surfaced_position")
         object.__setattr__(self, "score", _optional_unit_score(self.score))
         if self.queue_position is not None:
             require_non_negative_int(self.queue_position, "queue_position")
         object.__setattr__(self, "started_at", optional_utc_datetime(self.started_at, "started_at"))
         object.__setattr__(self, "finished_at", optional_utc_datetime(self.finished_at, "finished_at"))
+        if not isinstance(self.is_exploration, bool):
+            raise ValueError("is_exploration must be a bool")
 
         queued = self.status is OccurrenceStatus.QUEUED
         if queued != (self.queue_position is not None):

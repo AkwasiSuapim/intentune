@@ -6,7 +6,7 @@
 
 ## Current Repository Structure
 
-**Current (verified in B0; backend updated for B1, 2026-10-19).** Generated and ignored content (`.venv/`, `__pycache__/`, `node_modules/`, `dist/`, `.env`, `backend/data/intentune.db*`) is omitted.
+**Current (verified in B0; backend updated through B5, 2026-10-20).** Generated and ignored content (`.venv/`, `__pycache__/`, `node_modules/`, `dist/`, `.env`, `backend/data/intentune.db*`) is omitted.
 
 ```text
 intentune/
@@ -39,7 +39,8 @@ intentune/
 │   │       ├── 20261019_6ef3a3452ab7_create_listener_profiles.py
 │   │       ├── 20261019_2540be2956b8_create_managed_library.py  (B2)
 │   │       ├── 20261020_7a42f0b9c8bf_create_background_analysis.py  (B3)
-│   │       └── 20261020_dd7360f46b8b_create_listening_sessions.py  (B4)
+│   │       ├── 20261020_dd7360f46b8b_create_listening_sessions.py  (B4)
+│   │       └── 20261020_de244c476f3a_record_surfaced_position_and_exploration.py  (B5)
 │   ├── data/
 │   │   └── songs.csv                  (intentune.db and media/ appear here when used; gitignored)
 │   ├── src/
@@ -57,7 +58,8 @@ intentune/
 │   │       │   ├── library.py         (B2)
 │   │       │   ├── validation.py      (B2: shared validators)
 │   │       │   ├── analysis.py        (B3: jobs, features, analyzer identity)
-│   │       │   └── session.py         (B4: sessions, turns, occurrences, feedback events)
+│   │       │   ├── session.py         (B4: sessions, turns, occurrences, feedback events)
+│   │       │   └── policy.py          (B5: Recommendation Policy v1 and its constants)
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   ├── recommendation_service.py
@@ -65,7 +67,8 @@ intentune/
 │   │       │   ├── library.py         (B2: LibraryService)
 │   │       │   ├── analysis.py        (B3: AnalysisService)
 │   │       │   ├── analysis_worker.py (B3: AnalysisWorker thread)
-│   │       │   └── sessions.py        (B4: SessionService)
+│   │       │   ├── sessions.py        (B4: SessionService)
+│   │       │   └── recommendations.py (B5: RecommendationService, queue refresh)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
@@ -118,7 +121,9 @@ intentune/
 │       ├── test_analysis_worker.py    (B3)
 │       ├── test_session_domain.py     (B4)
 │       ├── test_session_repositories.py  (B4)
-│       └── test_session_service.py    (B4)
+│       ├── test_session_service.py    (B4)
+│       ├── test_policy.py             (B5)
+│       └── test_queue_refresh.py      (B5)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -161,6 +166,13 @@ B4 added the session domain:
 
 No new adapter or dependency.
 
+B5 added Recommendation Policy v1:
+- **Domain:** `domain/policy.py` holds every stage and every constant (one versioned `RecommendationPolicy`). `domain/scoring.py` now exposes the shared feature primitives it reuses.
+- **Application:** `application/recommendations.py` (`RecommendationService`). It is not `recommendation_service.py`, which keeps the legacy catalog use cases.
+- **Persistence:** one column on occurrence records, with a fifth migration.
+
+No new port, adapter, or dependency.
+
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 
 ## Planned Prototype 1 Additions
@@ -182,7 +194,7 @@ The [backend execution guide](../agents/CLAUDE_BACKEND_EXECUTION_GUIDE.md) sugge
 Later phases are expected to add, under `backend/src/intentune/`:
 
 - new ports beside `ports/catalog.py` and `ports/listener_profiles.py`: `SessionRepository`, `TrackRepository`, `PlaylistRepository`, `FeedbackRepository` (spec §4), each exposed through the existing `UnitOfWork`, with SQLAlchemy implementations and migrations in `persistence/` and `backend/alembic/versions/`
-- session-domain models and Recommendation Policy v1 modules under `domain/`, with all policy constants in one versioned module (B4, B5)
+- session-domain models and Recommendation Policy v1 modules under `domain/`, with all policy constants in one versioned module (B4, B5) *(done: `domain/session.py`, `domain/policy.py`)*
 - library and analysis adapters (B2, B3)
 - a thin FastAPI package with Pydantic schemas separate from ORM and domain models (B8)
 

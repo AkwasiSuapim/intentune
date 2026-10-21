@@ -349,6 +349,131 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 - B9 shows the frontend needs more session state.
 - Multiple listeners arrive (Future).
 
+## TD-016: B5 Recommendation Policy v1
+
+**Status:** Accepted, awaiting B5 review
+
+**Date:** 2026-10-20
+
+**Context:** Spec §12–21 and execution guide §8 fix most of Policy v1:
+- the stage order;
+- the .55 / .30 / .15 stage weights;
+- the missing-feature rule;
+- the session-fit formula with 0.85 recency;
+- about 90/10 exploration;
+- the 0.08 gate for playing #2 first.
+
+They also forbid a second copy of the scoring math. Several things were left open:
+- how features are compared;
+- what "no meaningful score" means;
+- how long the cooldown is in a small library;
+- what counts as a near-duplicate or as useful novelty;
+- which track exploration picks and how outcomes move the rate;
+- whether a steering control may take exploration outside an explicitly requested genre, how long it lasts, and where its pick goes (settled at the B5 review);
+- what counts as session evidence before B6 records feedback;
+- how a surfaced order, such as #2 queued ahead of #1, stays reconstructable once the queue moves on (settled at the B5 review).
+
+**Decision:**
+
+1. **One versioned policy object.** `RecommendationPolicy` (`domain/policy.py`, frozen) holds every constant, validated, as `policy-v1`. The version is the `algorithm` recorded on each occurrence, so a changed constant needs a new version.
+2. **Feature scoring reuses the legacy primitives.**
+   - `category_match()` and `closeness()` were extracted from `score_candidate()`, whose output is unchanged.
+   - A fit is a weighted average over the features where both a target and a value exist. The weights are the legacy 3/3/2/2 for genre, mood, energy, and danceability, and 1 each for tempo, valence, and acousticness. Tempo is compared on a 100 BPM scale.
+   - A test proves that intent fit equals `score_candidate()`'s normalized score for every CSV song.
+3. **Targets.**
+   - Per feature, the current `ListeningContext` wins, and the long-term profile fills only what it leaves open.
+   - Target moods are `temporary_moods`, else `desired_mood`. `current_mood` describes the listener, not the music they want, so it is not a target.
+4. **Stage availability.**
+   - Intent and long-term fit are unavailable when nothing can be compared, and the stage weights are renormalized.
+   - Session fit is always present: neutral 0.5 without evidence.
+   - A candidate whose only stage is that neutral 0.5 has "no meaningful score" (spec §13). It never outranks a scorable candidate and only fills a queue they cannot fill. It is surfaced without a score (item 14).
+5. **Session evidence before B6.**
+   - Evidence comes from turns: `MORE_LIKE_THIS` is +1.0, and `NOT_FOR_ME` is −1.0 and excludes the track for the session.
+   - Feedback events join in B6 with Feedback Policy v1's weights. The domain already takes any weight in [−1, 1]; tests use −0.5 for an early skip.
+6. **Diversity: a greedy re-rank against the last play and the picks so far.**
+   - **Recent-play cooldown:** 20 plays, shrinking to `max(1, eligible − 3)` so a small library keeps a full queue. Only plays of tracks that are still eligible count, so a rejected or unavailable track does not use up the window.
+   - **Recent-play penalty:** a track that is eligible again only because the library is small takes up to 0.10, fading over 20 plays, so a small library rotates.
+   - **Repeated artist:** 0.10. Unknown artists never count as repeats.
+   - **Near-duplicate:** 0.15, for similarity ≥ 0.95 over at least 3 shared features, so a library described by genre alone is not all duplicates.
+   - The penalties are small next to intent, so diversity never overrides explicit intent. Genre/mood monotony beyond near-duplicates is not penalized.
+7. **Automatic exploration** (no control pending).
+   - **Rate:** 0.10. Each of the last 3 exploration outcomes multiplies it: ×0.5 for a failure, ×1.25 for a success. It is capped at 0.50. Listener controls do not move it (item 11).
+   - **Whether:** the injected random generator decides only whether to explore.
+   - **Which:** deterministic. It is the best candidate that has a score, is plausible (scores at least 0.40), and is novel: a different artist from, and similarity below 0.80 to, the last play and the kept picks. It must be within the explicitly requested genre. The cooldown already keeps recent plays out.
+   - **Where:** it replaces #3 of a full queue.
+   - **Record:** every exploration pick, automatic or directed, is marked in `recommendation_occurrences.is_exploration` (migration `de244c476f3a`), so its outcome can be found in history.
+8. **#2 first** (spec §21). #2 plays first when the gap between the penalized scores is ≤ 0.08 (inclusive) and #2 offers useful novelty, which requires all of these:
+   - something has played;
+   - #2 is not by the artist that just played;
+   - either #1 is by that artist, or #2 is less similar to the last play than #1 is.
+
+   No swap involves an exploration pick, at #1 or #2. An unscored #2 never goes ahead of a scored #1. Occurrences keep the policy's ranks, and queue order is play order (2, 1, 3).
+9. **Application.** `RecommendationService.refresh_queue(session_id)` works in three steps:
+   - it reads the session, its history, and the library in one short transaction;
+   - it decides in memory;
+   - it surfaces the result through `SessionService.queue_recommendations()`, which replaces the old queue.
+
+   `decide()` returns the same decision without writing. Callers refresh after every meaningful change (B6, B8).
+10. **No new dependency, no new table.** Two columns were added (items 7 and 12).
+11. **Listener controls are one-refresh directives, part of current intent** (settled at the B5 review, then corrected before commit).
+    - **One refresh:** Surprise me, Try something different, and More familiar each direct the next refresh only. A control is pending from its turn until a queue is surfaced after it, which acts on it. A refinement made before that refresh restates the whole intent and supersedes the control. So does a newer control. `decide()` without writing does not use it up. A refresh that surfaces nothing leaves it pending.
+    - **Deterministic:** a pending control decides without the random draw. When a qualifying track exists, the control acts on that refresh.
+    - **Explicit genre:** the requested genre is `ListeningContext.temporary_genres`, not long-term history. Without a control, exploration never leaves it (item 7).
+    - **Surprise me:** it takes the last slot. It looks for a scored, plausible, novel track within the genre first, and sets the genre aside only when the genre has none.
+    - **Try something different:** it sets the genre aside at once and puts its track first in the queue, the next to play. The two best in-intent picks follow.
+    - **More familiar:** it suppresses exploration, automatic or directed, for that refresh.
+    - **Setting the genre aside** drops the genre target from intent fit for that one choice. A track is judged on what can still be compared: the rest of the intent, the session's evidence, a long-term profile. If something can, it needs a score at or above the floor, so a genre the listener rejected stays out.
+    - **When nothing can be compared**, the track gets no score: no value is invented. It may still be the control's pick under an explicit fallback rule: it is trustworthy (a known genre from its own labels, and playable) and unrejected (not refused with Not for me in this session). Eligibility already guarantees playable and unrejected. A track with a score is always preferred over one admitted by the rule, and an unknown track (no genre) is never a pick.
+    - **The rest of the queue** still follows the explicit intent. Diversity never overrides intent; the listener's newer command changes it.
+12. **An immutable surfaced position** (settled at the B5 review).
+    - **The column:** `recommendation_occurrences.surfaced_position` (not null, ≥ 0) records where in its queue an occurrence was surfaced.
+    - **Never rewritten:** it is written once by `add()`. Like rank, score, algorithm, and the exploration mark, it is never changed by `save()`.
+    - **queue_position:** it stays the mutable current-queue state, cleared when the occurrence leaves the queue.
+    - **History order:** history reads in surfaced order (surfaced time, then position), so an order such as rank 2 ahead of rank 1 can be reconstructed after the queue moves on.
+    - **Migration:** it is added in the same, still uncommitted B5 migration, `de244c476f3a`, extended in place; no local database had been upgraded to it. The committed B4 migration is unchanged.
+    - **Backfill:** older rows are recovered from insertion order. B4 inserted each queue's occurrences one at a time, in order, with one surfaced time, so within a session and surfaced time, rowid order is the surfaced order. It is read before the rebuild, while rowids are original.
+13. **Strictly ordered times within a session** (with item 11).
+    - **The problem:** this machine's clock moves in steps of about 1 ms (measured: 214 distinct readings in 200 ms). So a control turn and the refresh right after it could carry the same time, and two refreshes within a millisecond could share a surfaced time.
+    - **The rule:** `SessionService` gives every change to a session a time strictly later than the session's last change, which every command records in `updated_at`. That is the clock, or `updated_at` plus 1 µs when the clock has not moved.
+    - **What it buys:** "after" within a session is exact. A refresh is always later than the turn it follows, and no two queues of a session share a surfaced time.
+    - **No schema change.**
+14. **A pick with no meaningful score is surfaced without one.** Its `Recommendation` has an empty breakdown, so its occurrence's `score` is `NULL`. The neutral session fit (0.5) is how a stage reads with no evidence (spec §15); it is not a score for the track. This applies to directed picks admitted by the fallback rule and to unscored tracks that only fill a queue.
+
+**Alternatives Considered:**
+- Scoring written afresh for the policy (a second copy of the math, forbidden by the guide).
+- Defaults for missing features (D21).
+- A randomly chosen exploration track (spec §20 requires plausible exploration, and it would make tests nondeterministic).
+- A fixed 20-play cooldown (small libraries run dry).
+- A hard cooldown alone: a test showed a four-track library alternating two tracks.
+- Constants in the database (unneeded before tuning in B11).
+- Persisting decisions (the occurrence keeps rank, score, version, surfaced position, and the exploration mark; `decide()` can explain the current one).
+- Letting default exploration leave the genre whenever other features make a track plausible (diversity would silently override intent).
+- Setting the genre aside for the whole queue under Try something different (the request is for something different, not a new intent).
+- Controls as persistent session modes, or as rate changes (the first B5 version). A control then outlasted the request that made it, and its effect depended on the random draw, landing at #3 only some of the time.
+- A neutral 0.5 standing in for a track nothing can be compared with (the first review version): that invents plausibility. Replaced by the explicit fallback rule.
+- Telling "after" from raw clock readings (ties at about 1 ms resolution would make a control apply twice or not at all), or a new column linking each queue to the turn it followed (a schema change that item 13 makes unnecessary).
+- Keeping queue position as the only position (it is cleared when an occurrence leaves the queue, so a surfaced order was lost).
+- A new, separate migration for the surfaced position (the B5 migration was still uncommitted and unapplied outside tests).
+
+**Consequences:**
+- Every pick is explainable from its stage scores, renormalized weights, penalties, and exploration mark.
+- A library with only tag labels is ranked by genre, mood, and session evidence. Numeric features stay absent until an analyzer estimates them (TD-014).
+- Without a stored long-term profile (B10), Policy v1 ranks by intent and session alone.
+- Once a profile exists, it counts in the long-term stage and, for features the current intent leaves open, in intent fit too.
+- *(Before item 11)* With a genre in the intent and tracks described by genre alone, nothing was both plausible and novel, so exploration never fired and its controls had no effect.
+  - Item 11 resolves this through the controls. Without one, exploration still stays in the genre. Surprise me, or Try something different, takes the next refresh outside it through the fallback rule.
+  - Verified over real tagged files.
+- A control's effect is immediate and predictable: Try something different changes the very next track, Surprise me the third. Neither lasts past that refresh.
+- Over genre-only tags, which track outside the genre the fallback rule admits comes down to the deterministic tie-break, because nothing distinguishes them.
+- Occurrence history can reconstruct every surfaced queue in order, including exploratory orders, even when the clock does not move between them.
+
+**Revisit When:**
+- B6 records feedback events as evidence.
+- B10 stores a long-term profile.
+- B11 evaluation tunes the constants (as a new version).
+- An analyzer estimates numeric features.
+- "Play something from recently liked music" (spec §20) is defined; it is not implemented.
+
 ## New Decision Template
 
 ```text

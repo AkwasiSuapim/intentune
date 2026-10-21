@@ -2,7 +2,7 @@
 
 ## Status
 
-**Living Document.** Last reviewed: Phase B0, 2026-10-18. Questions answered by the [Prototype 1 Decision Register](../decisions/intentune-prototype-decision-register.md) are marked **Resolved** with the decision ID.
+**Living Document.** Last reviewed: Phase B5, 2026-10-20 (full review in B0, 2026-10-18). Questions answered by the [Prototype 1 Decision Register](../decisions/intentune-prototype-decision-register.md) are marked **Resolved** with the decision ID.
 
 ## Product Risks
 
@@ -14,7 +14,7 @@
 
 ## Technical Risks
 
-- Refactoring may change current scoring behavior. B5 must prove complete-input legacy outputs stay identical (D38).
+- Refactoring may change current scoring behavior. B5 must prove complete-input legacy outputs stay identical (D38). **Mitigated (B5, 2026-10-20):** the legacy and canonical tests pass unchanged, the CLI output is unchanged, and a test proves Policy v1's intent fit equals the legacy normalized score for every CSV song.
 - Audio analysis dependencies (`librosa` and its numeric stack, and any pretrained model) may be hard to install or slow on the listener's machine (Windows, Python 3.11 in the current environment). Their compatibility is unverified.
 - SQLite write contention between the background worker and API requests.
 - Large libraries: import throughput, analysis time, and full-library scoring latency are unmeasured (B11).
@@ -47,10 +47,18 @@
 ## Open Backend Questions
 
 - How should missing candidate features affect score normalization? **Resolved:** omit the feature and renormalize active weights; never invent a midpoint (D21, spec §14).
-- How should genre and mood similarity be represented?
+- How should genre and mood similarity be represented? *(Policy v1, B5: exact match, ignoring case and surrounding space, the legacy rule. Partial genre similarity, such as "indie pop" to "pop", is not attempted.)*
 - How should diversity penalties interact with relevance scores? **Resolved:** diversity is a separate re-ranking stage after the combined rank and must not override explicit intent (D07, spec §19).
 - What is the first stable API response schema? Still open: designed in B8.
-- What counts as "useful novelty" for letting candidate #2 play first (D15)? The spec does not define it.
+- What counts as "useful novelty" for letting candidate #2 play first (D15)? The spec does not define it. **Interpreted in B5 (TD-016):** something has played, #2 is not by that track's artist, and either #1 is, or #2 is less similar to it than #1. Open to revision at review.
+- *(Raised in B5, 2026-10-20.)* With a genre in the intent, a library described by genre tags alone never explores. A same-genre track is identical by genre, so it is not novel, and another genre has intent fit 0, so it is not plausible. Surprise me and Try something different then raise a rate that has nothing to act on. This follows spec §19 (diversity must not override explicit intent), and exploration resumes when the intent names no genre or once numeric features exist. Should these controls be allowed to step outside an explicit genre, for example by relaxing the plausibility floor? That is a product decision. **Resolved at the B5 review (TD-016 items 11, 13, 14):** a listener control is a deterministic one-refresh directive, part of current intent.
+  - Without a control, exploration stays in the requested genre.
+  - Surprise me prefers novelty within the genre and sets it aside only when the genre offers none.
+  - Try something different steps outside it and makes its track the next to play.
+  - More familiar suppresses exploration for that refresh.
+  - A refinement before the refresh supersedes the control.
+  - With the genre set aside, a track nothing can be compared with gets no score. It qualifies only by an explicit fallback rule: a known genre, playable, not refused.
+- *(Raised in B5.)* "Play something from recently liked music" (spec §20) is listed among the controls that shift exploration, but no turn kind or rule exists for it. What should it do, and is it a B6 feedback-driven control or a new turn kind?
 - How does the frontend's categorical intent (for example, five energy levels) map to `ListeningContext` numeric targets?
 - Where do the frontend's typed messages and quick-action labels become structured turn variants, given that React must not parse language and the backend accepts only limited deterministic commands (D30)? *(Still open after B4: `SessionService.apply_turn()` accepts structured turn kinds and `ListeningContext` only, so the mapping has to happen before it.)*
 - *(Raised in B4, 2026-10-20.)* Which call starts a session for the listener at startup or on Play (the "next listening action" of D35)? The B8 startup must call `end_sessions_from_previous_run()` before any request is served.

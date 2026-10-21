@@ -1,6 +1,7 @@
 """Alembic migrations: a clean database upgrades, downgrades, matches the ORM records, and fails atomically."""
 
 import os
+from datetime import datetime, timezone
 
 import pytest
 from alembic import command
@@ -12,6 +13,10 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 
 from src.intentune.application.local_listener import ensure_default_listener
+from src.intentune.application.sessions import SessionService
+from src.intentune.domain.library import AudioFormat, Track, TrackStatus
+from src.intentune.domain.models import ListeningContext, MusicCandidate, Recommendation, ScoreBreakdown, ScoreComponent
+from src.intentune.domain.session import TurnKind
 from src.intentune.persistence.db import create_database_engine, create_session_factory
 from src.intentune.persistence.migrations import alembic_config, upgrade_database
 from src.intentune.persistence.models import Base
@@ -217,6 +222,116 @@ def test_downgrading_background_analysis_keeps_tracks_and_returns_them_to_import
 
     command.upgrade(alembic_config(migrated_database_url), "head")
     assert _current_revision(migrated_database_url) == _head_revision(migrated_database_url)
+
+
+def test_the_b5_rebuild_keeps_occurrences_and_the_turns_about_them(migrated_database_url):
+    """B5 rebuilt recommendation_occurrences to add surfaced_position and is_exploration. Rows and the turns
+    that reference them survive the rebuild both ways."""
+    engine = create_database_engine(migrated_database_url)
+    try:
+        unit_of_work = SqlAlchemyUnitOfWork(create_session_factory(engine))
+        listener_id = ensure_default_listener(unit_of_work).listener_profile_id
+        now = datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc)
+        track = Track(
+            track_id=_FIRST_ID, sha256="a" * 64, size_bytes=10, audio_format=AudioFormat.FLAC, status=TrackStatus.IMPORTED,
+            original_filename="song.flac", created_at=now, updated_at=now,
+        )
+        with unit_of_work:
+            unit_of_work.tracks.add(track)
+            unit_of_work.commit()
+        sessions = SessionService(unit_of_work)
+        session_id = sessions.start_session(listener_id, ListeningContext(temporary_genres=("ambient",))).session.session_id
+        recommendation = Recommendation(
+            candidate=MusicCandidate(candidate_id=track.track_id, title="Song", creator="Artist", source="local"),
+            score_breakdown=ScoreBreakdown(total_score=0.5, maximum_score=1.0, components=(ScoreComponent("intent", 0.5, 1.0, "intent fit 0.50"),)),
+            rank=1,
+        )
+        [occurrence] = sessions.queue_recommendations(session_id, [recommendation], "policy-v1", exploration_track_ids={track.track_id}).queue
+        assert occurrence.is_exploration
+        sessions.advance(session_id)
+        sessions.apply_turn(session_id, TurnKind.NOT_FOR_ME)
+    finally:
+        engine.dispose()
+
+    def occurrence_rows():
+        engine = create_database_engine(migrated_database_url)
+        try:
+            with engine.connect() as connection:
+                occurrences = connection.exec_driver_sql("SELECT * FROM recommendation_occurrences").mappings().all()
+                turn_targets = connection.exec_driver_sql("SELECT occurrence_id FROM session_turns WHERE occurrence_id IS NOT NULL").scalars().all()
+            return [dict(row) for row in occurrences], turn_targets
+        finally:
+            engine.dispose()
+
+    command.downgrade(alembic_config(migrated_database_url), "dd7360f46b8b")
+    [before_b5], turn_targets = occurrence_rows()
+    assert {"is_exploration", "surfaced_position"}.isdisjoint(before_b5)
+    assert (before_b5["id"], before_b5["status"], turn_targets) == (occurrence.occurrence_id, "PLAYING", [occurrence.occurrence_id])
+
+    command.upgrade(alembic_config(migrated_database_url), "head")
+    [after_b5], turn_targets = occurrence_rows()
+    assert after_b5 == {**before_b5, "is_exploration": 0, "surfaced_position": 0}
+    assert turn_targets == [occurrence.occurrence_id]
+
+
+def test_the_b5_migration_recovers_surfaced_positions_from_insertion_order(database_url):
+    """Occurrences from before B5 get the position they were surfaced at: B4 inserted each queue in order,
+    with one surfaced_at, so insertion order within a session and surfaced_at is the surfaced order."""
+    command.upgrade(alembic_config(database_url), "dd7360f46b8b")
+    first_queue, second_queue = "2026-10-20 09:00:00", "2026-10-20 09:05:00"
+    track_ids = [f"7d1f2b3c-4d5e-4c55-9e0a-3f2c4a8e1b7{index}" for index in range(3)]
+    listener_ids = [_FIRST_ID, _SECOND_ID]  # one active session each
+    session_ids = ["0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e40", "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e41"]
+    # (session, surfaced_at, track, rank, status, queue_position, started_at, finished_at), in insertion order.
+    occurrences = [
+        (0, first_queue, 1, 2, "PLAYED", None, first_queue, second_queue),  # rank 2 surfaced, and played, first
+        (0, first_queue, 0, 1, "REPLACED", None, None, second_queue),
+        (0, first_queue, 2, 3, "REPLACED", None, None, second_queue),
+        (1, first_queue, 0, 1, "QUEUED", 0, None, None),  # another session's queue, surfaced at the same moment
+        (0, second_queue, 2, 1, "PLAYING", None, second_queue, None),
+        (0, second_queue, 0, 2, "QUEUED", 1, None, None),
+    ]
+    engine = create_database_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(_INSERT_PROFILE, (_FIRST_ID, 1))
+            connection.exec_driver_sql(_INSERT_PROFILE, (_SECOND_ID, 0))
+            for index, track_id in enumerate(track_ids):
+                connection.exec_driver_sql(
+                    "INSERT INTO tracks (id, sha256, size_bytes, audio_format, status, original_filename, created_at, updated_at) "
+                    "VALUES (?, ?, 10, 'flac', 'IMPORTED', 'song.flac', ?, ?)",
+                    (track_id, str(index) * 64, first_queue, first_queue),
+                )
+            for session_id, listener_id in zip(session_ids, listener_ids):
+                connection.exec_driver_sql(
+                    "INSERT INTO listening_sessions (id, listener_profile_id, status, context_json, started_at, updated_at) "
+                    "VALUES (?, ?, 'ACTIVE', '{\"context\": {}, \"format\": 1}', ?, ?)",
+                    (session_id, listener_id, first_queue, second_queue),
+                )
+            for number, (session, surfaced_at, track, rank, status, position, started, finished) in enumerate(occurrences):
+                connection.exec_driver_sql(
+                    "INSERT INTO recommendation_occurrences "
+                    "(id, session_id, track_id, rank, score, algorithm, status, queue_position, surfaced_at, updated_at, started_at, finished_at) "
+                    "VALUES (?, ?, ?, ?, 0.5, 'test-algorithm-v1', ?, ?, ?, ?, ?, ?)",
+                    (f"5e4f4a3b-8c2d-4e0f-9a8b-7c6d5e4f4a3{number}", session_ids[session], track_ids[track], rank, status,
+                     position, surfaced_at, surfaced_at, started, finished),
+                )
+    finally:
+        engine.dispose()
+
+    command.upgrade(alembic_config(database_url), "head")
+
+    engine = create_database_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            rows = connection.exec_driver_sql(
+                "SELECT id, surfaced_position, queue_position, is_exploration FROM recommendation_occurrences"
+            ).all()
+    finally:
+        engine.dispose()
+    by_id = {row[0]: row[1:] for row in rows}
+    stored = [by_id[f"5e4f4a3b-8c2d-4e0f-9a8b-7c6d5e4f4a3{number}"] for number in range(len(occurrences))]
+    assert stored == [(0, None, 0), (1, None, 0), (2, None, 0), (0, 0, 0), (0, None, 0), (1, 1, 0)]
 
 
 def test_migrated_database_uses_wal_and_leaves_no_foreign_key_violations(engine):

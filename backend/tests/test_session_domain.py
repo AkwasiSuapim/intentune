@@ -44,6 +44,7 @@ def _occurrence(**overrides):
         status=OccurrenceStatus.QUEUED,
         surfaced_at=_NOW,
         updated_at=_NOW,
+        surfaced_position=0,
         score=0.8,
         queue_position=0,
     )
@@ -194,11 +195,25 @@ def test_impossible_occurrence_transitions_are_refused(start, transition):
         dict(score=-0.1),
         dict(algorithm=" "),
         dict(track_id="1"),
+        dict(surfaced_position=-1),
+        dict(surfaced_position=None),
+        dict(surfaced_position=True),
     ],
 )
 def test_occurrence_invariants(overrides):
     with pytest.raises(ValueError):
         _occurrence(**overrides)
+
+
+def test_the_surfaced_position_outlasts_the_queue_position():
+    """queue_position is the current queue state; surfaced_position is where it was surfaced, for good (B5)."""
+    queued = _occurrence(surfaced_position=1, queue_position=1)
+
+    played = queued.started_playing(_NOW).finished_playing(_LATER)
+    replaced = queued.replaced(_LATER)
+    discarded = queued.discarded(_LATER)
+
+    assert [(left.queue_position, left.surfaced_position) for left in (played, replaced, discarded)] == [(None, 1)] * 3
 
 
 def test_an_occurrence_may_have_no_score():

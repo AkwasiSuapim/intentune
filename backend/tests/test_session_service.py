@@ -221,6 +221,42 @@ def test_queued_recommendations_become_occurrences_in_list_order(sessions, liste
     assert all((occurrence.algorithm, occurrence.status) == (_ALGORITHM, OccurrenceStatus.QUEUED) for occurrence in state.queue)
 
 
+def test_the_surfaced_order_survives_playback_and_replacement(sessions, listener, tracks):
+    """B5: rank 2 surfaced ahead of rank 1 stays readable once the queue has moved on."""
+    session_id = sessions.start_session(listener, _CALM).session.session_id
+    first = [_recommendation(tracks[1], rank=2), _recommendation(tracks[0], rank=1), _recommendation(tracks[2], rank=3)]
+    sessions.queue_recommendations(session_id, first, _ALGORITHM)
+    sessions.advance(session_id)
+    sessions.advance(session_id)
+    sessions.queue_recommendations(session_id, [_recommendation(tracks[3], rank=1)], _ALGORITHM)
+
+    history = sessions.history(session_id).occurrences
+
+    assert [(occurrence.track_id, occurrence.rank, occurrence.surfaced_position, occurrence.status) for occurrence in history] == [
+        (tracks[1], 2, 0, OccurrenceStatus.PLAYED),
+        (tracks[0], 1, 1, OccurrenceStatus.PLAYING),
+        (tracks[2], 3, 2, OccurrenceStatus.REPLACED),
+        (tracks[3], 1, 0, OccurrenceStatus.QUEUED),
+    ]
+    assert [occurrence.queue_position for occurrence in history] == [None, None, None, 0]
+
+
+def test_changes_within_a_session_get_strictly_later_times_even_when_the_clock_stands_still(unit_of_work, listener, tracks):
+    """B5: Policy v1 tells whether a control was acted on by whether a queue was surfaced after it."""
+    sessions = SessionService(unit_of_work, clock=lambda: _NOW)
+    session_id = sessions.start_session(listener, _CALM).session.session_id
+
+    turn = sessions.apply_turn(session_id, TurnKind.SURPRISE_ME)
+    first = _queue(sessions, session_id, tracks[:2])
+    playing = sessions.advance(session_id).playing
+    second = _queue(sessions, session_id, tracks[2:4])
+    ended = sessions.end_session(session_id)
+
+    times = [_NOW, turn.created_at, first.queue[0].surfaced_at, playing.started_at, second.queue[0].surfaced_at, ended.ended_at]
+    assert times == sorted(set(times))
+    assert sessions.history(session_id).turns[0].created_at == _NOW
+
+
 def test_canonical_rankings_can_be_surfaced_and_stay_separate_from_their_occurrences(sessions, listener, tracks):
     candidates = [
         MusicCandidate(candidate_id=track_id, title=f"T{index}", creator="A", source="library", genre=genre, mood="calm", energy=energy, danceability=0.3)

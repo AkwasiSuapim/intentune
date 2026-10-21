@@ -31,9 +31,9 @@
 - SQLite persistence with SQLAlchemy repositories and versioned migrations *(B1: foundation built, holding the listener profile only)*
 - Background scanning and analysis, with progressive track readiness *(B3: background analysis built and tested, with persisted jobs, one worker, recovery, and exact level and duration measurements. Scanning stays synchronous. Nothing a listener runs starts the worker until B8.)*
 - Structured `ListeningContext` and listening sessions *(B4: session state machine, turns, and the restart rule built and tested in the backend; nothing a listener runs reaches them until B8)*
-- Recommendation occurrences, feedback, and playback events *(B4: occurrences, plus the raw-feedback table; recording feedback is B6)*
-- Continuous recommendation flow with a rolling three-candidate queue
-- Controlled exploration and repetition cooldown
+- Recommendation occurrences, feedback, and playback events *(B4: occurrences, plus the raw-feedback table; recording feedback is B6. B5: each occurrence keeps its surfaced position and exploration mark.)*
+- Continuous recommendation flow with a rolling three-candidate queue *(B5: Recommendation Policy v1 fills and re-ranks the queue from the session's intent, turns, and plays, with #2 able to play first; built and tested in the backend; nothing a listener runs reaches it until B8)*
+- Controlled exploration and repetition cooldown *(B5: about 90/10 exploration moved by the listener's controls and recent outcomes, a cooldown that shrinks for small libraries, and repeated-artist and near-duplicate penalties. Without a control, exploration stays in a requested genre. Listener controls act on the next refresh, deterministically: Surprise me adds a novel track, leaving the genre only when it offers no novelty. Try something different makes a track outside the genre the next to play. More familiar holds exploration back.)*
 - Playlists
 - FastAPI HTTP API and local audio playback endpoint
 - Long-term evidence collection and conservative long-term adaptation
@@ -57,7 +57,7 @@ The sections below predate Prototype 1. Items that Prototype 1 replaces are mark
 
 Each feature must be introduced only after its behavior and tests are defined.
 
-In Prototype 1, missing-feature handling, diversity re-ranking, and algorithm versioning arrive with Recommendation Policy v1 (B5). Plural genre and mood labels are stored per track (spec §9). Match classifications and score display are **superseded**: the approved frontend never shows scores or confidence. The remaining items are not scheduled.
+In Prototype 1, missing-feature handling, diversity re-ranking, and algorithm versioning arrive with Recommendation Policy v1 (B5). *(Current since B5, 2026-10-20: each occurrence records the policy version, `policy-v1`.)* Plural genre and mood labels are stored per track (spec §9). Match classifications and score display are **superseded**: the approved frontend never shows scores or confidence. The remaining items are not scheduled.
 
 ## Planned Backend Features
 

@@ -18,8 +18,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B1** SQLite persistence foundation | SQLAlchemy, SQLite, Alembic, local listener, repositories, migration tests | **Complete and committed** (2026-10-19, `f000bb2`). 228 backend tests pass (131 baseline + 97 from B1, including the hardening pass). |
 | **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | **Complete and committed** (2026-10-19, `079c6f4`). 404 backend tests pass and 1 is skipped (405 collected; B2 adds 177). |
 | **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | **Complete and committed** (2026-10-20, `e2991cb`). 518 backend tests pass and 1 is skipped (519 collected; B3 adds 114). |
-| **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | **Complete, awaiting review** (2026-10-20). 618 backend tests pass and 1 is skipped (619 collected; B4 adds 100). |
-| **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | Not started |
+| **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | **Complete and committed** (2026-10-20, `d4060af`). 618 backend tests pass and 1 is skipped (619 collected; B4 adds 100). |
+| **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | **Complete, awaiting review** (2026-10-20), including the review decisions and the final policy corrections. 752 backend tests pass and 1 is skipped (753 collected; B5 adds 134). |
 | **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | Not started |
 | **B7** Playlists | CRUD, add/remove/reorder, persistence | Not started |
 | **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | Not started |
@@ -146,6 +146,70 @@ Not done in B4, by scope:
 - No effects of turns on ranking (B5, B6).
 - No recording or interpreting of feedback events (B6; the table and repository exist).
 - No mapping of typed text to turns (open question).
+- No routes (B8).
+
+### B5 record (2026-10-20)
+
+On branch `prototype-1`, on top of `d4060af`. Policy v1 is `domain/policy.py`, and the use case is `RecommendationService.refresh_queue()` (`application/recommendations.py`). The guide's B5 rules (execution guide §8):
+
+- **Stage order.** Eligibility, intent fit, session fit, long-term fit, combine, diversity/cooldown, exploration, then the top three. Each stage is computed and kept separately, so a pick can be explained.
+- **Missing features are never invented.** A feature counts only when the target and the track both have it. Feature weights and stage weights are renormalized over what is available. A track with nothing to compare never outranks one with a score.
+- **One reusable `candidate_similarity()`** over common features, used for session fit, near-duplicates, and novelty.
+- **Session fit** follows spec §15 exactly: 0.85 recency, and 0.5 without evidence.
+- **Diversity.** Recent-play cooldown, repeated artist, and near-duplicate penalties, plus a graded recent-play penalty so small libraries rotate.
+- **Exploration.** Automatic exploration runs at about 90/10, moved by recent exploration outcomes, and stays in an explicitly requested genre. Listener controls are deterministic one-refresh directives (see the review decisions below).
+- **#2 plays first** within 0.08 when it is more novel.
+- **All constants** are in one versioned `RecommendationPolicy` (`policy-v1`).
+- **No duplicated scoring math.** `category_match()` and `closeness()` were extracted from `score_candidate()`, and the policy reuses them. The 115 legacy and canonical tests pass unchanged, and the CLI output is unchanged. A test proves intent fit equals the legacy normalized score for every CSV song.
+
+Acceptance scenarios, each a deterministic test (`tests/test_policy.py`, with the session path in `tests/test_queue_refresh.py`):
+- no feedback;
+- positive feedback (More like this);
+- early skip (a −0.5 evidence weight);
+- Not for me (excluded for the session, similar tracks lowered);
+- current intent conflicting with history;
+- missing features;
+- a finite library (cooldown, rotation, a one-track library);
+- exploration success and failure, and the listener controls;
+- the #2 safety threshold, including the inclusive margin, no play yet, a less novel #2, a same-artist #2, and an exploration pick at #2.
+
+Decisions from the B5 review, applied before commit ([TD-016](../decisions/technical-decisions.md#td-016-b5-recommendation-policy-v1) items 11–14):
+- **Listener controls are one-refresh directives, part of current intent.**
+  - Surprise me, Try something different, and More familiar each act on the next refresh only, and deterministically.
+  - A refinement made before that refresh supersedes the control.
+  - Without a control, exploration never leaves an explicitly requested genre.
+  - Surprise me takes the last slot, looking for novelty within the genre first and setting the genre aside only when the genre offers none.
+  - Try something different steps outside the genre at once and makes its track the next to play.
+  - More familiar suppresses exploration for that refresh.
+- **No invented scores.**
+  - With the genre set aside, a track is judged on what can still be compared.
+  - When nothing can be compared, it gets no score. A control may still pick it under an explicit fallback rule: a known genre, playable, not refused.
+  - Any pick with no meaningful score is surfaced without a score.
+- **Strictly ordered times within a session**, so "a queue was surfaced after this control" is exact even though this machine's clock moves in about 1 ms steps.
+- **Every occurrence keeps an immutable surfaced position.**
+  - It records where in its queue the occurrence was surfaced, so an order such as rank 2 ahead of rank 1 can be reconstructed after the queue has moved on.
+  - `queue_position` stays the mutable current-queue state.
+
+Schema: migration `de244c476f3a` adds `recommendation_occurrences.surfaced_position` (backfilled from insertion order) and `is_exploration`. It was extended in place, being uncommitted and unapplied outside tests; the committed B4 migration is unchanged. Its data tests cover two things: occurrences and the turns that reference them survive the rebuild in both directions, and older surfaced positions are recovered. Decisions: [TD-016](../decisions/technical-decisions.md#td-016-b5-recommendation-policy-v1). Schema: [Database Design](../design/database-design.md#current-schema-b5). Workflow: [System Workflow](../architecture/system-workflow.md#listening-session-b4-b5).
+
+Also verified:
+- an end-to-end run over real tagged FLAC files imported through the library;
+- 63 single-rule mutations, each of which makes tests fail.
+
+Details: [current system audit](../architecture/current-system-audit.md#b5-update-2026-10-20).
+
+Two defects were found while B5 was being built, and both were fixed before completion:
+- With only the hard cooldown, a four-track library alternated two tracks.
+- Plays of rejected tracks used up the cooldown.
+
+Observed in the first end-to-end run, and resolved by the first review decision: with a genre in the intent and libraries described by genre tags alone, exploration never fired. Same-genre tracks were not novel, and other genres were not plausible. Now, without a control, exploration still stays in the genre. Surprise me or Try something different takes the next refresh outside it, through the fallback rule, with no invented score. Verified over the real tagged files.
+
+Not done in B5, by scope:
+- Feedback events are not yet evidence; recording and Feedback Policy v1 are B6. Turns are the only evidence.
+- No long-term profile is stored (B10), so the long-term stage is unavailable and its weight is renormalized away.
+- Library tracks carry only tag labels (genre, mood). No numeric features are estimated (TD-014).
+- No caller refreshes the queue automatically; B6 and B8 call `refresh_queue()` after meaningful changes.
+- "Play something from recently liked music" (spec §20) is not implemented.
 - No routes (B8).
 
 ## Frontend Phases

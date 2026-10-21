@@ -306,8 +306,10 @@ class RecommendationOccurrenceRecord(Base):
     __table_args__ = (
         CheckConstraint(_one_of("status", OccurrenceStatus), name="status"),
         CheckConstraint("rank >= 1", name="rank"),
+        CheckConstraint("is_exploration IN (0, 1)", name="is_exploration"),
         CheckConstraint("score IS NULL OR score BETWEEN 0 AND 1", name="score"),
         CheckConstraint("queue_position IS NULL OR queue_position >= 0", name="queue_position"),
+        CheckConstraint("surfaced_position >= 0", name="surfaced_position"),
         CheckConstraint("(status = 'QUEUED') = (queue_position IS NOT NULL)", name="queue_position_while_queued"),
         CheckConstraint("(status IN ('PLAYING', 'PLAYED')) = (started_at IS NOT NULL)", name="started_when_played"),
         CheckConstraint(
@@ -337,10 +339,12 @@ class RecommendationOccurrenceRecord(Base):
     algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     queue_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    surfaced_position: Mapped[int] = mapped_column(Integer, nullable=False)
     surfaced_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     started_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(UtcDateTime, nullable=True)
+    is_exploration: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
 
 
 class SessionTurnRecord(Base):

@@ -594,10 +594,12 @@ def _occurrence_from_record(record: RecommendationOccurrenceRecord) -> Recommend
         status=record.status,
         surfaced_at=record.surfaced_at,
         updated_at=record.updated_at,
+        surfaced_position=record.surfaced_position,
         score=record.score,
         queue_position=record.queue_position,
         started_at=record.started_at,
         finished_at=record.finished_at,
+        is_exploration=record.is_exploration,
     )
 
 
@@ -616,6 +618,10 @@ class SqlAlchemyRecommendationOccurrenceRepository:
     order of the writes. That keeps the partial unique indexes (one PLAYING
     occurrence per session, one occurrence per queue position) satisfied after
     every statement, not just at commit.
+
+    What was surfaced (track, rank, score, algorithm, time, surfaced position,
+    exploration mark) is written once by add(); save() changes only the
+    lifecycle columns, so a surfaced record can never be rewritten.
     """
 
     def __init__(self, session: Session) -> None:
@@ -632,7 +638,8 @@ class SqlAlchemyRecommendationOccurrenceRepository:
         if status is OccurrenceStatus.QUEUED:
             order = (RecommendationOccurrenceRecord.queue_position,)
         else:
-            order = (RecommendationOccurrenceRecord.surfaced_at, RecommendationOccurrenceRecord.rank, RecommendationOccurrenceRecord.id)
+            # The order they were surfaced in, which may differ from rank order.
+            order = (RecommendationOccurrenceRecord.surfaced_at, RecommendationOccurrenceRecord.surfaced_position, RecommendationOccurrenceRecord.id)
         return [_occurrence_from_record(record) for record in self._session.scalars(statement.order_by(*order))]
 
     def add(self, occurrence: RecommendationOccurrence) -> None:
@@ -644,6 +651,8 @@ class SqlAlchemyRecommendationOccurrenceRepository:
             score=occurrence.score,
             algorithm=occurrence.algorithm,
             surfaced_at=occurrence.surfaced_at,
+            surfaced_position=occurrence.surfaced_position,
+            is_exploration=occurrence.is_exploration,
         )
         _apply_occurrence(record, occurrence)
         self._session.add(record)

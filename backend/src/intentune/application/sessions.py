@@ -23,10 +23,15 @@ only on an ACTIVE session.
 
 Recording feedback events (FeedbackEvent) and interpreting them is B6. No raw
 conversational text is accepted or stored (D33).
+
+Within a session, every change gets a strictly later time than the one before
+(B5), even when the clock has not moved. So turns and surfaced queues are
+totally ordered in time, which Policy v1 relies on to tell whether a steering
+control has been acted on yet.
 """
 
-from datetime import datetime, timezone
-from typing import Callable, List, Optional, Sequence
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Iterable, List, Optional, Sequence
 
 from src.intentune.domain.library import TrackNotFound
 from src.intentune.domain.models import ListeningContext, Recommendation
@@ -50,6 +55,7 @@ from src.intentune.domain.validation import new_uuid, require_text
 from src.intentune.ports.unit_of_work import UnitOfWork
 
 _TURNS_WITHOUT_TARGET = frozenset({TurnKind.SURPRISE_ME, TurnKind.MORE_FAMILIAR, TurnKind.TRY_SOMETHING_DIFFERENT})
+_TICK = timedelta(microseconds=1)
 
 
 def _utc_now() -> datetime:
@@ -73,7 +79,7 @@ class SessionService:
                 raise ListenerProfileNotFound(listener_profile_id)
             previous = self._uow.listening_sessions.get_active_for_listener(listener_profile_id)
             if previous is not None:
-                self._end(previous, SessionEndReason.REPLACED_BY_NEW_SESSION, now)
+                self._end(previous, SessionEndReason.REPLACED_BY_NEW_SESSION, self._time_after(previous))
             session = new_session(listener_profile_id, context, now)
             self._uow.listening_sessions.add(session)
             self._uow.session_turns.add(new_turn(session, 1, TurnKind.INITIAL_INTENT, context, now))
@@ -81,19 +87,18 @@ class SessionService:
         return SessionState(session=session, playing=None, queue=())
 
     def end_session(self, session_id: str) -> ListeningSession:
-        now = self._clock()
         with self._uow:
-            ended = self._end(self._require_active(session_id), SessionEndReason.ENDED_BY_LISTENER, now)
+            session = self._require_active(session_id)
+            ended = self._end(session, SessionEndReason.ENDED_BY_LISTENER, self._time_after(session))
             self._uow.commit()
         return ended
 
     def end_sessions_from_previous_run(self) -> int:
         """End every session a previous run left ACTIVE (D35). Call at startup. Returns how many ended."""
-        now = self._clock()
         with self._uow:
             active = self._uow.listening_sessions.list_active()
             for session in active:
-                self._end(session, SessionEndReason.APP_RESTARTED, now)
+                self._end(session, SessionEndReason.APP_RESTARTED, self._time_after(session))
             if active:
                 self._uow.commit()
         return len(active)
@@ -115,9 +120,9 @@ class SessionService:
         if kind in _TURNS_WITHOUT_TARGET and occurrence_id is not None:
             raise ValueError(f"A {kind.value} turn is not about a single recommendation.")
 
-        now = self._clock()
         with self._uow:
             session = self._require_active(session_id)
+            now = self._time_after(session)
             playing = self._playing(session_id)
             target = None
             if kind is TurnKind.REFINE:
@@ -145,14 +150,20 @@ class SessionService:
     # --- Queue and playback -----------------------------------------------------------
 
     def queue_recommendations(
-        self, session_id: str, recommendations: Sequence[Recommendation], algorithm: str
+        self,
+        session_id: str,
+        recommendations: Sequence[Recommendation],
+        algorithm: str,
+        exploration_track_ids: Iterable[str] = (),
     ) -> SessionState:
         """Surface recommendations, in this order, as the session's upcoming queue.
 
         Each recommendation's candidate_id must be a library track id. rank is
         the algorithm's rank (its position in this list when unset), and score
         is its normalized score. Queue order is the list order, which may
-        differ from rank order (for example when #2 is chosen to play first, B5).
+        differ from rank order (for example when #2 is chosen to play first,
+        B5). Each occurrence keeps its list position as surfaced_position for
+        good. exploration_track_ids marks which of them are exploration picks.
         """
         algorithm = require_text(algorithm, "algorithm")
         recommendations = list(recommendations)
@@ -161,10 +172,13 @@ class SessionService:
         track_ids = [recommendation.candidate.candidate_id for recommendation in recommendations]
         if len(set(track_ids)) != len(track_ids):
             raise ValueError("A queue lists each track at most once.")
+        exploration = frozenset(exploration_track_ids)
+        if not exploration <= set(track_ids):
+            raise ValueError("Exploration picks must be among the queued recommendations.")
 
-        now = self._clock()
         with self._uow:
             session = self._require_active(session_id)
+            now = self._time_after(session)
             for track_id in track_ids:
                 if self._uow.tracks.get(track_id) is None:
                     raise TrackNotFound(track_id)
@@ -182,7 +196,9 @@ class SessionService:
                         surfaced_at=now,
                         updated_at=now,
                         score=recommendation.score_breakdown.normalized_score,
+                        surfaced_position=position,
                         queue_position=position,
+                        is_exploration=recommendation.candidate.candidate_id in exploration,
                     )
                 )
             self._uow.listening_sessions.save(session.touched(now))
@@ -192,9 +208,9 @@ class SessionService:
 
     def play(self, session_id: str, occurrence_id: str) -> SessionState:
         """Start a specific queued recommendation. The one playing before, if any, has been played."""
-        now = self._clock()
         with self._uow:
             session = self._require_active(session_id)
+            now = self._time_after(session)
             occurrence = self._require_occurrence(session_id, occurrence_id)
             if occurrence.status is not OccurrenceStatus.QUEUED:
                 raise InvalidSessionTransition("Only a queued recommendation can start playing.")
@@ -209,9 +225,9 @@ class SessionService:
 
     def advance(self, session_id: str) -> SessionState:
         """Finish the current recommendation, if any, and start the next queued one, if any."""
-        now = self._clock()
         with self._uow:
             session = self._require_active(session_id)
+            now = self._time_after(session)
             self._advance(session_id, self._playing(session_id), now)
             self._uow.listening_sessions.save(session.touched(now))
             state = self._state(session_id)
@@ -241,6 +257,18 @@ class SessionService:
             )
 
     # --- Internals (inside the caller's transaction) -----------------------------------
+
+    def _time_after(self, session: ListeningSession) -> datetime:
+        """The clock, but strictly later than the session's last change.
+
+        Every change to a session moves its updated_at, so its turns, surfaced
+        queues, and playback changes get strictly increasing times even when the
+        clock has not moved; this machine's clock advances in about 1 ms steps.
+        Within a session, "after" is then exact: a refresh that follows a turn is
+        later than it, and two queues are never surfaced at the same moment.
+        """
+        now = self._clock()
+        return now if now > session.updated_at else session.updated_at + _TICK
 
     def _require_session(self, session_id: str) -> ListeningSession:
         session = self._uow.listening_sessions.get(session_id)

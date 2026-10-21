@@ -190,22 +190,61 @@ start_session(listener, context)    -> ACTIVE session + INITIAL_INTENT turn
                                        (the listener's previous ACTIVE session ends: REPLACED_BY_NEW_SESSION)
 queue_recommendations(recs, algo)   -> the given Recommendations become QUEUED occurrences, in list order;
                                        whatever was still queued becomes REPLACED
+                                       (B5: each keeps its list position as surfaced_position for good)
 advance() / play(occurrence)        -> PLAYING -> PLAYED; the next (or the chosen) queued occurrence -> PLAYING
 apply_turn(kind, ...)               -> a turn with the context left in force:
                                          REFINE replaces the context
                                          NEXT finishes the current track and starts the next queued one
                                          NOT_FOR_ME / MORE_LIKE_THIS name their occurrence (the playing one by default)
                                          SURPRISE_ME / MORE_FAMILIAR / TRY_SOMETHING_DIFFERENT are recorded only
+                                         (B5: the next refresh acts on them, below)
 end_session()                       -> ENDED_BY_LISTENER; queued -> DISCARDED, playing -> PLAYED
 ```
 
 An ended session refuses every command and stays readable (`get_session`, `history`, `list_sessions`).
 
 What B4 does not do:
-- **Recommendations:** it does not produce them, refill the queue, or keep it at three. That is B5.
-- **Turn effects:** it does not act on what turns mean (exclusion, affinity, exploration), which is B5 and B6.
+- **Recommendations:** it does not produce them, refill the queue, or keep it at three. That is B5 *(current since B5, below)*.
+- **Turn effects:** it does not act on what turns mean (exclusion, affinity, exploration), which is B5 and B6. *(B5 acts on turns; B6 adds feedback events.)*
 - **Feedback:** it does not record feedback events. That is B6, though B4 created their table.
 - **Text:** it does not turn typed text into turns (an [open question](../planning/risks-and-open-questions.md#open-backend-questions)).
+
+**Current (B5, 2026-10-20): Recommendation Policy v1 fills the queue.** `RecommendationService.refresh_queue(session_id)` (`backend/src/intentune/application/recommendations.py`) runs the stages above with the policy in `backend/src/intentune/domain/policy.py`:
+
+```text
+read, in one short transaction: the session (context), its turns and occurrences, every library track
+   -> signals: NOT_FOR_ME = -1.0 evidence + excluded for the session; MORE_LIKE_THIS = +1.0 evidence;
+               plays (newest first) for the cooldown; a pending control: a SURPRISE_ME / MORE_FAMILIAR /
+               TRY_SOMETHING_DIFFERENT turn with no queue surfaced and no REFINE after it
+   -> eligibility: available (IMPORTED, ANALYZING, READY), not excluded, not in the recent-play cooldown
+   -> intent fit (current intent; the long-term profile fills open features), session fit, long-term fit
+   -> combined (weights renormalized over the stages available); tracks with no meaningful score last
+   -> diversity: greedy re-rank with recent-play, repeated-artist, and near-duplicate penalties
+   -> exploration, for this refresh:
+        no control               if the random draw is below the automatic rate (about 10%), #3 becomes the best
+                                 scored, plausible, novel track within the requested genre
+        SURPRISE_ME              no draw: #3 becomes the best such track within the genre; only if the genre has
+                                 none, the best track with the genre set aside
+        TRY_SOMETHING_DIFFERENT  no draw: the best track with the genre set aside goes FIRST, to play next,
+                                 followed by the two best in-intent picks
+        MORE_FAMILIAR            no exploration at all
+      with the genre set aside: scored on what can still be compared (rest of intent, session evidence),
+      at or above the floor; a track nothing can be compared with gets no score and qualifies only by the
+      fallback rule (a known genre, playable, not refused); scored tracks first
+   -> #2 first: within 0.08 of #1 and more novel than #1 relative to the last play
+      (never with an exploration pick at #1 or #2; never an unscored #2 ahead of a scored #1)
+   -> queue_recommendations(..., "policy-v1", exploration picks)  (the old queue becomes REPLACED;
+        each occurrence keeps its surfaced position for good; an unscored pick is stored with no score)
+```
+
+Surfacing the queue acts on the pending control, so the refresh after that is automatic again. `SessionService` gives every change in a session a strictly later time, so whether a queue was surfaced after a control turn is exact even when the clock has not moved.
+
+`decide(session_id)` returns the same decision without writing, for explanation. A caller refreshes after each meaningful change: start, refinement, steering turn, playback advance, and (B6) feedback. Nothing calls it from a running entry point yet (B8).
+
+What B5 does not do:
+- **Feedback events:** it does not use them as evidence; turns are the only evidence until B6.
+- **Long-term profile:** none is stored until B10, so the long-term stage is unavailable.
+- **Numeric features:** library tracks carry tag labels only. The stage scores ignore energy, danceability, tempo, valence, and acousticness until something measures them.
 
 ### Feedback and immediate adaptation (B6)
 
@@ -314,6 +353,8 @@ Return a structured validation error (`VALIDATION_ERROR`). Do not begin recommen
 ### Empty Library or No Eligible Track
 
 Return a controlled result rather than an error page or crash. The spec lists `RECOMMENDATION_UNAVAILABLE` among its potential error codes; exact error semantics are defined in B8.
+
+**Current (B5):** with no eligible track, Policy v1 returns an empty decision and `refresh_queue()` leaves the session with an empty queue; nothing raises. A small library keeps a full queue for as long as it has four or more eligible tracks, because the cooldown shrinks to fit it.
 
 ### Unsupported or Missing Audio
 

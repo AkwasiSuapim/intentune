@@ -101,6 +101,43 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
 - TD-015 records the B4 implementation decisions.
 
+### Added — Phase B5: Recommendation Policy v1 (2026-10-20)
+
+- `src/intentune/domain/policy.py`, pure, with randomness only from an injected generator:
+  - `RecommendationPolicy`, with every constant validated and versioned as `policy-v1` (`POLICY_V1`).
+  - The stages in the guide's order: eligibility, intent fit, session fit, long-term fit, combined score with renormalized weights, diversity (recent-play cooldown and penalty, repeated artist, near-duplicate), controlled exploration, and the top three with #2 able to play first.
+  - The reusable `candidate_similarity()`.
+  - `candidate_from_track()` and `signals_from_session()`: Not for me excludes the track and counts −1.0; More like this counts +1.0. A pending listener control is one with no queue surfaced and no refinement after it.
+  - Automatic exploration at about 10%, moved only by how recent exploration picks went, and only within an explicitly requested genre.
+  - Listener controls as deterministic one-refresh directives, part of current intent (from the B5 review):
+    - Surprise me takes the last slot, within the genre first.
+    - Try something different makes a track outside the genre the next to play.
+    - More familiar suppresses exploration for that refresh.
+    - A refinement before the refresh supersedes the control.
+  - With the genre set aside, a track nothing can be compared with gets no score. It qualifies only by an explicit fallback rule (a known genre, playable, not refused). A pick with no meaningful score is surfaced without one.
+- `RecommendationService` (`src/intentune/application/recommendations.py`): `refresh_queue(session_id)` surfaces Policy v1's decision through `SessionService.queue_recommendations()`, and `decide(session_id)` returns it without writing.
+- `RecommendationOccurrence.is_exploration` and `queue_recommendations(..., exploration_track_ids)`.
+- `RecommendationOccurrence.surfaced_position` (from the B5 review): where the occurrence was surfaced in its queue. It is written once, never changed, and kept after the occurrence leaves the queue, so an order such as rank 2 ahead of rank 1 can be reconstructed. `queue_position` stays the current queue state.
+- Migration `de244c476f3a` adds `recommendation_occurrences.surfaced_position` (not null, CHECK ≥ 0, backfilled from insertion order) and `is_exploration` (not null, default 0, CHECK).
+- 134 tests: 121 in `tests/test_policy.py` and `tests/test_queue_refresh.py`, and 13 added to the migration and B4 session test files. The suite is 752 passed and 1 skipped. No dependency was added.
+- TD-016 records the B5 implementation decisions.
+
+### Changed — Phase B5 (2026-10-20)
+
+- `src/intentune/domain/scoring.py`: the per-feature rules are extracted as `category_match()` and `closeness()`, which Policy v1 reuses. `score_candidate()` output, the legacy API, and the CLI are unchanged.
+- Occurrence history (`list_for_session()` without a status, and `SessionService.history()`) reads in surfaced order, by surfaced time and then surfaced position. Before, it read in rank order within each queue.
+- `SessionService` gives every change within a session a strictly later time than the one before: the clock, or 1 µs past the session's last change when the clock has not moved. It moves in about 1 ms steps on this machine. Turns and surfaced queues are therefore totally ordered.
+- `tests/test_session_domain.py`, `tests/test_session_repositories.py`: the occurrence helpers give a surfaced position, and the pinned occurrence columns include `surfaced_position` and `is_exploration`.
+
+### Fixed — during B5 (2026-10-20)
+
+- Two defects found while B5 was being built, before completion:
+  - With only the hard cooldown, a four-track library alternated two tracks. It now rotates through them.
+  - Plays of rejected or unavailable tracks used up the cooldown, so a just-played track could return at once.
+- Found during the final corrections:
+  - A turn and the refresh after it, or two quick refreshes, could share a timestamp, so whether a control had been acted on was ambiguous.
+  - An unscored #2 could have played ahead of a scored #1 when #1 was by the artist that just played.
+
 ### Fixed — during B4 (2026-10-20)
 
 - `docs/changelog.md` had a B2 limitation sentence attached to the B3 limitation, from the B3 edit.
@@ -154,7 +191,7 @@ All meaningful product, architecture, and behavior changes should be recorded he
 
 - The historical dictionary API and historical dataclass API shapes still coexist with the canonical domain models for backward compatibility, though they are now thin boundary conversions rather than separate scoring/ranking implementations.
 - The scoring algorithm, its 10-point maximum, and its sharp similarity cutoff are unchanged; it still only uses genre, mood, energy, and danceability.
-- `score_candidate()` requires genre, mood, energy, and danceability to be present -- missing-feature normalization for partial YouTube-style metadata is not implemented yet.
+- `score_candidate()` requires genre, mood, energy, and danceability to be present -- missing-feature normalization for partial YouTube-style metadata is not implemented yet. *(Since B5, missing-feature scoring exists in Recommendation Policy v1, for library tracks; `score_candidate()` keeps its contract.)*
 - The legacy dict shape (`load_songs()`'s output) assumes every candidate field is present; a `MusicCandidate` with a `None` audio feature would fail converting back to that shape. Not an issue for the current CSV catalog, where every field is always populated.
 - The compatibility CLI path performs an extra `MusicCandidate -> legacy dict -> MusicCandidate` conversion; it calls `load_music_candidates()` directly rather than through `CsvCatalog`/`Catalog`, since the legacy dict shape predates the port and rewiring it would change nothing observable.
 - The CLI (`src/main.py`) does not yet use `recommend_from_catalog()` -- it still runs the legacy `load_songs()`/`recommend_songs()` path. Wiring a catalog-backed entry point into the CLI is a future decision, not required for Phase 2.
@@ -163,7 +200,8 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - B1 persistence is not wired into any running entry point. Nothing applies migrations or calls `ensure_default_listener()` at startup until B8. `backend/.env` is not loaded, so a different database must be chosen through the `DATABASE_URL` environment variable.
 - B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously; background scanning (D26) is not assigned to a phase, since B3 covered analysis only. Artwork is not extracted. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
 - B3's worker is not started by any running entry point until B8. Only exact signal measurements exist (duration, peak, RMS level); BPM, key, loudness in LUFS, and semantic features stay `NULL`. M4A tracks are never analyzed, because libsndfile cannot decode them.
-- B4's session service is not called by any running entry point until B8, and nothing produces the recommendations it queues until B5. Turns are recorded but do not yet change ranking. Feedback events have a table but no recording use case (B6).
+- B4's session service is not called by any running entry point until B8, and nothing produces the recommendations it queues until B5. Turns are recorded but do not yet change ranking. Feedback events have a table but no recording use case (B6). *(Since B5, Policy v1 produces the queue and acts on turns.)*
+- B5's Policy v1 is not called by any running entry point until B8. Turns are its only evidence until B6 adds feedback events. No long-term profile is stored until B10, so its long-term stage is unavailable. Library tracks carry tag labels only, so ranking uses genre (and mood, when tagged) and session evidence. With a genre in the intent and genre-only tags, exploration happens only on the refresh after Surprise me or Try something different. Among tracks the fallback rule admits, the choice comes down to a deterministic tie-break. "Play something from recently liked music" is not implemented.
 
 ### Current Baseline
 

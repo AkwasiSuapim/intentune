@@ -156,7 +156,7 @@ Validated recommendation request
 
 Contains business rules that do not depend on HTTP, databases, the filesystem, AI providers, or music providers.
 
-**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are modeled but not yet used by scoring. `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `src/intentune/domain/library.py` (B2) holds the managed-library rules. It defines the entities `LibrarySource`, `SourceFile`, `Track`, and `TrackLabel`, and the values `DiscoveredFile`, `EmbeddedTags`, `AudioProbe`, and `ScanReport`. It sets the allowlisted `AudioFormat`s and the readiness states, a relative-path rule that cannot escape a source folder, and how tag values become year and genre labels. `src/intentune/domain/validation.py` (B2) holds validators shared by the listener and library models. `src/intentune/domain/analysis.py` (B3) holds:
+**Current:** `src/intentune/domain/models.py` defines the typed, source-independent models (`MusicCandidate`, `UserProfile`, `ListeningContext`, `FeatureWeights`, `ScoreComponent`, `ScoreBreakdown`, `Recommendation`). `src/intentune/domain/scoring.py` and `src/intentune/domain/ranking.py` implement the current four-feature scoring rule and tie-breaking ranking rule as the single source of truth -- `src/recommender.py`'s legacy `score_song()`/`recommend_songs()` delegate to them rather than containing a second copy of the scoring math. None of these three modules import CSV, HTTP, database, or provider-specific code. `ListeningContext` and `FeatureWeights` are not used by `score_candidate()`; since B5, Recommendation Policy v1 uses both (below). `src/intentune/domain/listener.py` (B1) defines `ListenerProfile`, the local listener identity (a canonical UUID, a default flag, and a UTC creation time; no personal data), and `new_default_listener_profile()`, which generates it. `src/intentune/domain/library.py` (B2) holds the managed-library rules. It defines the entities `LibrarySource`, `SourceFile`, `Track`, and `TrackLabel`, and the values `DiscoveredFile`, `EmbeddedTags`, `AudioProbe`, and `ScanReport`. It sets the allowlisted `AudioFormat`s and the readiness states, a relative-path rule that cannot escape a source folder, and how tag values become year and genre labels. `src/intentune/domain/validation.py` (B2) holds validators shared by the listener and library models. `src/intentune/domain/analysis.py` (B3) holds:
 - the job model and its transitions (`AnalysisJob`): succeeded, skipped, failed, retry later, after interruption, requeued;
 - `AnalyzerIdentity` (`name@version`), `AnalysisResult`, and `TrackFeature`, which carries provenance;
 - the `needs_analysis` rule.
@@ -170,12 +170,28 @@ Contains business rules that do not depend on HTTP, databases, the filesystem, A
 - `FeedbackEvent`: a raw listening fact with a derived `played_fraction`;
 - the read models `SessionState` and `SessionHistory`.
 
-Each enforces its invariants and transitions. `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
+Each enforces its invariants and transitions. *(B5: an occurrence also records `is_exploration`, and `surfaced_position`: where it was surfaced in its queue, never changed, unlike the current-queue `queue_position`.)*
+
+`src/intentune/domain/policy.py` (B5) is Recommendation Policy v1, pure and deterministic apart from an injected random generator:
+- `RecommendationPolicy`: every constant, validated and versioned as a whole (`POLICY_V1`, `policy-v1`);
+- inputs: `PolicyCandidate` (a library track as the policy sees it, from `candidate_from_track()`), `SessionEvidence`, and `SessionSignals`, built from a session's turns and plays by `signals_from_session()`;
+- the stages: `Targets.effective()` (current intent first), `feature_fit()`, `candidate_similarity()`, `session_fit()`, `score()` (renormalized stage weights), and `decide()` (eligibility, diversity, exploration, top three, #2 first), returning a `PolicyDecision` that converts to canonical `Recommendation`s.
+
+A pending listener control in the signals is a one-refresh directive, part of current intent (TD-016 item 11):
+- it decides exploration deterministically, without the random draw;
+- it decides whether the pick may set an explicitly requested genre aside (`score(..., set_aside_genre=True)`);
+- it decides where the pick goes.
+
+A track that nothing can score is never given one. It can only be a control's pick under an explicit fallback rule, and it is surfaced without a score.
+
+Feature comparison reuses `scoring.category_match()` and `scoring.closeness()`, extracted from `score_candidate()` without changing its output, so there is one copy of the scoring math.
+
+`backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
 - A listening-session domain: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (B4). The session owns current state; turns, occurrences, and feedback own history (D31). *(Current since B4; see above.)*
-- Recommendation Policy v1 (B5): eligibility, intent fit, session fit, long-term fit, combined rank, diversity/repetition re-rank, controlled exploration, and the rolling top three. Each stage is computed separately (D07, D08). All constants live in one versioned policy module.
+- Recommendation Policy v1 (B5): eligibility, intent fit, session fit, long-term fit, combined rank, diversity/repetition re-rank, controlled exploration, and the rolling top three. Each stage is computed separately (D07, D08). All constants live in one versioned policy module. *(Current since B5; see above.)*
 - Feedback interpretation (B6) and conservative long-term adaptation (B10).
 - Existing `score_candidate()`/`rank_candidates()` are preserved. New scoring extends or refactors shared primitives so the scoring math is never duplicated, and complete-input legacy outputs stay identical (D38).
 
@@ -206,7 +222,13 @@ See [System Workflow](system-workflow.md#background-analysis-b3).
 - `end_sessions_from_previous_run()` for D35;
 - reads: `get_session()`, `list_sessions()`, and `history()`.
 
-Each command is one transaction and works only on an active session. It does not rank (B5) or record and interpret feedback (B6). See [System Workflow](system-workflow.md#listening-session-b4-b5).
+Each command is one transaction and works only on an active session. It does not rank (B5) or record and interpret feedback (B6). See [System Workflow](system-workflow.md#listening-session-b4-b5). *(B5: every change to a session gets a strictly later time than the one before, even when the clock has not moved, so turns and surfaced queues are totally ordered within a session; TD-016 item 13.)*
+
+`src/intentune/application/recommendations.py` (B5) implements `RecommendationService`, through the `UnitOfWork` port only:
+- `refresh_queue(session_id)`: reads the session, its turns and occurrences, and the library in one transaction, asks Policy v1 for the next three tracks, and surfaces them with `SessionService.queue_recommendations()`, marking the exploration pick;
+- `decide(session_id)`: the same decision without writing.
+
+The random generator and clock are injected, so tests are deterministic.
 
 **Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
 

@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -80,6 +81,7 @@ def _queued(session, track, position=0, rank=1):
         status=OccurrenceStatus.QUEUED,
         surfaced_at=_NOW,
         updated_at=_NOW,
+        surfaced_position=position,
         score=0.75,
         queue_position=position,
     )
@@ -206,6 +208,51 @@ def test_occurrences_round_trip_and_the_queue_is_in_position_order(unit_of_work)
 
     assert [occurrence.track_id for occurrence in queue] == [second.track_id, first.track_id, third.track_id]
     assert loaded == later_rank_first
+
+
+def test_the_surfaced_order_is_kept_after_the_queue_moves_on(unit_of_work):
+    """Rank 2 surfaced ahead of rank 1 can still be read back once neither is QUEUED (B5)."""
+    session = _start(unit_of_work, _listener(unit_of_work))
+    first, second, third = (_track(unit_of_work, char) for char in "abc")
+    second_first = [_queued(session, second, position=0, rank=2), _queued(session, first, position=1, rank=1), _queued(session, third, position=2, rank=3)]
+    _add_occurrences(unit_of_work, *second_first)
+    with unit_of_work:
+        unit_of_work.recommendation_occurrences.save(second_first[0].started_playing(_NOW).finished_playing(_NOW + timedelta(seconds=5)))
+        for still_queued in second_first[1:]:
+            unit_of_work.recommendation_occurrences.save(still_queued.replaced(_NOW + timedelta(seconds=5)))
+        unit_of_work.commit()
+
+    with unit_of_work:
+        history = unit_of_work.recommendation_occurrences.list_for_session(session.session_id)
+
+    assert [occurrence.queue_position for occurrence in history] == [None, None, None]
+    assert [(occurrence.surfaced_position, occurrence.rank) for occurrence in history] == [(0, 2), (1, 1), (2, 3)]
+
+
+def test_saving_never_rewrites_what_was_surfaced(unit_of_work):
+    session = _start(unit_of_work, _listener(unit_of_work))
+    occurrence = _queued(session, _track(unit_of_work), position=1, rank=2)
+    _add_occurrences(unit_of_work, occurrence)
+    rewritten = replace(occurrence.started_playing(_NOW), surfaced_position=0, rank=1, score=0.1, is_exploration=True)
+
+    with unit_of_work:
+        unit_of_work.recommendation_occurrences.save(rewritten)
+        unit_of_work.commit()
+
+    with unit_of_work:
+        stored = unit_of_work.recommendation_occurrences.get(occurrence.occurrence_id)
+    assert stored.status is OccurrenceStatus.PLAYING
+    assert (stored.surfaced_position, stored.rank, stored.score, stored.is_exploration) == (1, 2, 0.75, False)
+
+
+@pytest.mark.parametrize("column, value", [("surfaced_position", -1), ("surfaced_position", None), ("is_exploration", 2)])
+def test_database_refuses_surfacing_values_the_domain_would_not_create(engine, unit_of_work, column, value):
+    session = _start(unit_of_work, _listener(unit_of_work))
+    _add_occurrences(unit_of_work, _queued(session, _track(unit_of_work)))
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.exec_driver_sql(f"UPDATE recommendation_occurrences SET {column} = ?", (value,))
 
 
 def test_occurrence_save_and_status_filter(unit_of_work):
@@ -343,5 +390,6 @@ def test_session_tables_have_no_column_for_raw_text_or_ui_state(engine):
         "id", "session_id", "occurrence_id", "event_type", "played_seconds", "duration_seconds", "played_fraction", "occurred_at"
     }
     assert columns["recommendation_occurrences"] == {
-        "id", "session_id", "track_id", "rank", "score", "algorithm", "status", "queue_position", "surfaced_at", "updated_at", "started_at", "finished_at"
+        "id", "session_id", "track_id", "rank", "score", "algorithm", "status", "queue_position", "surfaced_at", "updated_at",
+        "started_at", "finished_at", "surfaced_position", "is_exploration",  # the last two: added in B5
     }
