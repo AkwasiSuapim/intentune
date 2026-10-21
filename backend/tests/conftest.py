@@ -3,9 +3,11 @@
 Every database here is a fresh SQLite file under pytest's tmp_path. No test
 opens backend/data/intentune.db or depends on the DATABASE_URL variable.
 Library tests also keep their source folders and managed media under
-tmp_path, never backend/data/media/.
+tmp_path, never backend/data/media/. API tests (B8) run an app over the same
+kind of temporary database and media folder, with no background threads.
 """
 
+import random
 import struct
 import wave
 from pathlib import Path
@@ -16,12 +18,15 @@ import soundfile
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TCON, TDRC, TIT2, TPE1
 from mutagen.wave import WAVE
+from starlette.testclient import TestClient
 
 from src.intentune.adapters.local_folders import LocalSourceFolders
 from src.intentune.adapters.managed_media import LocalManagedMedia
 from src.intentune.adapters.mutagen_audio import MutagenAudioInspector
+from src.intentune.api.app import create_app
+from src.intentune.api.settings import ApiSettings
 from src.intentune.application.library import LibraryService
-from src.intentune.persistence.db import create_database_engine, create_session_factory
+from src.intentune.persistence.db import create_database_engine, create_session_factory, resolve_database_url
 from src.intentune.persistence.migrations import upgrade_database
 from src.intentune.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -186,3 +191,54 @@ def library(unit_of_work, media_root):
         MutagenAudioInspector(),
         LocalManagedMedia(media_root),
     )
+
+
+# --- HTTP API (B8) -----------------------------------------------------------------
+
+
+class NeverExplore(random.Random):
+    """A generator whose draws never trigger Policy v1's automatic exploration, so API queues are predictable."""
+
+    def random(self):
+        return 0.999
+
+
+@pytest.fixture
+def api_settings(database_url, media_root):
+    """Settings for an app over a fresh database file and media folder, with no background threads."""
+    return ApiSettings(
+        database_url=resolve_database_url(database_url),
+        media_root=media_root,
+        start_worker=False,
+        startup_scan=False,
+    )
+
+
+@pytest.fixture
+def client(api_settings):
+    """A running app (its startup has run) and a client for it."""
+    with TestClient(create_app(api_settings, rng_factory=lambda: NeverExplore(0))) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def music(tmp_path):
+    root = tmp_path / "music"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def library_tracks(client, music, audio):
+    """Six tagged WAV tracks registered and imported through the API: {title: track body}.
+
+    a1-a3 are Ambient, j1-j3 Jazz; each has its own artist.
+    """
+    for seed, (title, genre) in enumerate(
+        (("a1", "Ambient"), ("a2", "Ambient"), ("a3", "Ambient"), ("j1", "Jazz"), ("j2", "Jazz"), ("j3", "Jazz")), start=1
+    ):
+        audio.wav(music / f"{title}.wav", seed=seed, title=title, artist=f"Artist {title}", genre=genre)
+    source = client.post("/api/v1/library/sources", json={"path": str(music)}).json()
+    report = client.post("/api/v1/library/import", json={"source_id": source["source_id"]}).json()
+    assert report["imported"] == 6
+    return {track["title"]: track for track in client.get("/api/v1/library/tracks").json()["items"]}

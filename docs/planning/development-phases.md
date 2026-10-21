@@ -20,9 +20,9 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | **Complete and committed** (2026-10-20, `e2991cb`). 518 backend tests pass and 1 is skipped (519 collected; B3 adds 114). |
 | **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | **Complete and committed** (2026-10-20, `d4060af`). 618 backend tests pass and 1 is skipped (619 collected; B4 adds 100). |
 | **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | **Complete and committed** (2026-10-20, `8a1be05`), including the review decisions and the final policy corrections. 752 backend tests pass and 1 is skipped (753 collected; B5 adds 134). |
-| **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | **Complete, awaiting commit** (2026-10-20; review fixes 2026-10-21). 830 backend tests pass and 1 is skipped (831 collected; B6 adds 78). |
-| **B7** Playlists | CRUD, add/remove/reorder, persistence | **Complete, awaiting review** (2026-10-21), on top of the uncommitted B6. 905 backend tests pass and 1 is skipped (906 collected; B7 adds 75). |
-| **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | Not started |
+| **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | **Complete and committed** (2026-10-20; review fixes 2026-10-21; committed with B7 as `116276b`). 830 backend tests pass and 1 is skipped (831 collected; B6 adds 78). |
+| **B7** Playlists | CRUD, add/remove/reorder, persistence | **Complete and committed** (2026-10-21, `116276b`, together with B6). 905 backend tests pass and 1 is skipped (906 collected; B7 adds 75). |
+| **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | **Complete, awaiting review** (2026-10-21), on top of `116276b`. 1075 backend tests pass and 1 is skipped (1076 collected; B8 adds 170). |
 | **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | Not started. Corresponds to frontend phase F9. |
 | **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | Not started |
 | **B11** Evaluation/hardening | Performance with hundreds to thousands of tracks, restart behavior, migrations, algorithm evaluation | Not started |
@@ -280,6 +280,48 @@ Not done in B7, by scope:
 - No routes (B8).
 - The frontend's Save is not mapped to playlist adds yet (B9).
 - No artwork, sharing, or duplicate entries.
+
+### B8 record (2026-10-21)
+
+On branch `prototype-1`, on top of `116276b`. The HTTP boundary is `backend/src/intentune/api/` (FastAPI 0.143.0, Starlette 1.8.0, both already pinned), run with `python -m src.intentune.api`. The guide's B8 rules (execution guide §11), each tested:
+
+- **A thin HTTP boundary with Pydantic schemas separate from ORM and domain models.** Routes parse, call one use case, and map. An architecture test keeps persistence and adapter imports in the composition root (`api/container.py`, `api/settings.py`).
+- **The spec's routes** (§24), all 22, plus `HEAD` on audio. Request and response bodies and status codes: [API Design](../design/api-design.md).
+- **One error envelope with request IDs** (§26). `X-Request-ID` is on every response. Errors carry no stack traces, paths, or echoed ids, and unexpected errors are logged and answered `500 INTERNAL_ERROR`.
+- **Audio by track ID, never path** (§25). Starlette's `FileResponse` range behavior was verified, so no custom range code was needed: 206 for single, open-ended, and suffix ranges; multipart for several; 416 past the end; 400 when malformed. Tests pin each behavior. A missing managed copy answers `409 TRACK_UNAVAILABLE` and marks the track.
+
+Also:
+- **Startup runs in the FastAPI lifespan:** migrate, then the local listener, then the end of a previous run's sessions (D35), then the analysis worker (D28), then the background startup scan (D25). Shutdown stops them.
+- **Two thin application use cases:**
+  - `ListeningService`: start or steer, then re-rank;
+  - `LibraryScanCoordinator`: scans never overlap, and a second one is `409 CONFLICT`.
+- **`BEGIN IMMEDIATE`** replaces the deferred `BEGIN` of B1. Concurrent read-then-write transactions failed with "database is locked"; that was reproduced, then fixed, and is now tested.
+- **Strict request schemas:**
+  - no unknown fields;
+  - JSON numbers only, finite;
+  - text length limits;
+  - no text field on turns (D33).
+- **Settings come from the process environment** only, plus a new optional `MEDIA_ROOT`. `backend/.env` is not loaded.
+
+Decisions: [TD-019](../decisions/technical-decisions.md#td-019-b8-fastapi-boundary). Workflow: [System Workflow](../architecture/system-workflow.md#http-api-b8).
+
+Also verified:
+- **A real Uvicorn server, over real tagged FLAC files:**
+  - import, with background analysis of 7/7 tracks;
+  - range requests over TCP and with `curl`;
+  - a full listening session;
+  - a playlist add as feedback;
+  - 96 concurrent requests (turns, reactions, playlist writes, reads, audio ranges, and rescans) with no errors;
+  - a restart that ended the previous session.
+- **44 single-rule mutations,** each of which makes tests fail. Four survived the first run and were killed by tightening tests.
+
+Details: [current system audit](../architecture/current-system-audit.md#b8-update-2026-10-21).
+
+Not done in B8, by scope:
+- **Frontend:** the frontend does not call the API (B9), and its message, refine, Save, and playlist flows are not mapped yet.
+- **Library:** no artwork route, no scan progress, and manual Import and Rescan answer when the scan ends.
+- **Sessions:** no explanation text for recommendations (Policy v1's reasons are not stored).
+- **Settings:** no `.env` loading.
 
 ## Frontend Phases
 

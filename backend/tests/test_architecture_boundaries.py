@@ -6,6 +6,11 @@ import SQLAlchemy or Alembic, only src/intentune/adapters/ may import mutagen,
 soundfile, or numpy, and file I/O (os, shutil, pathlib, ...) happens only in
 adapters.
 
+The HTTP API (B8) is the outermost layer. No inner layer may import it.
+Inside it, only the composition root (api/container.py and api/settings.py)
+wires persistence and adapters; routes, schemas, views, and error handling
+reach storage and files only through the application layer.
+
 Every .py file under a layer is checked, including files in subpackages, and
 relative imports are resolved to absolute module names before checking, so
 `from ..persistence import db` is caught the same way as
@@ -21,7 +26,10 @@ _BACKEND = Path(__file__).resolve().parents[1]
 _INNER_LAYERS = ("domain", "ports", "application")
 _FRAMEWORKS = {"sqlalchemy", "alembic", "sqlite3", "fastapi", "starlette", "pydantic", "mutagen", "soundfile", "numpy"}
 _FILESYSTEM = {"os", "shutil", "pathlib", "glob", "io", "tempfile", "stat"}
-_OUTER_PACKAGES = ("src.intentune.persistence", "src.intentune.adapters")
+_OUTER_PACKAGES = ("src.intentune.persistence", "src.intentune.adapters", "src.intentune.api")
+_STORAGE_PACKAGES = ("src.intentune.persistence", "src.intentune.adapters")
+_STORAGE_FRAMEWORKS = {"sqlalchemy", "alembic", "sqlite3", "mutagen", "soundfile", "numpy"}
+_COMPOSITION_ROOT = {"src/intentune/api/container.py", "src/intentune/api/settings.py"}
 
 
 def _imported_modules(source, module_name, is_package):
@@ -84,6 +92,15 @@ def _outer_package_violations(imports):
     )
 
 
+def _storage_violations(imports):
+    return sorted(
+        f"{path} imports {name}"
+        for path, names in imports.items()
+        for name in names
+        if name.split(".")[0] in _STORAGE_FRAMEWORKS or any(_is_within(name, package) for package in _STORAGE_PACKAGES)
+    )
+
+
 def _outside_domain_violations(imports):
     return sorted(
         f"{path} imports {name}"
@@ -127,6 +144,15 @@ def test_domain_imports_nothing_outside_the_domain():
     assert _outside_domain_violations(imports) == []
 
 
+def test_only_the_composition_root_of_the_api_touches_storage():
+    imports = _imports_by_file(_BACKEND, "api")
+    outside_root = {path: names for path, names in imports.items() if path not in _COMPOSITION_ROOT}
+
+    assert _COMPOSITION_ROOT <= set(imports), "the composition root moved; update _COMPOSITION_ROOT"
+    assert len(outside_root) >= 8, "routes, schemas, views, and errors should all be checked"
+    assert _storage_violations(outside_root) == []
+
+
 # --- The checker itself --------------------------------------------------------
 
 
@@ -167,6 +193,9 @@ def test_violations_in_nested_subpackages_and_relative_imports_are_caught(tmp_pa
     _write(intentune / "domain" / "session" / "clean.py", "from ..models import MusicCandidate\n")
     _write(intentune / "application" / "use_cases" / "deep" / "start.py", "from ....persistence.db import create_database_engine\n")
     _write(intentune / "ports" / "nested" / "repo.py", "from ... import adapters\n")
+    _write(intentune / "application" / "presenting.py", "from ..api import views\n")
+    _write(intentune / "api" / "routes" / "tracks.py", "from ...persistence.unit_of_work import SqlAlchemyUnitOfWork\nimport sqlalchemy\n")
+    _write(intentune / "api" / "container.py", "from ..persistence.db import create_database_engine\n")
 
     domain = _imports_by_file(tmp_path, "domain")
     application = _imports_by_file(tmp_path, "application")
@@ -182,7 +211,16 @@ def test_violations_in_nested_subpackages_and_relative_imports_are_caught(tmp_pa
         "src/intentune/domain/session/state.py imports src.intentune.ports.catalog",
     ]
     assert _outer_package_violations(application) == [
+        "src/intentune/application/presenting.py imports src.intentune.api",
+        "src/intentune/application/presenting.py imports src.intentune.api.views",
         "src/intentune/application/use_cases/deep/start.py imports src.intentune.persistence.db",
         "src/intentune/application/use_cases/deep/start.py imports src.intentune.persistence.db.create_database_engine",
     ]
     assert _outer_package_violations(ports) == ["src/intentune/ports/nested/repo.py imports src.intentune.adapters"]
+
+    api = {path: names for path, names in _imports_by_file(tmp_path, "api").items() if path not in _COMPOSITION_ROOT}
+    assert _storage_violations(api) == [
+        "src/intentune/api/routes/tracks.py imports sqlalchemy",
+        "src/intentune/api/routes/tracks.py imports src.intentune.persistence.unit_of_work",
+        "src/intentune/api/routes/tracks.py imports src.intentune.persistence.unit_of_work.SqlAlchemyUnitOfWork",
+    ]

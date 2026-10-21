@@ -27,6 +27,8 @@ The suite must run from `backend/`, because tests import `src.…` and there is 
 
 Persistence tests create their own SQLite files under pytest's `tmp_path` and upgrade them with the real migrations. They never open `backend/data/intentune.db` or depend on `DATABASE_URL`.
 
+API tests (B8) run the real app, startup included, through Starlette's test client (`tests/conftest.py`: `api_settings`, `client`, `library_tracks`). It runs over a fresh database file and media folder under `tmp_path`. The analysis worker and the startup scan are off, except in the tests about them. A generator that never explores automatically keeps queues predictable. The test client prints one deprecation warning (its httpx support); it is expected.
+
 Run the full suite after every phase (spec §28).
 
 ### Frontend
@@ -116,6 +118,25 @@ Per-file counts are in the [B6 audit](../architecture/current-system-audit.md#b6
 | Backend `python -m pytest -q` | **905 passed, 1 skipped**: the 831 B0–B6 tests plus 75 from B7. No existing test changed. |
 
 Per-file counts are in the [B7 audit](../architecture/current-system-audit.md#b7-update-2026-10-21). 24 single-rule mutations each make a test fail. They cover the playlist domain, service, repository, feedback weight, and migration.
+
+## After B8 (2026-10-21)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **1075 passed, 1 skipped**: the 906 B0–B7 tests plus 170 from B8. One existing test was rewritten for `BEGIN IMMEDIATE` (two units of work in two threads instead of one). |
+
+Per-file counts are in the [B8 audit](../architecture/current-system-audit.md#b8-update-2026-10-21). 44 single-rule mutations each make a test fail. They cover:
+- the error envelope and request IDs;
+- status codes, schemas, and views;
+- audio serving;
+- the scan coordinator and listening service;
+- startup and shutdown, and settings;
+- `BEGIN IMMEDIATE`.
+
+The first run left four survivors, and tests were tightened to kill them:
+- a startup-scan race in a test;
+- a relative path tested only from `backend/`;
+- two schema rules the domain also enforces, now checked by where the error points.
 
 ## Current Test Coverage
 
@@ -388,6 +409,50 @@ Added in B7 (playlists):
     - nothing is ever saved automatically.
 - `tests/test_migrations.py`: the B7 downgrade drops the playlist tables and only PLAYLIST_ADD events, keeping other events exactly; the upgrade accepts PLAYLIST_ADD again.
 
+Added in B8 (HTTP API):
+
+- `tests/test_api_errors.py`:
+  - **Request IDs:** generated on every response; a safe client id kept in the header and the envelope; unsafe ones (spaces, 65 characters, `;`, non-ASCII, empty) replaced.
+  - **Envelope:** fixed not-found messages that echo no id; `NOT_FOUND` for unknown routes; `405` with `Allow`.
+  - **Validation:** problem locations without the rejected values; `400` for a body that is not JSON; strict context values (numbers as text, booleans, zero and negative tempo, blank, long, and too many labels); the domain's own refusals as `422`.
+  - **Unexpected errors:** logged with the request id and answered with a generic message (no path, no traceback); a response that cannot be built is `500`, not `422`.
+  - **CORS:** the frontend origin can read responses and their request ids, on errors and on the 500 envelope; a preflight is allowed; other origins are not.
+- `tests/test_api_library.py`:
+  - **Sources:** registration answers the folder's name and never its path; registering again answers `200` unchanged; unusable paths and the media folder are refused without echoing them; body validation.
+  - **Scans:** Import's full report and an unchanged rescan; an unknown source; Rescan over two sources; a missing folder reported, not raised; a scan during another is `409 CONFLICT`, and `scanning` shows it.
+  - **Tracks:** every field, no paths; paging and its bounds.
+  - **Jobs:** listed, filtered by status, and paged.
+- `tests/test_api_audio.py`: pins the installed range behavior:
+  - the whole file with its media type, `Accept-Ranges`, and no `Content-Disposition`;
+  - `HEAD`;
+  - single ranges (closed, open-ended, suffix, end clamped), multipart, `416` past the end, `400` when malformed;
+  - every format mapped to an `audio/` type, and FLAC served as `audio/flac`;
+  - unknown tracks and path-like ids reach no file;
+  - a missing managed copy is `409 TRACK_UNAVAILABLE` and marks the track; a rescan restores it.
+- `tests/test_api_sessions.py`:
+  - **Start and read:** the first queue with its tracks and every occurrence field; an empty library; starting again ends the previous session; the list newest first and paged; the detail with turns, occurrences, and raw events; unknown sessions.
+  - **Turns:** Play (`next` while nothing plays); next; refine; Not for me moving on and excluding; the three controls, which refuse a target; `initial_intent` refused with `409`; unknown and missing targets; body validation, including a raw-text field (D33); an ended session.
+  - **Playback events:** an early skip stored as a raw fact with its weight and interpretation, moving on; a completion; a skip of a track that never played; body validation checked at the schema.
+  - **Reactions:** Like; Not for me excluding and moving on; Replay as the listener's choice; another session's recommendation; body validation, including `playlist_add`.
+- `tests/test_api_playlists.py`:
+  - create and list; names trimmed, unique, and bounded;
+  - adds at the end, once each, of existing tracks only;
+  - an add from a recommendation is PLAYLIST_ADD feedback in the answer and the session;
+  - session and occurrence together; another track's recommendation refused with nothing stored;
+  - rename; remove closing the gap; reorder only by a full order;
+  - delete keeping library tracks; unknown playlists on every route.
+- `tests/test_api_startup.py`:
+  - **Startup:** a fresh database migrated; the listener kept across restarts; a previous run's session ended `app_restarted` with its queue discarded.
+  - **Background work:** the worker running while serving, analyzing imported tracks, and stopped at shutdown; the startup scan importing in the background, and nothing imported without it; a failed startup stopping what it started.
+  - **Settings:** defaults; paths relative to `backend/`, not the working directory; CORS origins; host and port; bad ports and non-SQLite URLs refused; `.env` not loaded; the environment read by default.
+  - **Entry point:** `python -m src.intentune.api` serves on the configured host and port.
+- `tests/test_library_scans.py`: scans in the caller's thread with a fresh service each; overlap refused; the background rescan; the worker woken after scans, failed ones included; the lock released after failures; a failing wake not failing the scan; `wait()`.
+- `tests/test_listening_service.py`: start surfaces the first queue; the previous session ends; Play starts the first queued track and refills; refine re-ranks; a refused turn changes nothing; a failed refresh leaves the turn recorded.
+- `tests/test_library_service.py`: `get_tracks()`; `track_audio()` for a playable track, a missing copy (marked), an already unavailable track, and an unknown one.
+- `tests/test_persistence_db.py`: a read-then-write transaction survives another connection's commit (`BEGIN IMMEDIATE`); with a deferred `BEGIN` it fails with "database is locked".
+- `tests/test_architecture_boundaries.py`: only the API's composition root imports persistence, adapters, or storage libraries, and no inner layer imports the API.
+- `tests/test_listener_repository.py`: uncommitted changes stay invisible to a unit of work in another thread, which waits for the writer.
+
 ### Frontend
 
 Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure tests (composition policy, reducers, commands, mock service, service boundary), static-render tests (every block type and the unknown-block fallback), DOM tests (interaction, focus, overlays, loading/waiting/failure states), and browser checks (layout matrix, motion, contrast, axe-core audit, keyboard probe, design comparison). The frontend has not been tested on physical phones or with real screen readers.
@@ -405,7 +470,7 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | Context resolution; missing-feature scoring; candidate similarity; session fit; combined weights; diversity/cooldown (recent track, repeated artist, near-duplicates); exploration gate; three-candidate selection; #2 safety threshold; conflicting current vs historical intent; finite library; exploration success and failure; **complete-input legacy outputs unchanged** | B5 — **Current** (2026-10-20) |
 | Feedback thresholds, including boundary values (8 s, 15%, 40%, 75%, 90%); explicit actions overriding passive playback; playback-event behavior; Not for me excluding the track for the session only | B6 — **Current** (2026-10-20) |
 | Playlist CRUD and ordering; one occurrence per playlist | B7 — **Current** (2026-10-21) |
-| API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 |
+| API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 — **Current** (2026-10-21) |
 | Frontend service boundary against the HTTP adapter | B9 |
 | Long-term evidence threshold; bounded, reversible adjustments | B10 |
 | Restart behavior; migrations on existing data; performance with hundreds to thousands of tracks | B11 |
@@ -442,7 +507,7 @@ Cover module cooperation:
 
 ### API Tests
 
-Cover:
+**Current (B8).** Cover:
 
 - Request validation
 - Response schema
@@ -450,6 +515,8 @@ Cover:
 - Error format
 - Dependency failure handling
 - Request limits
+
+API tests go through the real app and its startup, over a temporary database and media folder (see [How to Run](#backend)). Use-case rules stay tested at the application level; API tests check that routes reach them and report them faithfully.
 
 ### End-to-End Tests
 

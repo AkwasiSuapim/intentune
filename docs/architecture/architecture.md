@@ -24,9 +24,17 @@ Microservices would add network calls, service discovery, distributed logging, a
 
 ## Current Components
 
-**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector, plus, since B3 (2026-10-20), a signal-level audio analyzer. It also has, since B1, a SQLite persistence package. Since B3 it has a background analysis worker, a single in-process thread, and since B4 a listening-session service. It has no API boundary. The CLI flow below does not touch the database, the library, the worker, or sessions; those paths are used by tests only until the B8 startup wires them in. The frontend is a separate React application running on a mock service; it does not call the backend.
+**Current:** the backend has a domain layer, application use cases, and ports. Its adapters are the CSV catalog and, since B2 (2026-10-19), local folders, managed media, and a mutagen audio inspector, plus, since B3 (2026-10-20), a signal-level audio analyzer. It also has, since B1, a SQLite persistence package. Since B3 it has a background analysis worker, a single in-process thread, and since B4 a listening-session service. Since B8 (2026-10-21) it has an HTTP API (`src/intentune/api/`, FastAPI), which wires all of them together and runs them: `python -m src.intentune.api`. The legacy CLI flow below still touches none of them. The frontend is a separate React application running on a mock service; it does not call the backend yet (B9).
 
 ```text
+HTTP client --> FastAPI app (src/intentune/api/, B8): request-ID middleware, CORS, routes, error envelope
+                     |  container.py builds the adapters once, and services per request (each with its own unit of work)
+                     |  lifespan: migrate -> local listener -> end previous sessions -> start worker -> startup scan
+                     v
+     ListeningService, SessionService, FeedbackService, RecommendationService, PlaylistService,
+     LibraryService (via LibraryScanCoordinator for scans), AnalysisService  ... the use cases below
+
+
 CLI (src/main.py)
       |
       v
@@ -49,7 +57,7 @@ Recommendation domain      Catalog port
 
 ensure_default_listener() (B1)      LibraryService (B2): register/list sources,
       |                             scan, rescan, import file, list/get track,
-      |                             mark unavailable          (no caller yet)
+      |                             mark unavailable          (called by the API since B8)
       |                                   |
       v                                   v
 UnitOfWork and repository ports     + SourceFolders, AudioInspector, ManagedMedia ports
@@ -63,9 +71,9 @@ SQLite: backend/data/intentune.db (schema managed by Alembic)                   
       ^                                                                                 |
       | jobs, features, track status                                                    |
 AnalysisWorker (B3, one thread) -> AnalysisService -> AudioAnalyzer port -> SignalLevelAnalyzer (soundfile, numpy)
-                                   (no caller starts the worker yet)
+                                   (started by the API at startup since B8)
 
-SessionService (B4): start / turn / queue / play / advance / end / restart cleanup / history   (no caller yet)
+SessionService (B4): start / turn / queue / play / advance / end / restart cleanup / history   (called by the API since B8)
       |   takes in-memory Recommendations, records persisted RecommendationOccurrences
       v
 UnitOfWork: listening_sessions, session_turns, recommendation_occurrences, feedback_events (+ listener_profiles, tracks)
@@ -263,7 +271,11 @@ An add of a recommendation from a session also goes through `FeedbackService.rec
 
 Nothing else writes playlist items. See [System Workflow](system-workflow.md#playlists-b7).
 
-**Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP. *(Library, session, and feedback use cases are current since B2, B4–B6; playlists are B7.)*
+`src/intentune/application/listening.py` (B8) implements `ListeningService`: `start()` starts a session and surfaces its first queue, and `steer()` applies a turn and re-ranks. Each is two steps, like FeedbackService's.
+
+`src/intentune/application/library_scans.py` (B8) implements `LibraryScanCoordinator`. It runs scans one at a time: the startup scan in a background thread, Import and Rescan in the caller's thread. A scan that would overlap another is refused (`ScanInProgress`). After each scan it wakes the analysis worker. `LibraryService` gained `get_tracks()` and `track_audio()`, the latter for the audio route.
+
+**Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP. *(All current: library, session, and feedback use cases since B2, B4–B6, playlists since B7, and the HTTP boundary over them since B8.)*
 
 **Dependency direction (Current):** the application layer may import the
 domain, and adapters may construct domain models. The domain does not import
@@ -272,15 +284,21 @@ frameworks.
 
 ### API Layer
 
-**Planned (B8).** A thin FastAPI boundary:
+**Current (B8, 2026-10-21).** A thin FastAPI boundary in `src/intentune/api/`:
 
-- Routes (listed in [API Design](../design/api-design.md))
-- Pydantic request and response schemas, separate from ORM and domain models
-- Status codes and a consistent error envelope with request IDs
-- Dependency injection
-- Audio serving by track ID with range support
+- **Composition root:**
+  - `container.py` builds the engine and adapters once, and fresh services, each with its own unit of work, for every request;
+  - `settings.py` reads the process environment;
+  - only these two import persistence or adapters, which an architecture test enforces.
+- **`app.py`:** `create_app()`, whose lifespan runs startup and shutdown. Nothing happens at import.
+- **`routes/`:** one module per resource, covering every route in [API Design](../design/api-design.md). Each parses its request, calls one use case, and maps the result.
+- **`schemas.py` and `views.py`:**
+  - `schemas.py` holds the Pydantic request and response bodies, separate from ORM and domain models, with strict validation;
+  - `views.py` maps domain objects onto them.
+- **`errors.py`:** a pure-ASGI request-ID middleware, the error envelope, and the mapping from domain errors to status codes.
+- **Audio:** served by track ID through Starlette's `FileResponse`, whose range support was verified.
 
-Authentication is **not** part of Prototype 1 (D01). Routes stay thin: no scoring, ranking, or persistence logic inside route functions.
+Authentication is **not** part of Prototype 1 (D01). Routes stay thin: no scoring, ranking, or persistence logic inside route functions. No inner layer imports the API.
 
 ### Repository and Port Layer
 
@@ -296,7 +314,7 @@ Defines interfaces for data access and external capabilities.
 
 **Current (B4):** `src/intentune/ports/sessions.py` defines the spec's `SessionRepository` and `FeedbackRepository` as four ports: `ListeningSessionRepository`, `SessionTurnRepository`, `RecommendationOccurrenceRepository`, and `FeedbackEventRepository`. All are exposed by `UnitOfWork`.
 
-**Planned (Prototype 1):** `PlaylistRepository` (spec §4), added to the same unit of work.
+**Current (B7):** `PlaylistRepository` (spec §4), exposed by the same unit of work.
 
 **Future:** an `IntentParser` port for LLM intent parsing (D30), and an external provider port (D39).
 
@@ -306,7 +324,7 @@ Implements ports using specific technology.
 
 **Current:** `src/intentune/adapters/csv_catalog.py` is the first implemented adapter. It is the only module that knows about CSV column names, file paths, and string-to-number conversion for the song catalog; it converts raw rows into `MusicCandidate` objects and never prints. It exposes both the functional `load_music_candidates()` loader and `CsvCatalog`, a small class implementing the `Catalog` port around that loader. The legacy `load_songs()` in `src/recommender.py` calls `load_music_candidates()` directly and converts the result back into the historical dictionary shape for compatibility -- the legacy path predates the port and was not rewired onto it, since that would change nothing observable and adds risk for no behavioral benefit.
 
-**Current (B1):** `src/intentune/persistence/` is the SQLite adapter package. `db.py` resolves the database URL and creates engines (foreign keys on, WAL, SQLAlchemy-emitted `BEGIN`). `models.py` holds the ORM records and the `UtcDateTime` type. `repositories.py` holds `SqlAlchemyListenerProfileRepository`, `unit_of_work.py` holds `SqlAlchemyUnitOfWork`, and `migrations.py` runs Alembic from Python. Migrations live in `backend/alembic/`. Records never leave this package; repositories return domain models. Details: [Database Design](../design/database-design.md).
+**Current (B1):** `src/intentune/persistence/` is the SQLite adapter package. `db.py` resolves the database URL and creates engines (foreign keys on, WAL, SQLAlchemy-emitted `BEGIN`; `BEGIN IMMEDIATE` since B8, so concurrent transactions queue instead of failing). `models.py` holds the ORM records and the `UtcDateTime` type. `repositories.py` holds `SqlAlchemyListenerProfileRepository`, `unit_of_work.py` holds `SqlAlchemyUnitOfWork`, and `migrations.py` runs Alembic from Python. Migrations live in `backend/alembic/`. Records never leave this package; repositories return domain models. Details: [Database Design](../design/database-design.md).
 
 **Current (B2):**
 
@@ -329,7 +347,7 @@ Implements ports using specific technology.
 
 **Planned (Prototype 1):**
 
-- Further SQLAlchemy repositories and migrations for playlists (B7) and long-term adaptation records (B10)
+- Further SQLAlchemy repositories and migrations for long-term adaptation records (B10). *(Playlists: current since B7.)*
 - Estimated features (tempo, key, loudness in LUFS): a later analyzer version, once an evaluation set exists to measure their accuracy (TD-014)
 - CSV compatibility (the existing adapter, kept)
 

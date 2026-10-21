@@ -1,5 +1,7 @@
 """Database configuration: URL resolution, connection setup, and the UTC column type."""
 
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -171,6 +173,40 @@ def test_rolled_back_insert_is_discarded(raw_engine):
 
     with raw_engine.connect() as connection:
         assert connection.execute(select(items)).all() == []
+
+
+def test_a_read_then_write_transaction_survives_another_connections_commit(raw_engine):
+    """BEGIN IMMEDIATE (B8): the second transaction waits for the first instead of invalidating its snapshot.
+
+    With a deferred BEGIN, the first transaction's write would fail at once with
+    "database is locked", because the other connection committed after it read.
+    """
+    metadata = MetaData()
+    items = Table("items", metadata, Column("id", Integer, primary_key=True))
+    metadata.create_all(raw_engine)
+    first_has_read = threading.Event()
+    errors = []
+
+    def other_writer():
+        assert first_has_read.wait(timeout=5)
+        try:
+            with raw_engine.begin() as connection:
+                connection.execute(insert(items).values(id=2))
+        except Exception as error:  # reported below, so the main thread's assertion explains the failure
+            errors.append(error)
+
+    thread = threading.Thread(target=other_writer)
+    thread.start()
+    with raw_engine.begin() as connection:
+        assert connection.execute(select(items)).all() == []
+        first_has_read.set()
+        time.sleep(0.3)  # time for the other connection to commit, if it could
+        connection.execute(insert(items).values(id=1))
+    thread.join(timeout=10)
+
+    assert errors == []
+    with raw_engine.connect() as connection:
+        assert sorted(row.id for row in connection.execute(select(items))) == [1, 2]
 
 
 # --- UtcDateTime ----------------------------------------------------------

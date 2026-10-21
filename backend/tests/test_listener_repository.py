@@ -1,5 +1,7 @@
 """SQLite-backed listener repository and unit of work, against a migrated database."""
 
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -115,15 +117,29 @@ def test_staged_changes_are_visible_inside_the_same_unit_of_work(unit_of_work):
 
 
 def test_uncommitted_changes_are_invisible_to_another_unit_of_work(session_factory):
+    """Another transaction, in another thread, waits for the writer's transaction to end (BEGIN IMMEDIATE, B8)
+    and never sees what it did not commit."""
     writer = SqlAlchemyUnitOfWork(session_factory)
     reader = SqlAlchemyUnitOfWork(session_factory)
+    seen = []
+    reading = threading.Event()
 
+    def read():
+        reading.set()
+        with reader:
+            seen.append(reader.listener_profiles.get_default())
+
+    thread = threading.Thread(target=read)
     with writer:
         writer.listener_profiles.add(new_default_listener_profile(now=_NOW))
         writer.listener_profiles.get_default()  # flushes the insert inside the writer's transaction
+        thread.start()
+        reading.wait(timeout=5)
+        time.sleep(0.2)
+        assert seen == []  # the reader is waiting for the writer's transaction to end
+    thread.join(timeout=5)  # the writer left without committing
 
-        with reader:
-            assert reader.listener_profiles.get_default() is None
+    assert seen == [None]
 
 
 def test_a_unit_of_work_can_be_reused_for_consecutive_transactions(engine, unit_of_work):

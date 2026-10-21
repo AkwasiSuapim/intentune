@@ -16,6 +16,14 @@ one place that decides:
     driver skips BEGIN for SELECT and DDL statements, which makes schema
     changes non-transactional and breaks SAVEPOINT. Emitting BEGIN ourselves
     is the approach SQLAlchemy documents for all Python versions.
+  * The BEGIN is BEGIN IMMEDIATE (B8): each transaction takes SQLite's write
+    lock when it starts, so concurrent transactions queue on the busy timeout
+    instead of failing. With a deferred BEGIN, a transaction that reads and
+    then writes fails at once with "database is locked" whenever another
+    connection committed in between; the busy timeout does not help, because
+    its snapshot is stale. B8 brings that concurrency: API request threads,
+    the analysis worker, and the startup scan. Transactions here are short,
+    and file work happens between them, so the queueing is brief.
 
 Only SQLite is accepted. PostgreSQL is future work (D22).
 """
@@ -99,7 +107,7 @@ def create_database_engine(database_url: Union[str, URL], *, enforce_foreign_key
 
     @event.listens_for(engine, "begin")
     def _begin_transaction(connection) -> None:
-        connection.exec_driver_sql("BEGIN")
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
 
     return engine
 

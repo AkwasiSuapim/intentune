@@ -243,7 +243,28 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 - **Gain:** the backend's state matches what the listener hears. A skip, completion, or Not for me moves on to the prepared next track, and Replay plays a past track again, as the approved frontend does.
 - **Cost:** each event refreshes the queue, so upcoming occurrence ids change after every event, and history grows with replaced occurrences. A replay is an occurrence no algorithm chose; history marks it `listener-replay`.
 - **Status:** Current since B6 (2026-10-20, TD-017).
-- **Revisit when:** B8/B9 show the churn of occurrence ids is a problem for the frontend.
+- **Revisit when:** B8/B9 show the churn of occurrence ids is a problem for the frontend. *(B8: every command answers the session after its re-rank, with the current occurrence ids, so a client always has fresh ones. Whether the frontend copes is B9's to see.)*
+
+### `BEGIN IMMEDIATE` for every transaction (TD-019)
+
+- **Gain:** request threads, the analysis worker, and the startup scan can share one SQLite file. A read-then-write transaction no longer fails with "database is locked" when another connection commits in between; it waits its turn on the busy timeout. No use case needs retry logic.
+- **Cost:** transactions serialize, reads included, so WAL's concurrent readers are given up. A long transaction would stall every request; all of them are short today (file and analysis work happen between transactions), and the full suite runs no slower.
+- **Status:** Current since B8 (2026-10-21).
+- **Revisit when:** B11 measures contention with thousands of tracks, or a read-heavy load appears. The alternative is a deferred `BEGIN` for read-only units of work plus retries for writes.
+
+### Manual scans inside the request (D26)
+
+- **Gain:** Import and Rescan answer the actual scan report, with no scan-status resource the spec's routes lack. Scans never overlap. The server keeps answering other requests meanwhile, because a scan holds no long transaction.
+- **Cost:** a first import of a large folder keeps its request open until the scan ends, with no progress shown. D26 asks for background scanning; only the startup scan is fully in the background.
+- **Status:** Current since B8 (2026-10-21, TD-019).
+- **Revisit when:** the frontend gains a library screen that needs progress. That would mean `202 Accepted`, a scan-status resource, and keeping the last report.
+
+### Starlette's range support instead of our own (spec §25)
+
+- **Gain:** no custom byte-range code to get wrong. Range parsing, clamping, multipart, and `416` are the framework's, verified on the installed version.
+- **Cost:** the behavior can change with an upgrade (tests pin it). Malformed ranges answer Starlette's plain text, not our envelope.
+- **Status:** Current since B8 (2026-10-21).
+- **Revisit when:** a Starlette upgrade changes the pinned behavior, or a browser needs something it does not do.
 
 ### Conservative long-term learning (D06)
 

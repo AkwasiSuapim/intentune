@@ -93,6 +93,14 @@ The Python backend lives in `backend/`. Run the commands below from that directo
    python -m src.main
    ```
 
+4. Run the Prototype 1 backend API (local only, `127.0.0.1:8000` by default):
+
+   ```bash
+   python -m src.intentune.api
+   ```
+
+   It creates and migrates `backend/data/intentune.db` on first start. Settings come from the process environment (see `backend/.env.example`); `backend/.env` is not loaded. Routes: [API Design](docs/design/api-design.md).
+
 ### Running Tests
 
 Run the starter tests from the `backend/` directory with:

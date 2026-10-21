@@ -132,6 +132,10 @@ class TrackNotFound(LibraryError, LookupError):
     pass
 
 
+class TrackUnavailable(LibraryError):
+    """The track exists but cannot be played: its managed copy is missing (API code TRACK_UNAVAILABLE, B8)."""
+
+
 class UnsupportedAudioFile(LibraryError):
     """The file is not a valid file of an allowlisted format."""
 

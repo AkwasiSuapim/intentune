@@ -72,7 +72,9 @@ intentune/
 │   │       │   ├── sessions.py        (B4: SessionService)
 │   │       │   ├── recommendations.py (B5: RecommendationService, queue refresh)
 │   │       │   ├── feedback.py        (B6: FeedbackService)
-│   │       │   └── playlists.py       (B7: PlaylistService)
+│   │       │   ├── playlists.py       (B7: PlaylistService)
+│   │       │   ├── listening.py       (B8: ListeningService, start/steer then re-rank)
+│   │       │   └── library_scans.py   (B8: LibraryScanCoordinator, one scan at a time)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
@@ -90,6 +92,23 @@ intentune/
 │   │       │   ├── managed_media.py   (B2)
 │   │       │   ├── mutagen_audio.py   (B2)
 │   │       │   └── signal_levels.py   (B3: SignalLevelAnalyzer)
+│   │       ├── api/                   (B8: the HTTP API)
+│   │       │   ├── __init__.py
+│   │       │   ├── __main__.py        (python -m src.intentune.api)
+│   │       │   ├── app.py             (create_app(), lifespan)
+│   │       │   ├── container.py       (composition root: adapters once, services per request)
+│   │       │   ├── settings.py        (process environment)
+│   │       │   ├── errors.py          (error envelope, request IDs)
+│   │       │   ├── schemas.py         (Pydantic request and response bodies)
+│   │       │   ├── views.py           (domain objects -> response bodies)
+│   │       │   ├── dependencies.py
+│   │       │   └── routes/
+│   │       │       ├── __init__.py
+│   │       │       ├── health.py
+│   │       │       ├── library.py
+│   │       │       ├── tracks.py      (audio by track id)
+│   │       │       ├── sessions.py
+│   │       │       └── playlists.py
 │   │       └── persistence/           (B1)
 │   │           ├── __init__.py
 │   │           ├── db.py
@@ -98,7 +117,7 @@ intentune/
 │   │           ├── unit_of_work.py
 │   │           └── migrations.py
 │   └── tests/
-│       ├── conftest.py                (B1: database fixtures; B2: generated audio files, library fixture)
+│       ├── conftest.py                (B1: database fixtures; B2: generated audio files, library fixture; B8: API app and client)
 │       ├── test_recommender.py
 │       ├── test_domain_models.py
 │       ├── test_csv_catalog.py
@@ -133,7 +152,15 @@ intentune/
 │       ├── test_feedback_service.py   (B6)
 │       ├── test_playlist_domain.py    (B7)
 │       ├── test_playlist_repositories.py  (B7)
-│       └── test_playlist_service.py   (B7)
+│       ├── test_playlist_service.py   (B7)
+│       ├── test_listening_service.py  (B8)
+│       ├── test_library_scans.py      (B8)
+│       ├── test_api_errors.py         (B8)
+│       ├── test_api_library.py        (B8)
+│       ├── test_api_audio.py          (B8)
+│       ├── test_api_sessions.py       (B8)
+│       ├── test_api_playlists.py      (B8)
+│       └── test_api_startup.py        (B8)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -197,6 +224,12 @@ B7 added playlists:
 
 No new adapter or dependency.
 
+B8 added the HTTP API:
+- **API:** `api/`, with its routes in `api/routes/`. Only `container.py` and `settings.py` import persistence or adapters.
+- **Application:** `application/listening.py` and `application/library_scans.py`.
+
+No new port, adapter, table, migration, or dependency.
+
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 
 ## Planned Prototype 1 Additions
@@ -220,7 +253,7 @@ Later phases are expected to add, under `backend/src/intentune/`:
 - new ports beside `ports/catalog.py` and `ports/listener_profiles.py`: `SessionRepository`, `TrackRepository`, `PlaylistRepository`, `FeedbackRepository` (spec §4), each exposed through the existing `UnitOfWork`, with SQLAlchemy implementations and migrations in `persistence/` and `backend/alembic/versions/`
 - session-domain models and Recommendation Policy v1 modules under `domain/`, with all policy constants in one versioned module (B4, B5) *(done: `domain/session.py`, `domain/policy.py`)*
 - library and analysis adapters (B2, B3)
-- a thin FastAPI package with Pydantic schemas separate from ORM and domain models (B8)
+- a thin FastAPI package with Pydantic schemas separate from ORM and domain models (B8) *(done: `api/`)*
 
 The exact module names are decided in the phase that creates them and recorded here at that time.
 
@@ -308,9 +341,9 @@ Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy 
 
 Alembic environment and versioned migrations (B1). Run `alembic upgrade head` from `backend/`.
 
-### API package (planned, B8)
+### `backend/src/intentune/api/`
 
-FastAPI routes, HTTP schemas, error translation, request IDs, and dependencies. Thin.
+The HTTP API (B8): FastAPI routes, HTTP schemas, error translation, request IDs, and dependencies. Thin. `container.py` and `settings.py` are the composition root, the only API modules that import persistence or adapters; routes, schemas, views, and error handling reach storage and files only through the application layer. No inner layer imports the API. An architecture test enforces both rules.
 
 ### `backend/data/`
 

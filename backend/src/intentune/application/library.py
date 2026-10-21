@@ -2,7 +2,10 @@
 
 Capabilities (execution guide §5): register a source, list sources, scan a
 source (and rescan them all), import one discovered file, list tracks, get a
-track, and mark a track unavailable.
+track, and mark a track unavailable. B8 adds get_tracks() (several tracks by
+id) and track_audio() (a playable track's managed copy, for the audio route).
+Scans that must not overlap are run through LibraryScanCoordinator
+(application/library_scans.py).
 
 Import pipeline for one file, in the guide's order:
 
@@ -40,7 +43,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, Iterable, List, Optional, Set
 
 from src.intentune.domain.library import (
     DiscoveredFile,
@@ -57,6 +60,7 @@ from src.intentune.domain.library import (
     Track,
     TrackNotFound,
     TrackStatus,
+    TrackUnavailable,
     UnsupportedAudioFile,
     new_library_source,
     new_track_id,
@@ -95,6 +99,14 @@ class ImportResult:
     outcome: ImportOutcome
     track_id: Optional[str] = None
     tags_read: bool = True
+
+
+@dataclass(frozen=True)
+class TrackAudio:
+    """A playable track and its managed copy. path is for the server to read; it is never shown to a client."""
+
+    track: Track
+    path: str
 
 
 def _utc_now() -> datetime:
@@ -221,6 +233,12 @@ class LibraryService:
             raise TrackNotFound(track_id)
         return track
 
+    def get_tracks(self, track_ids: Iterable[str]) -> Dict[str, Track]:
+        """The tracks with these ids, by id, read in one transaction. Ids of no track are left out (B8)."""
+        with self._uow:
+            tracks = (self._uow.tracks.get(track_id) for track_id in set(track_ids))
+            return {track.track_id: track for track in tracks if track is not None}
+
     def mark_track_unavailable(self, track_id: str) -> Track:
         """Record that a track's managed copy is missing. A later scan restores it if the content is found again."""
         with self._uow:
@@ -233,6 +251,20 @@ class LibraryService:
             self._uow.tracks.save(unavailable)
             self._uow.commit()
             return unavailable
+
+    def track_audio(self, track_id: str) -> TrackAudio:
+        """Where a track's managed copy is, for serving it (B8). Only the track id comes from the caller.
+
+        Raises TrackNotFound, or TrackUnavailable when the managed copy is missing. A copy
+        found missing here marks the track MISSING_MANAGED_FILE, as analysis does.
+        """
+        track = self.get_track(track_id)
+        if track.status is TrackStatus.MISSING_MANAGED_FILE:
+            raise TrackUnavailable(track_id)
+        if not self._media.exists(track.track_id, track.audio_format):
+            self.mark_track_unavailable(track_id)
+            raise TrackUnavailable(track_id)
+        return TrackAudio(track=track, path=self._media.path(track.track_id, track.audio_format))
 
     # --- Pipeline -----------------------------------------------------------------
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21; B8 `BEGIN IMMEDIATE`, 2026-10-21, with no schema change), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
@@ -38,6 +38,7 @@ Location (spec §5): `backend/data/intentune.db`, with managed media in `backend
 - **Transactions:** SQLAlchemy, not the `sqlite3` driver, emits `BEGIN`. On Python 3.11 the driver's legacy mode skips `BEGIN` before `SELECT` and DDL, so schema changes would autocommit and a rolled-back `CREATE TABLE` would survive. Taking over `BEGIN` is the approach SQLAlchemy documents for all Python versions. It makes DDL transactional, and a test proves the rollback.
 - **Foreign keys:** `PRAGMA foreign_keys = ON` on every connection (SQLite's default is off). Migrations turn them off, as SQLite's table-rebuild procedure requires, and run `PRAGMA foreign_key_check` before committing. Any violation fails the migration and rolls it back.
 - **Journal mode:** WAL for file databases, so readers do not block the single writer. This matters from B3, when the background worker writes while the app reads. SQLAlchemy notes that driver-independent `BEGIN` makes "database is locked" errors more likely; WAL, short transactions, and the driver's 5-second busy timeout are the mitigation.
+- **`BEGIN IMMEDIATE`** *(since B8, 2026-10-21, TD-019).* Every transaction takes SQLite's write lock when it begins, so concurrent transactions wait on the 5-second busy timeout instead of failing. With a deferred `BEGIN`, a transaction that read and then wrote failed at once with "database is locked" if another connection had committed in between (its snapshot was stale, so the busy timeout could not help). The API's request threads, the worker, and the startup scan made that routine. Reads queue too, so WAL's concurrent readers are given up; transactions stay short.
 - **Sessions:** `create_session_factory(engine)` returns a `sessionmaker`; a unit of work opens one session per transaction.
 
 ### Conventions for every table

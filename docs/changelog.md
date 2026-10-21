@@ -101,6 +101,27 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
 - TD-015 records the B4 implementation decisions.
 
+### Added — Phase B8: FastAPI boundary (2026-10-21)
+
+- **The HTTP API, `src/intentune/api/`.** Run it from `backend/` with `python -m src.intentune.api`, which serves on `API_HOST:API_PORT`, by default `127.0.0.1:8000`.
+  - **Routes:** all 22 of spec §24, plus `HEAD` on audio, in `routes/` (health, library, tracks, sessions, playlists).
+  - **Schemas:** strict Pydantic request and response bodies (`schemas.py`), separate from domain and ORM models, with `views.py` mapping domain objects onto them.
+  - **Errors:** one envelope (`errors.py`) with `X-Request-ID` on every response. Errors carry no stack traces, paths, or echoed ids, and unexpected errors are logged and answered `500 INTERNAL_ERROR`.
+  - **Composition root:** `container.py` builds the adapters once and services per request.
+  - **Settings:** `settings.py` reads `DATABASE_URL`, a new optional `MEDIA_ROOT`, `CORS_ORIGINS`, `API_HOST`, and `API_PORT` from the process environment.
+  - **Lifespan:** at startup it migrates, ensures the local listener, ends the previous run's sessions, starts the analysis worker, and starts a background startup scan. Shutdown stops them.
+- **Audio by track id** (`GET`/`HEAD /api/v1/tracks/{track_id}/audio`), through Starlette's `FileResponse`. Its range support (206, multipart, 416, 400) was verified on the installed version and is pinned by tests. A missing managed copy answers `409 TRACK_UNAVAILABLE` and marks the track.
+- **`ListeningService`** (`application/listening.py`): `start()` and `steer()`, each followed by a queue refresh. A `next` turn while nothing plays is Play.
+- **`LibraryScanCoordinator`** (`application/library_scans.py`): it runs scans one at a time, refusing an overlapping scan with `ScanInProgress` (`409 CONFLICT`). The startup scan runs in a thread, and the worker is woken after each scan.
+- **Library additions:** `LibraryService.get_tracks()` and `track_audio()`, and the domain error `TrackUnavailable`.
+- **Tests:** 170 new tests, in eight new files (`test_api_*.py`, `test_library_scans.py`, `test_listening_service.py`) and additions to four. The suite is 1075 passed and 1 skipped. No dependency was added.
+- **TD-019** records the B8 implementation decisions.
+
+### Changed — Phase B8 (2026-10-21)
+
+- **Transactions:** every transaction now begins with `BEGIN IMMEDIATE` (`persistence/db.py`). With concurrent request threads, the worker, and scans, a deferred `BEGIN` made read-then-write transactions fail with "database is locked". Transactions now queue on the busy timeout. One B1 test, of two overlapping units of work in one thread, now uses two threads.
+- **`backend/.env.example`:** it documents `MEDIA_ROOT`, and says that nothing loads `.env`.
+
 ### Added — Phase B7: Playlists (2026-10-21)
 
 - `src/intentune/domain/playlist.py`:

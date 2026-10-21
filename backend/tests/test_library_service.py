@@ -30,6 +30,7 @@ from src.intentune.domain.library import (
     TagReadError,
     TrackNotFound,
     TrackStatus,
+    TrackUnavailable,
     UnsupportedAudioFile,
 )
 
@@ -443,3 +444,58 @@ def test_import_file_runs_the_pipeline_for_one_discovered_file(library, audio, m
     assert (again.outcome, again.track_id) == (ImportOutcome.UNCHANGED, first.track_id)
     with pytest.raises(UnsupportedAudioFile):
         library.import_file(source.source_id, DiscoveredFile("notes.txt", 1, 1))
+
+
+# --- Tracks for the API (B8) -------------------------------------------------------
+
+
+def test_get_tracks_reads_several_tracks_by_id_and_leaves_out_unknown_ids(library, audio, music):
+    audio.mp3(music / "one.mp3", seed=1, title="One")
+    audio.mp3(music / "two.mp3", seed=2, title="Two")
+    library.scan_source(library.register_source(str(music)).source_id)
+    one, two = sorted(library.list_tracks(), key=lambda track: track.title)
+
+    found = library.get_tracks([two.track_id, one.track_id, two.track_id, str(uuid.uuid4())])
+
+    assert found == {one.track_id: one, two.track_id: two}
+    assert library.get_tracks([]) == {}
+
+
+def test_track_audio_gives_the_managed_copy_of_a_playable_track(library, audio, music, media_root):
+    audio.flac(music / "song.flac", TITLE="Song")
+    library.scan_source(library.register_source(str(music)).source_id)
+    [track] = library.list_tracks()
+
+    found = library.track_audio(track.track_id)
+
+    assert found.track == track
+    assert found.path == str((media_root / f"{track.track_id}.flac").resolve())
+
+
+def test_track_audio_of_a_missing_managed_copy_marks_the_track_unavailable(library, audio, music, media_root):
+    audio.flac(music / "song.flac", TITLE="Song")
+    library.scan_source(library.register_source(str(music)).source_id)
+    [track] = library.list_tracks()
+    (media_root / f"{track.track_id}.flac").unlink()
+
+    with pytest.raises(TrackUnavailable):
+        library.track_audio(track.track_id)
+
+    assert library.get_track(track.track_id).status is TrackStatus.MISSING_MANAGED_FILE
+    with pytest.raises(TrackUnavailable):
+        library.track_audio(track.track_id)
+
+
+def test_track_audio_refuses_a_track_already_unavailable_even_if_a_file_is_back(library, audio, music, media_root):
+    audio.flac(music / "song.flac", TITLE="Song")
+    library.scan_source(library.register_source(str(music)).source_id)
+    [track] = library.list_tracks()
+    library.mark_track_unavailable(track.track_id)
+
+    with pytest.raises(TrackUnavailable):
+        library.track_audio(track.track_id)  # the managed copy is still on disk; only a scan restores the track
+
+
+def test_track_audio_of_an_unknown_track_raises_not_found(library):
+    with pytest.raises(TrackNotFound):
+        library.track_audio(str(uuid.uuid4()))

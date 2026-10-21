@@ -124,7 +124,7 @@ A lightweight incremental scan runs at startup, and the listener can trigger **R
 - **Repair:** a track marked unavailable (`MISSING_MANAGED_FILE`) gets its managed copy back when a source file with the same content is scanned again.
 - **Folder safety:** the walker skips symbolic links, never enters a folder whose real location is outside the source (this includes Windows junctions), visits each folder once, and never scans the managed media folder.
 
-Not yet: nothing runs the startup scan; the B8 startup will call `rescan_library()`. Scans run synchronously when called. B3 implemented background *analysis* only, so running scans in the background (D26) is not assigned to a phase yet ([open question](../planning/risks-and-open-questions.md#open-backend-questions)). "Queue deeper analysis" is B3's `AnalysisService.enqueue_pending()`: a track with no `analysis_version` for the current analyzer gets a job.
+**Current (B8) for running scans.** Every scan goes through `LibraryScanCoordinator`, one at a time. At startup the API runs `rescan_library()` in a background thread (D25, D26), so requests are answered meanwhile. The manual Import (one source) and Rescan Library (all) run in their request and answer the scan report. A scan asked for while another runs is refused (`409 CONFLICT`); it is not queued. After each scan the analysis worker is woken. "Queue deeper analysis" is B3's `AnalysisService.enqueue_pending()`: a track with no `analysis_version` for the current analyzer gets a job.
 
 ### Background analysis (B3)
 
@@ -166,7 +166,7 @@ Queuing is idempotent: one job per track and analyzer version, enforced by a uni
 
 The B3 analyzer measures decoded duration, sample peak, and RMS level only. These are exact signal measurements, not perceptual or semantic features; see [TD-014](../decisions/technical-decisions.md#td-014-b3-background-analysis).
 
-Not yet: nothing starts the worker; the B8 startup will. Scanning itself is not a background job (see the library section above).
+**Current (B8).** The API starts the worker at startup, after migrations, and stops it at shutdown after its current job. A scan wakes it when it ends. Scanning is not an analysis job; the startup scan has its own thread (see the library section above).
 
 ### Listening session (B4, B5)
 
@@ -241,7 +241,7 @@ read, in one short transaction: the session (context), its turns and occurrences
 
 Surfacing the queue acts on the pending control, so the refresh after that is automatic again. `SessionService` gives every change in a session a strictly later time, so whether a queue was surfaced after a control turn is exact even when the clock has not moved.
 
-`decide(session_id)` is a read-only preview of what `refresh_queue()` would choose now, for explanation. It writes nothing, uses up no pending control, and restores the random generator's state afterwards, so it never changes the next refresh. A caller refreshes after each meaningful change: start, refinement, steering turn, playback advance, and (B6) feedback. Nothing calls it from a running entry point yet (B8).
+`decide(session_id)` is a read-only preview of what `refresh_queue()` would choose now, for explanation. It writes nothing, uses up no pending control, and restores the random generator's state afterwards, so it never changes the next refresh. A caller refreshes after each meaningful change: start, refinement, steering turn, playback advance, and (B6) feedback. Since B8 the API calls it after a session start and after every turn (`ListeningService`), and after every piece of feedback (`FeedbackService`).
 
 What B5 does not do:
 - **Feedback events:** it does not use them as evidence; turns are the only evidence until B6. *(Current since B6, below.)*
@@ -293,7 +293,7 @@ What each event means, recomputed at every refresh and never stored:
 - **Exclusion (D18):** separate and sticky. A track refused with Not for me at any point in the session stays out of automatic recommendations for the rest of it, even if a later Like or Replay makes its evidence positive. A Replay may still play it, as the listener's own choice.
 - **Raw events** stay stored per occurrence; only their reading is per track.
 
-Only discrete events are accepted; there are no progress ticks. The frontend owns playback position and reports how a track ended. Nothing calls `FeedbackService` from a running entry point until B8.
+Only discrete events are accepted; there are no progress ticks. The frontend owns playback position and reports how a track ended. Since B8 the API's playback-events and reactions routes call `FeedbackService`.
 
 ### Playlists (B7)
 
@@ -315,7 +315,7 @@ remove_track(playlist, track)      -> the tracks after it move up one place; rem
 reorder_tracks(playlist, order)    -> the order lists exactly the playlist's tracks, each once
 ```
 
-A refused add stores neither an item nor an event. Nothing else ever writes a playlist item, so recommendations are never saved automatically. Playlists survive restarts. Nothing calls `PlaylistService` from a running entry point until B8.
+A refused add stores neither an item nor an event. Nothing else ever writes a playlist item, so recommendations are never saved automatically. Playlists survive restarts. Since B8 the API's playlist routes call `PlaylistService`.
 
 ### Restart (D35)
 
@@ -326,7 +326,47 @@ app restarts
    -> the next listening action starts a fresh session
 ```
 
-**Current (B4) for sessions.** `SessionService.end_sessions_from_previous_run()` ends every session a previous run left `ACTIVE`, with reason `APP_RESTARTED`. Queued occurrences become `DISCARDED` and the playing one `PLAYED`; turns, occurrences, and events are kept. The next `start_session()` creates a fresh session. This was verified with a real hard process exit mid-session. Nothing calls it at startup until B8.
+**Current (B4) for sessions.** `SessionService.end_sessions_from_previous_run()` ends every session a previous run left `ACTIVE`, with reason `APP_RESTARTED`. Queued occurrences become `DISCARDED` and the playing one `PLAYED`; turns, occurrences, and events are kept. The next `start_session()` creates a fresh session. This was verified with a real hard process exit mid-session. **Current (B8):** the API calls it at every startup, before serving any request; verified again against a real server killed mid-session and started again.
+
+### HTTP API (B8)
+
+**Current (B8, 2026-10-21).** `python -m src.intentune.api` (from `backend/`) builds the app and serves it with Uvicorn on `API_HOST:API_PORT`.
+
+```text
+startup (FastAPI lifespan, before any request)
+   -> migrate the database to the latest revision
+   -> ensure the local listener (created on first run, found after)
+   -> end sessions a previous run left active (D35)
+   -> start the analysis worker (D28)
+   -> start the incremental startup scan in a background thread (D25, D26)
+
+each request
+   -> request-ID middleware (X-Request-ID; unexpected errors -> logged, 500 envelope)
+   -> CORS
+   -> route: validate the body (strict Pydantic schema)
+   -> fresh services with their own unit of work (container.py)
+   -> one use case
+   -> domain objects -> response body (views.py); domain errors -> envelope (errors.py)
+
+shutdown
+   -> stop the worker after its current job; wait for a running scan; close connections
+```
+
+A listening flow over HTTP:
+
+```text
+POST /sessions {context}               -> session started, first queue surfaced, nothing playing
+POST /sessions/{id}/turns {next}       -> Play: the first queued track starts; queue re-ranked
+GET  /tracks/{track_id}/audio          -> the browser streams and seeks with range requests
+POST .../recommendations/{occ}/reactions {like}         -> stored, interpreted, queue re-ranked
+POST .../playback-events {skip, played, duration}       -> stored, moves on, queue re-ranked
+POST .../turns {refine, context} / {surprise_me} / ...  -> recorded, queue re-ranked
+POST /playlists/{id}/items {track, session, occurrence} -> item stored, PLAYLIST_ADD feedback, re-ranked
+```
+
+Every command answers the session as it stands after the re-rank. Recording a change and re-ranking are separate transactions; if the re-rank fails, the change stays recorded and the next command re-ranks again.
+
+Concurrency: request threads, the worker, and the startup scan share one SQLite file. Every transaction begins with `BEGIN IMMEDIATE`, so transactions queue on SQLite's 5-second busy timeout instead of failing with "database is locked" (TD-019). Transactions are short; file I/O and analysis happen between them.
 
 ### Long-term adaptation (B10)
 
@@ -403,17 +443,17 @@ The chatbot is an input adapter. It does not replace backend validation or ranki
 
 ### Invalid Input
 
-Return a structured validation error (`VALIDATION_ERROR`). Do not begin recommendation processing.
+Return a structured validation error (`VALIDATION_ERROR`). Do not begin recommendation processing. **Current (B8):** the API answers `422` (or `400` for a body that is not JSON) in the error envelope, listing each problem's location without echoing the value, before any use case runs.
 
 ### Empty Library or No Eligible Track
 
-Return a controlled result rather than an error page or crash. The spec lists `RECOMMENDATION_UNAVAILABLE` among its potential error codes; exact error semantics are defined in B8.
+Return a controlled result rather than an error page or crash. **Current (B8):** an empty queue is a normal state, not an error: the session answers with `queue: []` and `playing: null`, and `RECOMMENDATION_UNAVAILABLE` is not used.
 
 **Current (B5):** with no eligible track, Policy v1 returns an empty decision and `refresh_queue()` leaves the session with an empty queue; nothing raises. A small library keeps a full queue for as long as it has four or more eligible tracks, because the cooldown shrinks to fit it.
 
 ### Unsupported or Missing Audio
 
-**Planned:** an unsupported or corrupt file fails safely, and a missing managed file makes the track ineligible, without crashing the library. Related potential codes in the spec: `UNSUPPORTED_AUDIO`, `IMPORT_FAILED`, `TRACK_UNAVAILABLE`.
+**Planned:** an unsupported or corrupt file fails safely, and a missing managed file makes the track ineligible, without crashing the library. Related potential codes in the spec: `UNSUPPORTED_AUDIO`, `IMPORT_FAILED`, `TRACK_UNAVAILABLE`. **Current (B2, B8):** unsupported and failed files are counted in the scan report, never raised. Asking for the audio of a track whose managed copy is gone answers `409 TRACK_UNAVAILABLE` and marks the track `MISSING_MANAGED_FILE`; a rescan that finds the same content restores it.
 
 ### Analysis Failure
 
@@ -421,7 +461,7 @@ Return a controlled result rather than an error page or crash. The spec lists `R
 
 ### Database Failure
 
-Recommendation logic that does not require persistence may continue. Session, feedback, playlist, or history operations return a controlled error. Clients never see stack traces or filesystem paths.
+Recommendation logic that does not require persistence may continue. Session, feedback, playlist, or history operations return a controlled error. Clients never see stack traces or filesystem paths. **Current (B8):** any unexpected error, a database error included, is logged with its request ID and answered `500 INTERNAL_ERROR` with a generic message.
 
 ### AI Failure (future)
 

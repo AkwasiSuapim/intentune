@@ -203,6 +203,8 @@ New technical choices introduced by the register include SQLite + SQLAlchemy + A
 
 **Revisit When:** the backend moves to Python 3.12 or later (decision 2); B3's worker shows lock contention (decision 3); B8 introduces settings loading (decision 1); PostgreSQL is adopted (D22).
 
+*B8 update (2026-10-21, TD-019):* decision 2 now emits `BEGIN IMMEDIATE`, because the API runs request threads, the worker, and the startup scan together, and a deferred `BEGIN` made read-then-write transactions fail with "database is locked". Decision 1 stands: B8 reads settings from the process environment and still does not load `backend/.env`.
+
 ## TD-013: B2 Managed Local Library
 
 **Status:** Accepted, awaiting B2 review
@@ -620,6 +622,97 @@ The approved frontend:
 - B8 maps the routes (`PATCH …/items/order` takes the full order).
 - B9 maps the frontend's Save to playlist adds.
 - Playlists need artwork or sharing (Future).
+
+## TD-019: B8 FastAPI Boundary
+
+**Status:** Accepted, awaiting B8 review
+
+**Date:** 2026-10-21
+
+**Context:** Execution guide §11 and spec §24–§26 fix the B8 scope:
+- a thin HTTP boundary with Pydantic schemas separate from ORM and domain models;
+- the spec's routes;
+- one error envelope with request IDs, and no stack traces or paths;
+- audio served by track ID, with the installed Starlette range behavior verified (and a tested range response only if it falls short).
+
+B8 is also the first phase that runs everything at once: request threads, the analysis worker, and the startup scan share one SQLite file.
+
+**Decision:**
+
+1. **Package** `backend/src/intentune/api/`:
+   - `container.py` and `settings.py` are the composition root, the only API modules that import persistence or adapters;
+   - `routes/` (one module per resource), `schemas.py`, `views.py` (domain → schema mapping), `errors.py`, and `dependencies.py` do not, and an architecture test enforces it;
+   - no inner layer may import the API (the same test).
+2. **Per-request services.** The engine and adapters are built once. Every request builds its services with a fresh unit of work, because units of work are neither re-entrant nor thread-safe and synchronous routes run on FastAPI's thread pool. Services that call each other share that one unit of work in sequence, as the B6/B7 tests do.
+3. **Two thin use cases** in the application layer:
+   - **`ListeningService`** (`application/listening.py`): `start()` = start session + refresh queue, and `steer()` = apply turn + refresh queue. These are the same two-step pattern FeedbackService uses.
+   - **`LibraryScanCoordinator`** (`application/library_scans.py`): scans never overlap. One that would start while another runs is refused with `ScanInProgress` (`409 CONFLICT`), not queued. The startup scan runs in a thread. Each scan gets a fresh `LibraryService`, and the analysis worker is woken after it.
+
+   The library also gains `get_tracks(ids)` and `track_audio(id)`. The latter raises the new domain error `TrackUnavailable` and marks a track whose copy is gone `MISSING_MANAGED_FILE`.
+4. **Startup and shutdown** run in the FastAPI lifespan, never at import:
+   - **startup:** migrate → ensure the local listener → end sessions from the previous run (D35) → start the worker (D28) → start the background startup scan (D25, D26);
+   - **shutdown:** stop the worker after its job → wait for a scan → dispose the engine.
+
+   A failed startup stops what it started.
+5. **`BEGIN IMMEDIATE`.** Every transaction takes SQLite's write lock when it begins (`persistence/db.py`).
+   - **Why:** with the deferred `BEGIN` of TD-012, a transaction that reads and then writes fails at once with "database is locked" when another connection commits in between. Its snapshot is stale, so the busy timeout cannot help. B8 makes that interleaving routine: a turn's read-then-write against the worker or a scan. It was reproduced before the change.
+   - **Effect:** transactions now queue on the 5-second busy timeout.
+   - **Cost:** reads also take the lock, so WAL's concurrent readers are given up. Transactions are short (file and analysis work happen between them), so the queueing is brief.
+   - **Evidence:** the full suite takes no longer. A test proves the read-then-write case. One B1 test of two overlapping units of work in one thread was rewritten to use two threads. In a live run, 96 concurrent requests (turns, reactions, playlist writes, reads, audio ranges, and rescans) caused no errors.
+6. **Range requests: Starlette's `FileResponse`, unmodified.** Verified on Starlette 1.8.0:
+   - `Accept-Ranges: bytes`;
+   - `206` for single, open-ended, and suffix ranges, with the end clamped;
+   - `multipart/byteranges` for several;
+   - `416` with `bytes */size` past the end;
+   - `400` for a malformed range.
+
+   That is what browser seeking needs, so no custom range code exists. Tests pin each behavior, to catch an upgrade that changes one. `HEAD` is declared on the route. The 400 and 416 replies are Starlette's plain text, outside the envelope.
+7. **Errors** (`errors.py`):
+   - **Request IDs:** a pure-ASGI middleware gives each request an id, which a client may supply if it is safe, and sets `X-Request-ID`. It also turns any unexpected error into a logged, generic `500 INTERNAL_ERROR`. It sits inside CORS, so that envelope carries CORS headers.
+   - **Domain errors:** these map by class. Resource errors get fixed messages that echo no id or path, and transitions and domain validation pass their own messages through.
+   - **Pydantic errors outside request parsing:** these are `500`, not `422`.
+   - **Codes and statuses:** `SOURCE_NOT_FOUND`, `NOT_FOUND`, and `METHOD_NOT_ALLOWED` are added to the spec's potential codes. `400` is for a body that is not JSON. `409` covers transitions, unavailable tracks, and conflicts.
+8. **Schemas are strict:**
+   - unknown fields are refused;
+   - numbers must be JSON numbers and finite;
+   - text is trimmed and length-limited (labels 100, at most 20 genres or moods, playlist names by the domain's constant);
+   - wire enums are lowercase.
+
+   Turns have no text field, so no raw prompt can be stored (D33).
+9. **Feedback routing:**
+   - SKIP/COMPLETE are playback events;
+   - LIKE/SAVE/REPLAY/NOT_FOR_ME are reactions;
+   - PLAYLIST_ADD only goes through playlist items;
+   - Play is a `next` turn while nothing plays;
+   - `initial_intent` as a turn is `409`.
+10. **Library scans run inside the request** for Import and Rescan, which answer their scan reports; only the startup scan is a background thread. Paging is `limit`/`offset` over the loaded list.
+11. **Settings** come from the process environment only: `DATABASE_URL`, `MEDIA_ROOT` (new, relative to `backend/`), `CORS_ORIGINS`, `API_HOST`, `API_PORT`. `backend/.env` is still not loaded, and no settings or dotenv dependency was added.
+12. **No new dependency.** FastAPI, Uvicorn, and httpx were already pinned.
+
+**Alternatives Considered:**
+- **Keeping deferred `BEGIN`** and retrying on "database is locked": retries in every use case, and a retried read-then-write must re-read.
+- **One process-wide lock around all writes:** it would not cover the worker's own engine use, and it duplicates SQLite's lock.
+- **A custom range response:** unneeded once the installed behavior was verified, and more code to keep safe.
+- **`202 Accepted` with background scans** for Import and Rescan: closer to D26, but it needs a scan-status resource the spec's routes do not have, and the report would be lost.
+- **Queueing a second scan** instead of refusing it: a caller could wait minutes with no feedback.
+- **Loading `.env` with python-dotenv** (installed with `uvicorn[standard]`): it would silently pick up the listener's stale `DATABASE_URL` (see Consequences).
+- **Async routes:** every use case is synchronous, so they would block the event loop or need wrapping.
+- **Module-level `app`:** importing it would read the environment and open the database.
+
+**Consequences:**
+- Every Prototype 1 use case is now reachable over HTTP, and the backend runs as one process: `python -m src.intentune.api`.
+- The worker and the startup scan run for the first time outside tests.
+- SQLite transactions serialize, reads included.
+- A long first import keeps its request open until the scan ends (other requests are still served).
+- A local `backend/.env` written before B1's default moved still says `DATABASE_URL=sqlite:///./intentune.db` (backend/intentune.db, not gitignored). It is not read by `python -m src.intentune.api`. A tool that loads `.env` would use that file instead of `backend/data/intentune.db`, so such a `.env` should be updated or removed first.
+- The Starlette test client warns that its httpx support is deprecated (it asks for `httpx2`); no dependency was added for it.
+
+**Revisit When:**
+- **Concurrency:** B11 measures contention with thousands of tracks, or many readers need WAL concurrency back (deferred reads with retrying writes).
+- **Scans:** the frontend needs scan progress (background Import/Rescan with a status resource).
+- **Settings:** settings loading is wanted (and the `.env` above is dealt with).
+- **Frontend:** B9 maps the frontend to these routes.
+- **Upgrades:** Starlette or FastAPI changes the range behavior the tests pin, or drops httpx from its test client.
 
 ## New Decision Template
 

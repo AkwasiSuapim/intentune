@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree; B6 and B7 are both uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), and [B7](#b7-update-2026-10-21) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all seven.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), and [B8](#b8-update-2026-10-21) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all eight.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -184,6 +184,43 @@ B7 tests per file:
 
 No existing test changed, and no dependency was added.
 
+## B8 Update (2026-10-21)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **1075 passed, 1 skipped** (1076 collected): 906 from B0–B7, plus 170 from B8. The skip is the same symbolic-link test as before. One warning: Starlette's test client says its httpx support is deprecated. |
+| Legacy behavior | `python -m src.main` | Unchanged top five (Sunrise City 9.94, ...) |
+| Migration | `alembic upgrade head`, then `alembic check` | No schema change in B8; no drift. |
+| Concurrency, before the fix | Two connections: one reads, the other commits, the first writes | With B1's deferred `BEGIN`: `OperationalError: database is locked` at once. With `BEGIN IMMEDIATE`: both succeed (now a test). |
+| A real server | `python -m src.intentune.api` with a scratch `DATABASE_URL`, `MEDIA_ROOT`, and port, driven over HTTP by a script and `curl` | See the steps below. |
+| Mutation checks | 44 single-rule mutations of the API, the new use cases, `BEGIN IMMEDIATE`, settings, and schemas | All 44 make tests fail. Four survived the first run (a startup-scan race in a test, a relative path tested from `backend/` only, and two schema rules the domain also enforces); the tests were tightened. |
+
+Real-server steps, in order, over 7 real FLAC tones tagged with title, artist, album, year, and genre:
+1. Startup migrated a fresh database and ran the startup scan (no sources yet).
+2. Registering the folder answered its name, not its path. Import found 7 new tracks; again, 7 unchanged.
+3. The analysis worker, woken by the scan, analyzed all 7 (7 jobs succeeded); tracks became `ready`.
+4. No response for tracks, sources, or jobs contained a path.
+5. The audio came back byte-identical (SHA-256), with `audio/flac` and `Accept-Ranges: bytes`. `bytes=1000-1999` and `bytes=-500` gave `206` with the right bytes, past the end gave `416 bytes */252612`, and `HEAD` gave the length with no body. `curl` showed the same headers.
+6. A session over Ambient surfaced 3 Ambient tracks. Play (`next`) started the first; Like (+1.00), Complete (+0.80), and a skip at 43% (+0.10) were stored. Try something different put a Rock pick first. Refine to Jazz re-ranked to Jazz. Adding the playing track to a playlist was PLAYLIST_ADD feedback.
+7. Errors over the wire answered the envelope with matching `X-Request-ID`: unknown session `404`, bad JSON `400`, a missing folder `422` without the path, a traversal id `404`. A preflight from `http://localhost:5173` was allowed.
+8. **96 concurrent requests** from 16 threads ran against one session and one database: turns, reactions, playlist writes, session reads, audio ranges, and rescans. There were no 500s and no lock errors. Turn sequences stayed contiguous (1–20), exactly one track was playing, and three were queued. The 9 `409`s were duplicate playlist adds, as expected.
+9. After killing the process and starting it again, the session read `ended` / `app_restarted` with its queue discarded, and the startup scan found 0 new tracks.
+
+B8 tests per file:
+- `test_api_errors.py` 29;
+- `test_api_library.py` 22;
+- `test_api_audio.py` 18;
+- `test_api_sessions.py` 40;
+- `test_api_playlists.py` 17;
+- `test_api_startup.py` 23;
+- `test_library_scans.py` 8;
+- `test_listening_service.py` 6;
+- `test_library_service.py` gained 5 (`get_tracks()`, `track_audio()`);
+- `test_persistence_db.py` gained 1 (read-then-write under concurrency);
+- `test_architecture_boundaries.py` gained 1 (only the composition root touches storage).
+
+One existing test changed: `test_listener_repository.py::test_uncommitted_changes_are_invisible_to_another_unit_of_work` held two overlapping units of work in one thread. Under `BEGIN IMMEDIATE` the second waits for the first, so the test now reads from another thread. It still shows that uncommitted changes are invisible, and also that the reader waits. No dependency was added.
+
 ## Current Files
 
 ### Backend
@@ -260,6 +297,21 @@ Changed in B7:
 - `application/feedback.py`: `record_playlist_add()`; `react()` refuses PLAYLIST_ADD.
 - `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: playlist records and repository.
 - `tests/test_migrations.py`, `tests/test_feedback_policy.py`.
+
+Added in B8 (2026-10-21):
+
+- `backend/src/intentune/api/`: `__init__.py`, `__main__.py`, `app.py`, `container.py`, `settings.py`, `errors.py`, `schemas.py`, `views.py`, `dependencies.py`, and `routes/` (`health.py`, `library.py`, `tracks.py`, `sessions.py`, `playlists.py`)
+- `backend/src/intentune/application/listening.py` (`ListeningService`)
+- `backend/src/intentune/application/library_scans.py` (`LibraryScanCoordinator`, `ScanInProgress`)
+- `backend/tests/test_api_errors.py`, `test_api_library.py`, `test_api_audio.py`, `test_api_sessions.py`, `test_api_playlists.py`, `test_api_startup.py`, `test_library_scans.py`, `test_listening_service.py`
+
+Changed in B8:
+- `persistence/db.py`: `BEGIN IMMEDIATE`.
+- `domain/library.py`: `TrackUnavailable`.
+- `application/library.py`: `get_tracks()`, `track_audio()` (`TrackAudio`).
+- `backend/.env.example`: optional `MEDIA_ROOT`; says that nothing loads the file.
+- `tests/conftest.py`: API fixtures (`api_settings`, `client`, `library_tracks`).
+- `tests/test_listener_repository.py`, `tests/test_library_service.py`, `tests/test_persistence_db.py`, `tests/test_architecture_boundaries.py`.
 
 Added in B6 (2026-10-20):
 
@@ -432,7 +484,7 @@ numpy==2.4.6           (B3: already installed through pandas; now used directly,
 soundfile==0.14.0      (added in B3)
 ```
 
-`pip check` reports no broken requirements. `pytest` is used by the tests. Since B1 (2026-10-19), `sqlalchemy` and `alembic` are used by `backend/src/intentune/persistence/`, `backend/alembic/`, and the persistence tests; no domain, port, or application module imports them, and a test enforces that. No source or test file imports `pandas`, `fastapi`, `uvicorn`, or `httpx` yet. B1 added no dependency. B2 added `mutagen==1.48.1`, installed in `backend/.venv` and pinned in `backend/requirements.txt`, as the execution guide prescribes for this phase. `pip check` stays clean. Only `backend/src/intentune/adapters/mutagen_audio.py` and the tests import it.
+`pip check` reports no broken requirements. `pytest` is used by the tests. Since B1 (2026-10-19), `sqlalchemy` and `alembic` are used by `backend/src/intentune/persistence/`, `backend/alembic/`, and the persistence tests; no domain, port, or application module imports them, and a test enforces that. No source or test file imports `pandas`. *(B8, 2026-10-21:)* `fastapi` and `uvicorn` are used by `backend/src/intentune/api/`, and `httpx` by Starlette's test client in the API tests; no domain, port, or application module imports FastAPI, Starlette, or Pydantic, and a test enforces that. B8 added no dependency. B1 added no dependency. B2 added `mutagen==1.48.1`, installed in `backend/.venv` and pinned in `backend/requirements.txt`, as the execution guide prescribes for this phase. `pip check` stays clean. Only `backend/src/intentune/adapters/mutagen_audio.py` and the tests import it.
 
 B3 added `soundfile==0.14.0` (with its dependencies `cffi` and `pycparser`, not pinned, like other transitive dependencies) and pinned `numpy==2.4.6`. Only `backend/src/intentune/adapters/signal_levels.py` and the tests import them. `librosa` was evaluated and not added (see the B3 update).
 
@@ -442,7 +494,7 @@ B3 added `soundfile==0.14.0` (with its dependencies `cffi` and `pycparser`, not 
 
 **Current (updated 2026-10-18, B1 prerequisites):**
 
-- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. **Updated in B1:** `backend/src/intentune/persistence/db.py` reads `DATABASE_URL` from the process environment. It resolves a relative path against `backend/`, whatever the working directory, and defaults to `backend/data/intentune.db` when the variable is unset, the Prototype 1 layout (spec §5). The other values are still unread. No code loads `backend/.env`.
+- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. **Updated in B1:** `backend/src/intentune/persistence/db.py` reads `DATABASE_URL` from the process environment. It resolves a relative path against `backend/`, whatever the working directory, and defaults to `backend/data/intentune.db` when the variable is unset, the Prototype 1 layout (spec §5). The other values are still unread. No code loads `backend/.env`. **Updated in B8:** `backend/src/intentune/api/settings.py` reads `API_HOST`, `API_PORT`, `CORS_ORIGINS`, and a new optional `MEDIA_ROOT` from the process environment. `APP_ENV` is still unread, and still no code loads `backend/.env`. A local `.env` written before B1's default moved (`DATABASE_URL=sqlite:///./intentune.db`) would point at `backend/intentune.db` if a tool such as `uvicorn --env-file` loaded it.
 - `.gitignore` ignores `backend/data/intentune.db*` (the database plus its SQLite journal, WAL, and SHM files) and `backend/data/media/`, as spec §5 requires. `backend/data/songs.csv` stays tracked.
 - A developer's existing, untracked `backend/.env` copied from the old template still points at `sqlite:///./intentune.db` (`backend/intentune.db`, which is not ignored) until it is updated by hand. B1 does not load `.env`, so this has no effect yet. It will matter once a settings loader reads `.env`.
 - There is no CI workflow (`.github/` does not exist).
@@ -453,14 +505,14 @@ B3 added `soundfile==0.14.0` (with its dependencies `cffi` and `pycparser`, not 
 
 There is currently no:
 
-- HTTP API
+- HTTP API *(B8, 2026-10-21: built and tested; the frontend does not call it yet, B9)*
 - Persistence beyond the listener profile and the managed library. B1 and B2 built those tables only, and no running entry point opens the database yet.
-- Running library features. The managed library (register sources, scan, import, dedupe, tags) exists as a tested application service, but nothing a listener runs calls it until B8.
-- Running background analysis. The worker and analyzer exist and are tested, but nothing starts the worker until B8.
+- Running library features. The managed library (register sources, scan, import, dedupe, tags) exists as a tested application service. *(B8: reachable over HTTP, with the startup scan at every start.)*
+- Running background analysis. The worker and analyzer exist and are tested. *(B8: the API starts the worker at startup and wakes it after scans.)*
 - Estimated or semantic audio features (tempo, key, loudness in LUFS, energy, mood, and so on), background scanning, or artwork
-- Running listening sessions. Since B4, the session state machine and its history exist as a tested service, and since B5 Recommendation Policy v1 fills its queue (`RecommendationService`), but nothing calls either until B8.
-- Running feedback. Since B6, recording and interpreting feedback exist as tested use cases (`FeedbackService`), but nothing a listener runs calls them until B8.
-- Running playlists. Since B7, playlists exist as tested use cases (`PlaylistService`), but nothing a listener runs calls them until B8, and the frontend's playlists are still local.
+- Running listening sessions. Since B4, the session state machine and its history exist as a tested service, and since B5 Recommendation Policy v1 fills its queue (`RecommendationService`), but nothing calls either until B8. *(B8: reachable over HTTP.)*
+- Running feedback. Since B6, recording and interpreting feedback exist as tested use cases (`FeedbackService`). *(B8: reachable over HTTP.)*
+- Running playlists. Since B7, playlists exist as tested use cases (`PlaylistService`). *(B8: reachable over HTTP.)* The frontend's playlists are still local (B9).
 - Audio playback
 - Authentication (none is planned for Prototype 1, D01)
 - AI intent parser (deferred, D39)
@@ -480,13 +532,13 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | `ListeningContext` as the source of intent (D29) | **Yes (B4, B5):** a session's stored intent, kept per session and per turn, and the current intent Policy v1 ranks by | — |
 | Missing-feature scoring with renormalization (D21) | **Yes (B5)**, in Policy v1; the legacy scorer still raises on missing values, by contract | — |
 | SQLite + SQLAlchemy + Alembic (D22) | **Yes (B1, 2026-10-19):** engine configuration, repository and unit-of-work pattern, migrations | Later phases add their tables and repositories |
-| Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup from B8 |
-| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan and API routes in B8; background *scanning* (D26) is not assigned to a phase (B3 covered analysis only) |
-| Background analysis jobs (D26, D28) | **Yes (B3, 2026-10-20):** persisted jobs, one worker thread, recovery, provenance-tagged signal measurements | Worker started at app startup in B8; estimated features need an evaluation set first |
-| Sessions, turns, recommendation occurrences, feedback events (D31) | **Yes (B4, B6, 2026-10-20):** session state machine, turns, occurrences, restart rule (D35); raw feedback recorded and read through Feedback Policy v1, with immediate re-ranking | Routes in B8; PLAYLIST_ADD in B7 |
+| Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup since B8 |
+| Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan (in the background) and API routes since B8; manual Import and Rescan run within their request |
+| Background analysis jobs (D26, D28) | **Yes (B3, 2026-10-20):** persisted jobs, one worker thread, recovery, provenance-tagged signal measurements | Worker started at app startup since B8; estimated features need an evaluation set first |
+| Sessions, turns, recommendation occurrences, feedback events (D31) | **Yes (B4, B6, 2026-10-20):** session state machine, turns, occurrences, restart rule (D35); raw feedback recorded and read through Feedback Policy v1, with immediate re-ranking | Routes since B8; PLAYLIST_ADD since B7 |
 | Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | **Yes (B5, 2026-10-20):** `domain/policy.py` and `RecommendationService.refresh_queue()` | Feedback events as evidence in B6; long-term profile in B10; constants tuned in B11 |
-| Playlists (D34) | **Yes (B7, 2026-10-21):** CRUD, add, remove, reorder; one entry per track; a playlist add from a recommendation is PLAYLIST_ADD feedback | Routes in B8; frontend in B9 |
-| FastAPI routes, error envelope, audio serving | No (FastAPI listed but unused) | B8 |
+| Playlists (D34) | **Yes (B7, 2026-10-21):** CRUD, add, remove, reorder; one entry per track; a playlist add from a recommendation is PLAYLIST_ADD feedback | Routes since B8; frontend in B9 |
+| FastAPI routes, error envelope, audio serving | **Yes (B8, 2026-10-21):** every spec §24 route, the §26 envelope with request IDs, audio by track id with verified range support | Frontend use in B9 |
 | Frontend HTTP adapter | Service boundary only | B9 (frontend phase F9) |
 | Conservative long-term adaptation (D06) | No | B10 |
 
