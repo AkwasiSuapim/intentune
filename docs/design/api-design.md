@@ -72,6 +72,45 @@ Structured `ListeningContext` is the source of truth for intent (D29). Prototype
 
 Events recorded through playback events and reactions (B6): `LIKE`, `SAVE`, `REPLAY`, `SKIP`, `COMPLETE`, `NOT_FOR_ME`. The backend persists the raw facts (`event_type`, `played_seconds`, `duration_seconds`, `played_fraction`, `recommendation_occurrence_id`, `session_id`, timestamp) and records meaningful events, not per-second ticks. Which events travel on which route is decided in B8.
 
+**Use cases current since B6** (`FeedbackService`, no route yet):
+- **`react(session, occurrence, LIKE | SAVE | REPLAY | NOT_FOR_ME)`** matches the reactions route.
+- **`report_playback(session, occurrence, SKIP | COMPLETE, played_seconds, duration_seconds)`** matches the playback-events route.
+- **Each call:** it stores the raw event, applies its playback effect, and re-ranks the queue. It returns the event, its own weight, the track's interpretation, and the new session state.
+- **Errors** map onto the codes below:
+  - `SESSION_NOT_FOUND`;
+  - `RECOMMENDATION_NOT_FOUND` for an occurrence of another session;
+  - `INVALID_SESSION_TRANSITION` for an ended session, or a skip, completion, or replay of a track that never played;
+  - `VALIDATION_ERROR` for missing or negative seconds, or a zero duration.
+
+Left for B8:
+- whether the frontend's Next sends a `next` turn, a SKIP playback event, or both (both are safe: a late SKIP about a finished track moves nothing);
+- whether Not for me travels as a turn or a reaction (both are read together, and both move on);
+- how a replay from history is sent.
+
+### Playlists
+
+**Use cases current since B7** (`PlaylistService`, no route yet), one per planned route:
+
+| Route | Use case |
+|---|---|
+| `GET /api/v1/playlists` | `list_playlists(listener)`: oldest first, with track counts |
+| `POST /api/v1/playlists` | `create_playlist(listener, name)` |
+| `GET /api/v1/playlists/{playlist_id}` | `get_playlist(playlist)`: the tracks in order |
+| `PATCH /api/v1/playlists/{playlist_id}` | `rename_playlist(playlist, name)` |
+| `DELETE /api/v1/playlists/{playlist_id}` | `delete_playlist(playlist)` |
+| `POST /api/v1/playlists/{playlist_id}/items` | `add_track(playlist, track, session_id?, occurrence_id?)`. With a session and occurrence, the add is also PLAYLIST_ADD feedback and the session's queue is re-ranked. |
+| `DELETE /api/v1/playlists/{playlist_id}/items/{track_id}` | `remove_track(playlist, track)` |
+| `PATCH /api/v1/playlists/{playlist_id}/items/order` | `reorder_tracks(playlist, track_ids)`: the full new order |
+
+Errors map onto the codes below:
+- `PLAYLIST_NOT_FOUND`;
+- `TRACK_NOT_FOUND`;
+- `CONFLICT` for a name already used by the listener or a track already in the playlist;
+- `VALIDATION_ERROR` for a name that is empty or over 100 characters, an order that does not list exactly the playlist's tracks, or a session given without its occurrence;
+- the session codes for an add from a recommendation.
+
+The frontend's playlist tone is presentation and is not stored (D32). Whether the frontend's Save maps to playlist adds is B9's to settle.
+
 ### Audio serving
 
 `GET /api/v1/tracks/{track_id}/audio`:

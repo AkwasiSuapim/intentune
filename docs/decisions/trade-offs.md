@@ -217,6 +217,34 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 - **Cost:** in a library of a few tracks, a track can return after only a few plays.
 - **Status:** Current since B5 (2026-10-20). The cooldown is 20 plays, or the number of eligible tracks minus three, whichever is smaller (at least one).
 
+### Feedback read from raw facts, per track (D10–D12)
+
+- **Gain:** only raw facts are stored, so Feedback Policy v1's thresholds can change, and the same history can be read again, without losing evidence. Reading everything about a track in a session at once makes explicit actions reliably take precedence over playback, even across queue refreshes, and a track never counts twice.
+- **Cost:** evidence is recomputed from the whole session at every refresh (cheap at session scale; measured in B11). A track heard twice in one session is judged once, by its latest explicit action or, without one, its latest playback.
+- **Status:** Current since B6 (2026-10-20, TD-017).
+- **Revisit when:** B11 evaluates the thresholds, or B10 needs evidence across sessions.
+
+### Playlists: unique names, one entry per track, whole-list writes (D34)
+
+- **Gain:**
+  - Names identify playlists to the listener, as the frontend keeps them.
+  - A track cannot appear twice by accident.
+  - Writing a playlist's items as a whole keeps positions gap-free and lets two tracks swap without breaking the unique positions.
+  - Only an explicit add saves a recommendation.
+- **Cost:**
+  - Two playlists cannot share a name.
+  - Duplicates need a product decision before they are allowed.
+  - A whole-list write costs more than moving one row (negligible for playlists of hundreds of tracks).
+- **Status:** Current since B7 (2026-10-21, TD-018).
+- **Revisit when:** duplicates are approved, or playlists grow to thousands of tracks (B11 measurements).
+
+### Playback effects of feedback (D12, D18, spec §22)
+
+- **Gain:** the backend's state matches what the listener hears. A skip, completion, or Not for me moves on to the prepared next track, and Replay plays a past track again, as the approved frontend does.
+- **Cost:** each event refreshes the queue, so upcoming occurrence ids change after every event, and history grows with replaced occurrences. A replay is an occurrence no algorithm chose; history marks it `listener-replay`.
+- **Status:** Current since B6 (2026-10-20, TD-017).
+- **Revisit when:** B8/B9 show the churn of occurrence ids is a problem for the frontend.
+
 ### Conservative long-term learning (D06)
 
 - **Gain:** one session or one skip never rewrites long-term taste.

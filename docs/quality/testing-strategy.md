@@ -96,6 +96,27 @@ Per-file counts are in the [B4 audit](../architecture/current-system-audit.md#b4
 
 Per-file counts are in the [B5 audit](../architecture/current-system-audit.md#b5-update-2026-10-20). The policy tests are pure: no database, and randomness fixed by an injected generator, so every scenario is deterministic. Control tests use a generator that fails if it is drawn from, which proves that controls decide without randomness. 63 single-rule mutations each make a test fail. They cover the policy, strictly ordered session times, the queue write, the repository, the domain validation, and the migration backfill.
 
+## After B6 (2026-10-20)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **830 passed, 1 skipped**: the 753 B0–B5 tests plus 78 from B6, including the two review fixes. Three existing tests changed, because Not for me about the playing track now moves on. |
+
+Per-file counts are in the [B6 audit](../architecture/current-system-audit.md#b6-update-2026-10-20). The Feedback Policy v1 tests are pure. The mandatory boundary tests cover:
+- 8.0 s against 8.01 s;
+- every band edge and the value just below it;
+- a capped fraction and short tracks.
+
+32 single-rule mutations each make a test fail. They cover the interpretation, precedence, evidence, the D18 exclusion, playback effects, the use case, and the read-only preview.
+
+## After B7 (2026-10-21)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **905 passed, 1 skipped**: the 831 B0–B6 tests plus 75 from B7. No existing test changed. |
+
+Per-file counts are in the [B7 audit](../architecture/current-system-audit.md#b7-update-2026-10-21). 24 single-rule mutations each make a test fail. They cover the playlist domain, service, repository, feedback weight, and migration.
+
 ## Current Test Coverage
 
 ### Backend
@@ -264,12 +285,108 @@ Added in B5 (Recommendation Policy v1):
     - a newer control replaces a pending one;
   - with the clock frozen, a control and its refresh still ordered, and acted on exactly once;
   - a #2-first order still readable from surfaced positions after the queue moves on;
-  - signals read from real history.
+  - signals read from real history;
+  - *(B6 review)* a preview before a refresh leaving the refresh's choice unchanged: the generator state is restored, and seed 31's first draw still explores.
 - `tests/test_migrations.py`: B5's table rebuild keeps occurrences and the turns that reference them in both directions. Pre-B5 rows read `is_exploration = 0`, and their surfaced positions are recovered from insertion order across two sessions and two queues.
 - B5 additions to the B4 session tests:
   - `test_session_domain.py`: surfaced-position invariants, and the position outlasting the queue position through every transition;
   - `test_session_repositories.py`: the surfaced order kept after the queue moves on; `save()` never rewriting what was surfaced; CHECK constraints on both new columns;
   - `test_session_service.py`: the surfaced order surviving playback and replacement; with the clock frozen, every change in a session still getting a strictly later time.
+
+Added in B6 (feedback and playback events):
+
+- `tests/test_feedback_policy.py`, pure:
+  - **Constants:** the register's weights, and validation of the bands and weights.
+  - **Passive boundaries:**
+    - nothing, 8.0 s, and 8.01 s;
+    - 14.99/15, 39.99/40, 74.99/75, and 89.99/90%;
+    - 100%, and over 100% (capped);
+    - 15% of a longer track; short tracks within and past the grace period;
+    - SKIP and COMPLETE read alike.
+  - **Explicit actions:** they keep their weight whatever was played.
+  - **Precedence:**
+    - the latest playback decides without an explicit action;
+    - the grace period is no evidence;
+    - an explicit action wins in either order;
+    - Not for me outweighs a full play;
+    - the latest explicit action decides the evidence (changing one's mind), while any Not for me, turn or event, keeps the exclusion;
+    - turns and events are read together;
+    - a NEXT turn alone is no evidence.
+  - **From history to evidence:**
+    - one piece per track, newest first;
+    - a double Like counts once;
+    - a Like on a queued card still decides after a refresh re-surfaced the track;
+    - a track heard twice is one piece;
+    - a Not for me event excludes; a later Replay turns the evidence positive but keeps the track excluded (D18);
+    - exploration outcomes follow the deciding occurrence;
+    - stray events are ignored;
+    - the same raw facts are read differently under other thresholds.
+- `tests/test_feedback_service.py`, against a migrated database:
+  - **Reactions:** Like and Save re-rank at once and do not touch playback.
+  - **Not for me:**
+    - on the playing track, it moves on and keeps the track out for the session;
+    - a new session plays it again;
+    - on a queued track, it leaves playback alone.
+  - **Playback endings:**
+    - an early skip moves to the prepared next track and lowers similar tracks;
+    - a grace-period skip moves on with no evidence;
+    - a completion counts +0.80;
+    - a Like takes precedence over the skip that follows, including when a refresh re-surfaced the track in between;
+    - a late report after NEXT moves nothing.
+  - **Replay:**
+    - of a past track: a fresh listener-replay occurrence, ignoring the cooldown;
+    - of the playing track: no change;
+    - a replay is not a refresh, so a pending control still applies;
+    - a Replay after Not for me plays the track manually, but the track never comes back automatically (D18).
+  - **Raw events:** each is stored with its own occurrence, even when the evidence is combined per track.
+  - **Refusals, leaving nothing stored:**
+    - skipping or replaying a track that never played;
+    - a playback type sent as a reaction and the reverse;
+    - negative seconds, a zero duration, missing seconds;
+    - an unknown type;
+    - an ended or unknown session, or another session's occurrence.
+  - **Exploration and storage:**
+    - an early skip of an exploration pick halves the automatic rate;
+    - the stored rows hold raw facts only, in order.
+- `tests/test_session_service.py`: More like this leaves playback alone; a Not for me turn about the playing track moves on.
+
+Added in B7 (playlists):
+
+- `tests/test_playlist_domain.py`, pure:
+  - **Playlists:** a new playlist (identity, trimmed name, UTC times); the 100-character name limit; invariants; renaming.
+  - **Items:** a non-negative position; contents with one entry per track, in position order, without gaps, and only their own items.
+  - **Operations:** add at the end; a duplicate refused; remove closing the gap; removing a missing track refused; reorder keeping `added_at`.
+  - **Orders refused:** one missing a track, one with an extra track, one with a track twice, and an empty one.
+- `tests/test_playlist_repositories.py`:
+  - **Round trips:** in order; unknown ids and names.
+  - **Listing:** oldest first, with track counts including 0.
+  - **Writes:** rename and swap positions in one transaction; delete removing the items and keeping the tracks; another playlist's items refused.
+  - **Persistence:** survives a restart.
+  - **Database rules:**
+    - one name per listener, while two listeners may share a name;
+    - a duplicate track, a taken position, a negative position;
+    - unknown tracks, playlists, and listeners;
+    - empty and over-long names.
+  - **Columns:** pinned, so no presentation state is stored.
+- `tests/test_playlist_service.py`:
+  - **Playlists:**
+    - create and list with counts;
+    - names unique on create and rename, with keeping one's own name fine;
+    - renaming keeps the tracks;
+    - an unknown listener;
+    - unknown playlists for every operation;
+    - delete keeping tracks and feedback history;
+    - survives a restart.
+  - **Tracks:** added at the end, once each; only library tracks; a track with a missing copy kept; remove; reorder; an invalid order changing nothing.
+  - **Feedback:**
+    - adding a recommendation records PLAYLIST_ADD, counts +1.00, and re-ranks;
+    - saving one recommendation to two playlists is two events and one piece of evidence, without touching playback;
+    - an add without a session is not feedback;
+    - a refused add stores neither item nor event (another track, another session, an ended session, a duplicate);
+    - session and occurrence must come together, with a FeedbackService;
+    - PLAYLIST_ADD is refused as a plain reaction;
+    - nothing is ever saved automatically.
+- `tests/test_migrations.py`: the B7 downgrade drops the playlist tables and only PLAYLIST_ADD events, keeping other events exactly; the upgrade accepts PLAYLIST_ADD again.
 
 ### Frontend
 
@@ -286,8 +403,8 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | Tracks usable during analysis; a failed track does not stop the worker; interrupted jobs recover; reanalysis after an analyzer version change | B3 — **Current** (2026-10-20) |
 | Session domain transitions, written as pure application tests before HTTP | B4 — **Current** (2026-10-20) |
 | Context resolution; missing-feature scoring; candidate similarity; session fit; combined weights; diversity/cooldown (recent track, repeated artist, near-duplicates); exploration gate; three-candidate selection; #2 safety threshold; conflicting current vs historical intent; finite library; exploration success and failure; **complete-input legacy outputs unchanged** | B5 — **Current** (2026-10-20) |
-| Feedback thresholds, including boundary values (8 s, 15%, 40%, 75%, 90%); explicit actions overriding passive playback; playback-event behavior; Not for me excluding the track for the session only | B6 |
-| Playlist CRUD and ordering; one occurrence per playlist | B7 |
+| Feedback thresholds, including boundary values (8 s, 15%, 40%, 75%, 90%); explicit actions overriding passive playback; playback-event behavior; Not for me excluding the track for the session only | B6 — **Current** (2026-10-20) |
+| Playlist CRUD and ordering; one occurrence per playlist | B7 — **Current** (2026-10-21) |
 | API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 |
 | Frontend service boundary against the HTTP adapter | B9 |
 | Long-term evidence threshold; bounded, reversible adjustments | B10 |

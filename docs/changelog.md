@@ -101,6 +101,54 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
 - TD-015 records the B4 implementation decisions.
 
+### Added — Phase B7: Playlists (2026-10-21)
+
+- `src/intentune/domain/playlist.py`:
+  - `Playlist`: a name unique per listener, trimmed, 1–100 characters.
+  - `PlaylistItem` and `PlaylistSummary`.
+  - `PlaylistContents`, with pure add (at the end, one entry per track), remove (closing the gap), and reorder (an exact permutation).
+  - Errors: `PlaylistNotFound`, `PlaylistNameTaken`, `TrackAlreadyInPlaylist`, `TrackNotInPlaylist`, and `InvalidPlaylistOrder`.
+- `PlaylistService` (`src/intentune/application/playlists.py`): create, rename, delete, list (with track counts), read, add, remove, and reorder. Adding a recommendation from a session records PLAYLIST_ADD feedback (+1.00) through `FeedbackService.record_playlist_add()` and re-ranks the queue. A refused add stores nothing, and nothing is ever saved automatically.
+- `PlaylistRepository` port (`ports/playlists.py`), `SqlAlchemyPlaylistRepository`, and the unit of work's `playlists`.
+- `FeedbackEventType.PLAYLIST_ADD` and `RecommendationPolicy.playlist_add_weight`.
+- Migration `ce0b59df2cd1`:
+  - it creates `playlists` (unique listener and name; name length CHECK) and `playlist_items` (primary key playlist and track; unique positions; position ≥ 0);
+  - it rebuilds `feedback_events` to accept PLAYLIST_ADD;
+  - the downgrade removes only PLAYLIST_ADD events.
+- 75 tests in `tests/test_playlist_domain.py`, `tests/test_playlist_repositories.py`, `tests/test_playlist_service.py`, `tests/test_migrations.py`, and `tests/test_feedback_policy.py`. The suite is 905 passed and 1 skipped. No dependency was added.
+- TD-018 records the B7 implementation decisions.
+
+### Added — Phase B6: Feedback and playback events (2026-10-20)
+
+- `FeedbackService` (`src/intentune/application/feedback.py`):
+  - `react()` takes LIKE, SAVE, REPLAY, or NOT_FOR_ME; `report_playback()` takes SKIP or COMPLETE, with seconds played and duration.
+  - Each records the raw event, then re-ranks the queue at once.
+  - It returns the event, its weight, the track's interpretation, and the new state.
+- `SessionService.record_feedback()` stores a raw event and applies its playback effect in one transaction:
+  - a skip, completion, or Not for me about the playing track moves on to the prepared next track;
+  - Replay of a finished track starts it again as a fresh `listener-replay` occurrence (rank 1, no score, past the cooldown).
+- Feedback Policy v1 in `domain/policy.py`, its constants in `RecommendationPolicy`:
+  - Like, Save, and Replay count +1.00, Not for me −1.00.
+  - Passive playback counts nothing for 8 s, then by the fraction played: under 15% −0.50, 15–39% −0.20, 40–74% +0.10, 75–89% +0.50, 90%+ +0.80.
+  - `passive_weight()`, `event_weight()`, and `interpret_feedback()`: per track in the session, explicit actions over playback, the latest explicit action deciding the evidence, and any Not for me keeping the track excluded for the session.
+  - `signals_from_session()` reads feedback events with the turns. Evidence is recomputed from the raw facts at every refresh and never stored.
+- `RecommendationOccurrence.replayed()` and `LISTENER_REPLAY_ALGORITHM`. A listener replay is not a surfaced queue, so it does not use up a pending control.
+- 78 tests in `tests/test_feedback_policy.py`, `tests/test_feedback_service.py`, `tests/test_session_service.py`, and `tests/test_queue_refresh.py`. The suite is 830 passed and 1 skipped. No schema change, no dependency added.
+- TD-017 records the B6 implementation decisions.
+
+### Changed — Phase B6 (2026-10-20)
+
+- A `NOT_FOR_ME` turn about the playing track now finishes it and starts the next one, as a Not for me event does. Three tests that relied on the track still playing were updated.
+
+### Fixed — at the B6 review (2026-10-21)
+
+- `RecommendationService.decide()` drew from the service's random generator, so a preview could change what the next refresh chose. It is now read-only: it restores the generator's state and no longer sets `last_decision`. A regression test covers it.
+- A Like or Replay after Not for me lifted the track's exclusion. Not for me now keeps the exact track out of automatic recommendations for the rest of the session (D18), whatever follows. The latest explicit action still decides the track's evidence, and a Replay may still play it manually. `Interpretation.rejected` became `Interpretation.excluded`.
+
+### Fixed — during B6 (2026-10-20)
+
+- Evidence was first combined per occurrence. Because each re-rank surfaces upcoming tracks as new occurrences, a Like on a queued card did not take precedence over the skip when that track later played, and a track could count twice. Found in the end-to-end run. Evidence is now combined per track within the session.
+
 ### Added — Phase B5: Recommendation Policy v1 (2026-10-20)
 
 - `src/intentune/domain/policy.py`, pure, with randomness only from an injected generator:
@@ -201,7 +249,9 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - B2's library is not wired into any running entry point either. There is no startup scan or route until B8. Scans run synchronously; background scanning (D26) is not assigned to a phase, since B3 covered analysis only. Artwork is not extracted. A crash mid-import can leave an unreferenced managed file or a `.partial` file; neither is served, and cleanup is not built.
 - B3's worker is not started by any running entry point until B8. Only exact signal measurements exist (duration, peak, RMS level); BPM, key, loudness in LUFS, and semantic features stay `NULL`. M4A tracks are never analyzed, because libsndfile cannot decode them.
 - B4's session service is not called by any running entry point until B8, and nothing produces the recommendations it queues until B5. Turns are recorded but do not yet change ranking. Feedback events have a table but no recording use case (B6). *(Since B5, Policy v1 produces the queue and acts on turns.)*
-- B5's Policy v1 is not called by any running entry point until B8. Turns are its only evidence until B6 adds feedback events. No long-term profile is stored until B10, so its long-term stage is unavailable. Library tracks carry tag labels only, so ranking uses genre (and mood, when tagged) and session evidence. With a genre in the intent and genre-only tags, exploration happens only on the refresh after Surprise me or Try something different. Among tracks the fallback rule admits, the choice comes down to a deterministic tie-break. "Play something from recently liked music" is not implemented.
+- B7's playlists are not called by any running entry point until B8; the frontend's playlists stay local until B9.
+- B6's feedback use cases are not called by any running entry point until B8, and the frontend reports no playback position until B9. PLAYLIST_ADD arrives with playlists (B7). *(B7 added it.)* Each refresh after an event replaces the queue with new occurrences, so the ids of upcoming tracks change after every event.
+- B5's Policy v1 is not called by any running entry point until B8. Turns are its only evidence until B6 adds feedback events. *(B6 added them.)* No long-term profile is stored until B10, so its long-term stage is unavailable. Library tracks carry tag labels only, so ranking uses genre (and mood, when tagged) and session evidence. With a genre in the intent and genre-only tags, exploration happens only on the refresh after Surprise me or Try something different. Among tracks the fallback rule admits, the choice comes down to a deterministic tie-break. "Play something from recently liked music" is not implemented.
 
 ### Current Baseline
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Living Document.** Last reviewed: Phase B5, 2026-10-20 (full review in B0, 2026-10-18). Questions answered by the [Prototype 1 Decision Register](../decisions/intentune-prototype-decision-register.md) are marked **Resolved** with the decision ID.
+**Living Document.** Last reviewed: Phase B7, 2026-10-21 (full review in B0, 2026-10-18). Questions answered by the [Prototype 1 Decision Register](../decisions/intentune-prototype-decision-register.md) are marked **Resolved** with the decision ID.
 
 ## Product Risks
 
@@ -20,7 +20,11 @@
 - Large libraries: import throughput, analysis time, and full-library scoring latency are unmeasured (B11).
 - Browser seeking depends on correct HTTP range support for audio; the installed Starlette behavior must be verified (B8).
 - Path traversal or arbitrary file serving through the audio route if path resolution is wrong.
-- Feedback signals such as skips may be ambiguous. Policy v1 interprets them by played fraction and ignores the first 8 seconds (D10, D11).
+- Feedback signals such as skips may be ambiguous. Policy v1 interprets them by played fraction and ignores the first 8 seconds (D10, D11). **Mitigated (B6, 2026-10-20):**
+  - explicit actions take precedence over playback, per track in the session;
+  - the raw facts are kept, so the thresholds can be re-evaluated (B11) and the same history read again;
+  - a single skip changes only the current session and halves, never stops, exploration.
+- *(Raised in B6.)* The frontend must report how far a track played (seconds and duration) for a skip to mean anything; it has no real playback yet (B9). Without those facts, a NEXT turn is recorded but is no evidence.
 - Dependency drift. **Mitigated (2026-10-18):** direct dependencies are now pinned and installed. Transitive dependencies are not locked, and `pandas` is pinned but unused.
 - AI output may be malformed or inconsistent. *(Future: AI is deferred.)*
 - YouTube results may lack precise audio features. *(Future: YouTube is deferred.)*
@@ -58,6 +62,13 @@
   - More familiar suppresses exploration for that refresh.
   - A refinement before the refresh supersedes the control.
   - With the genre set aside, a track nothing can be compared with gets no score. It qualifies only by an explicit fallback rule: a known genre, playable, not refused.
+- *(Raised in B6, 2026-10-20.)* How should B8 carry the frontend's Next and Not for me? Today both travel as turns (`next`, `not_for_me`), and the playback facts of a skip as a SKIP event. B6 makes any combination safe:
+  - a NEXT turn and a later SKIP report move playback once;
+  - a Not for me turn and a Not for me event are read as one rejection.
+
+  The route design should still pick one path per action.
+- *(Raised in B7, 2026-10-21.)* The frontend's Save opens the playlist picker and saves the current song to the playlists chosen. The backend has both a SAVE reaction and PLAYLIST_ADD (an add from a recommendation). Should B9 send the picker's saves as playlist adds only? A SAVE without a playlist would then stay unused. The frontend's playlist colour tone is not stored by the backend (D32), so B9 must keep or derive it.
+- *(Raised in B6.)* The frontend replays a past song from the session history. That needs the occurrence id of the earlier play, which B9 must keep or look up.
 - *(Raised in B5.)* "Play something from recently liked music" (spec §20) is listed among the controls that shift exploration, but no turn kind or rule exists for it. What should it do, and is it a B6 feedback-driven control or a new turn kind?
 - How does the frontend's categorical intent (for example, five energy levels) map to `ListeningContext` numeric targets?
 - Where do the frontend's typed messages and quick-action labels become structured turn variants, given that React must not parse language and the backend accepts only limited deterministic commands (D30)? *(Still open after B4: `SessionService.apply_turn()` accepts structured turn kinds and `ListeningContext` only, so the mapping has to happen before it.)*

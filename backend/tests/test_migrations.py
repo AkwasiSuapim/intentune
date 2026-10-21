@@ -13,10 +13,11 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 
 from src.intentune.application.local_listener import ensure_default_listener
+from src.intentune.application.playlists import PlaylistService
 from src.intentune.application.sessions import SessionService
 from src.intentune.domain.library import AudioFormat, Track, TrackStatus
 from src.intentune.domain.models import ListeningContext, MusicCandidate, Recommendation, ScoreBreakdown, ScoreComponent
-from src.intentune.domain.session import TurnKind
+from src.intentune.domain.session import FeedbackEventType, TurnKind
 from src.intentune.persistence.db import create_database_engine, create_session_factory
 from src.intentune.persistence.migrations import alembic_config, upgrade_database
 from src.intentune.persistence.models import Base
@@ -266,7 +267,8 @@ def test_the_b5_rebuild_keeps_occurrences_and_the_turns_about_them(migrated_data
     command.downgrade(alembic_config(migrated_database_url), "dd7360f46b8b")
     [before_b5], turn_targets = occurrence_rows()
     assert {"is_exploration", "surfaced_position"}.isdisjoint(before_b5)
-    assert (before_b5["id"], before_b5["status"], turn_targets) == (occurrence.occurrence_id, "PLAYING", [occurrence.occurrence_id])
+    # Not for me about the playing track moved playback on (B6), so it has played.
+    assert (before_b5["id"], before_b5["status"], turn_targets) == (occurrence.occurrence_id, "PLAYED", [occurrence.occurrence_id])
 
     command.upgrade(alembic_config(migrated_database_url), "head")
     [after_b5], turn_targets = occurrence_rows()
@@ -332,6 +334,59 @@ def test_the_b5_migration_recovers_surfaced_positions_from_insertion_order(datab
     by_id = {row[0]: row[1:] for row in rows}
     stored = [by_id[f"5e4f4a3b-8c2d-4e0f-9a8b-7c6d5e4f4a3{number}"] for number in range(len(occurrences))]
     assert stored == [(0, None, 0), (1, None, 0), (2, None, 0), (0, 0, 0), (0, None, 0), (1, 1, 0)]
+
+
+def test_the_b7_migration_keeps_feedback_and_its_downgrade_removes_only_playlist_data(migrated_database_url):
+    """B7 rebuilt feedback_events to accept PLAYLIST_ADD. Downgrading drops the playlist tables and the PLAYLIST_ADD
+    events that came from them, and keeps every other event exactly; upgrading accepts PLAYLIST_ADD again."""
+    engine = create_database_engine(migrated_database_url)
+    try:
+        unit_of_work = SqlAlchemyUnitOfWork(create_session_factory(engine))
+        listener_id = ensure_default_listener(unit_of_work).listener_profile_id
+        now = datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc)
+        with unit_of_work:
+            unit_of_work.tracks.add(Track(
+                track_id=_FIRST_ID, sha256="a" * 64, size_bytes=10, audio_format=AudioFormat.FLAC, status=TrackStatus.IMPORTED,
+                original_filename="song.flac", created_at=now, updated_at=now,
+            ))
+            unit_of_work.commit()
+        sessions = SessionService(unit_of_work)
+        session_id = sessions.start_session(listener_id, ListeningContext()).session.session_id
+        recommendation = Recommendation(
+            candidate=MusicCandidate(candidate_id=_FIRST_ID, title="Song", creator="Artist", source="local"),
+            score_breakdown=ScoreBreakdown(total_score=0.5, maximum_score=1.0, components=(ScoreComponent("intent", 0.5, 1.0, "intent fit 0.50"),)),
+            rank=1,
+        )
+        [occurrence] = sessions.queue_recommendations(session_id, [recommendation], "policy-v1").queue
+        sessions.record_feedback(session_id, occurrence.occurrence_id, FeedbackEventType.LIKE)
+        sessions.record_feedback(session_id, occurrence.occurrence_id, FeedbackEventType.PLAYLIST_ADD)
+        playlist_id = PlaylistService(unit_of_work).create_playlist(listener_id, "Focus").playlist_id
+        PlaylistService(unit_of_work).add_track(playlist_id, _FIRST_ID)
+        with engine.connect() as connection:
+            like_before = connection.exec_driver_sql("SELECT * FROM feedback_events WHERE event_type = 'LIKE'").one()
+    finally:
+        engine.dispose()
+
+    command.downgrade(alembic_config(migrated_database_url), "de244c476f3a")
+
+    assert {"playlists", "playlist_items"}.isdisjoint(_table_names(migrated_database_url))
+    engine = create_database_engine(migrated_database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT * FROM feedback_events").all() == [like_before]
+    finally:
+        engine.dispose()
+
+    command.upgrade(alembic_config(migrated_database_url), "head")
+    engine = create_database_engine(migrated_database_url)
+    try:
+        SessionService(SqlAlchemyUnitOfWork(create_session_factory(engine))).record_feedback(
+            session_id, occurrence.occurrence_id, FeedbackEventType.PLAYLIST_ADD
+        )
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT event_type FROM feedback_events ORDER BY occurred_at").scalars().all() == ["LIKE", "PLAYLIST_ADD"]
+    finally:
+        engine.dispose()
 
 
 def test_migrated_database_uses_wal_and_leaves_no_foreign_key_violations(engine):

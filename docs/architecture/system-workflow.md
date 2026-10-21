@@ -195,7 +195,9 @@ advance() / play(occurrence)        -> PLAYING -> PLAYED; the next (or the chose
 apply_turn(kind, ...)               -> a turn with the context left in force:
                                          REFINE replaces the context
                                          NEXT finishes the current track and starts the next queued one
-                                         NOT_FOR_ME / MORE_LIKE_THIS name their occurrence (the playing one by default)
+                                         NOT_FOR_ME / MORE_LIKE_THIS name their occurrence (the playing one by default);
+                                         NOT_FOR_ME about the playing one also moves on (B6)
+record_feedback(occurrence, event)  -> (B6) a raw feedback event, and its effect on playback (see Feedback below)
                                          SURPRISE_ME / MORE_FAMILIAR / TRY_SOMETHING_DIFFERENT are recorded only
                                          (B5: the next refresh acts on them, below)
 end_session()                       -> ENDED_BY_LISTENER; queued -> DISCARDED, playing -> PLAYED
@@ -239,10 +241,10 @@ read, in one short transaction: the session (context), its turns and occurrences
 
 Surfacing the queue acts on the pending control, so the refresh after that is automatic again. `SessionService` gives every change in a session a strictly later time, so whether a queue was surfaced after a control turn is exact even when the clock has not moved.
 
-`decide(session_id)` returns the same decision without writing, for explanation. A caller refreshes after each meaningful change: start, refinement, steering turn, playback advance, and (B6) feedback. Nothing calls it from a running entry point yet (B8).
+`decide(session_id)` is a read-only preview of what `refresh_queue()` would choose now, for explanation. It writes nothing, uses up no pending control, and restores the random generator's state afterwards, so it never changes the next refresh. A caller refreshes after each meaningful change: start, refinement, steering turn, playback advance, and (B6) feedback. Nothing calls it from a running entry point yet (B8).
 
 What B5 does not do:
-- **Feedback events:** it does not use them as evidence; turns are the only evidence until B6.
+- **Feedback events:** it does not use them as evidence; turns are the only evidence until B6. *(Current since B6, below.)*
 - **Long-term profile:** none is stored until B10, so the long-term stage is unavailable.
 - **Numeric features:** library tracks carry tag labels only. The stage scores ignore energy, danceability, tempo, valence, and acousticness until something measures them.
 
@@ -258,9 +260,62 @@ LIKE / SAVE / REPLAY / SKIP / COMPLETE / NOT_FOR_ME
 
 Explicit actions override passive playback interpretation. The first 0–8 seconds are not preference evidence. Not for me excludes the exact track for the current session and strongly down-ranks similar tracks, without changing the long-term profile (D12, D18).
 
+**Current (B6, 2026-10-20).** `FeedbackService` (`backend/src/intentune/application/feedback.py`):
+
+```text
+react(session, occurrence, LIKE | SAVE | REPLAY | NOT_FOR_ME)
+report_playback(session, occurrence, SKIP | COMPLETE, played_seconds, duration_seconds)
+   -> SessionService.record_feedback(), one transaction:
+        store the raw event (type, seconds, duration, capped fraction, occurrence, session, time)
+        playback: SKIP / COMPLETE / NOT_FOR_ME about the playing track -> it is PLAYED, the prepared next starts
+                  (a late report about a finished track moves nothing)
+                  REPLAY of a finished track -> the playing one is PLAYED; a fresh "listener-replay"
+                  occurrence of the replayed track starts now, past the cooldown
+                  REPLAY of the playing track -> nothing (the player restarts it)
+   -> RecommendationService.refresh_queue(): Policy v1 reads every turn and raw event through
+        Feedback Policy v1, per track in the session, and re-ranks and refills the queue
+   -> the event, its own weight, the track's interpretation, and the new session state
+```
+
+What each event means, recomputed at every refresh and never stored:
+- **Explicit:** LIKE, SAVE, and REPLAY count +1.00, NOT_FOR_ME −1.00. The `MORE_LIKE_THIS` turn counts +1.00 and the `NOT_FOR_ME` turn −1.00.
+- **Passive** (SKIP, COMPLETE): 8 s or less counts 0. After that, by the fraction played:
+
+  | Fraction played | Weight |
+  |---|---|
+  | under 15% | −0.50 |
+  | 15–39% | −0.20 |
+  | 40–74% | +0.10 |
+  | 75–89% | +0.50 |
+  | 90% and up | +0.80 |
+
+- **Precedence, for the evidence:** for each track, the latest explicit signal decides its effective evidence; otherwise the latest playback event.
+- **Exclusion (D18):** separate and sticky. A track refused with Not for me at any point in the session stays out of automatic recommendations for the rest of it, even if a later Like or Replay makes its evidence positive. A Replay may still play it, as the listener's own choice.
+- **Raw events** stay stored per occurrence; only their reading is per track.
+
+Only discrete events are accepted; there are no progress ticks. The frontend owns playback position and reports how a track ended. Nothing calls `FeedbackService` from a running entry point until B8.
+
 ### Playlists (B7)
 
 Create, rename, delete, add, remove, and reorder. One occurrence of a track per playlist by default. Adding to a playlist is strong positive feedback, but recommendations are never saved automatically.
+
+**Current (B7, 2026-10-21).** `PlaylistService` (`backend/src/intentune/application/playlists.py`):
+
+```text
+create_playlist(listener, name)    -> a playlist; the name is trimmed, 1-100 characters, unique per listener
+rename_playlist / delete_playlist  -> delete removes the items, never the tracks or any feedback history
+list_playlists(listener)           -> oldest first, with track counts
+get_playlist(playlist)             -> the tracks in order
+add_track(playlist, track)         -> at the end; a track at most once per playlist
+add_track(playlist, track, session, occurrence)
+   -> check: the session is active, the occurrence is of it, and of this track
+   -> store the item (one transaction)
+   -> FeedbackService.record_playlist_add(): a raw PLAYLIST_ADD event (+1.00), then re-rank the queue
+remove_track(playlist, track)      -> the tracks after it move up one place; removing is not feedback
+reorder_tracks(playlist, order)    -> the order lists exactly the playlist's tracks, each once
+```
+
+A refused add stores neither an item nor an event. Nothing else ever writes a playlist item, so recommendations are never saved automatically. Playlists survive restarts. Nothing calls `PlaylistService` from a running entry point until B8.
 
 ### Restart (D35)
 

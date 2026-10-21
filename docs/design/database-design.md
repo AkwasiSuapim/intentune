@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, and B5 exploration marks, 2026-10-20), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
@@ -10,6 +10,8 @@
 - **B3** added background analysis: `analysis_jobs` and `track_features`, and the `ANALYZING` and `READY` track states (see [Current Schema (B3)](#current-schema-b3)).
 - **B4** added the session domain: `listening_sessions`, `session_turns`, `recommendation_occurrences`, and `feedback_events` (see [Current Schema (B4)](#current-schema-b4)).
 - **B5** added two columns to `recommendation_occurrences` (see [Current Schema (B5)](#current-schema-b5)): `surfaced_position`, which never changes, and `is_exploration`, which marks Recommendation Policy v1's exploration picks. Policy v1 ranks library tracks; it adds no other table, and its constants live in code, not in the database.
+- **B6** records feedback into the B4 `feedback_events` table, with no schema change (see [Feedback events (B6)](#feedback-events-b6)).
+- **B7** added `playlists` and `playlist_items`, and `feedback_events` accepts `PLAYLIST_ADD` (see [Current Schema (B7)](#current-schema-b7)).
 - The recommendation catalog used by the CLI is still `backend/data/songs.csv`.
 - Nothing in the running CLI opens the database yet. The FastAPI startup (B8) will apply migrations, create the default listener, and run the startup scan.
 
@@ -239,7 +241,7 @@ There is no column for text: raw conversational text cannot be stored (D33).
 | `played_fraction` | `FLOAT` | null | 0–1: `played_seconds / duration_seconds`, capped at 1.0; present exactly when the seconds are. |
 | `occurred_at` | `DATETIME` | not null | |
 
-Raw facts only; no interpreted weight is stored. B4 creates the table and repository. Recording events and interpreting them is B6.
+Raw facts only; no interpreted weight is stored. B4 creates the table and repository. Recording events and interpreting them is B6. *(Current since B6; see [Feedback events (B6)](#feedback-events-b6).)*
 
 ### Context storage
 
@@ -270,13 +272,45 @@ Policy v1 writes occurrences through `queue_recommendations()` as before: `algor
 
 Within a session, `SessionService` gives every change a strictly later time (TD-016 item 13). Each surfaced queue therefore has its own `surfaced_at`, and a queue is always later than the turn before it.
 
+## Current Schema (B7)
+
+**Current.** Migration `ce0b59df2cd1` (`backend/alembic/versions/20261021_ce0b59df2cd1_create_playlists.py`), which revises `de244c476f3a`.
+
+### `playlists`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `listener_profile_id` | `VARCHAR(36)` | not null | Foreign key to `listener_profiles`. |
+| `name` | `VARCHAR(100)` | not null | Trimmed, 1–100 characters (CHECK on the length). Unique per listener: `uq_playlists_listener_name` on (`listener_profile_id`, `name`). |
+| `created_at`, `updated_at` | `DATETIME` | not null | |
+
+### `playlist_items`
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `playlist_id` | `VARCHAR(36)` | not null | Foreign key to `playlists`; part of the primary key. |
+| `track_id` | `VARCHAR(36)` | not null | Foreign key to `tracks`; part of the primary key, so a track appears once per playlist; indexed. |
+| `position` | `INTEGER` | not null | `>= 0` (CHECK); unique per playlist (`uq_playlist_items_playlist_position`). The domain keeps them 0, 1, 2… with no gaps. |
+| `added_at` | `DATETIME` | not null | Kept through reorders. |
+
+How the tables are used:
+- **Writes:** the repository writes a playlist's items as a whole (delete, then insert in order) inside one transaction, so a swap never breaks the unique positions.
+- **Deleting a playlist** removes its items; tracks and feedback events stay.
+- **Not stored:** presentation, such as the frontend's colour tone (D32).
+
+### `feedback_events` (changed)
+
+`event_type` also accepts `PLAYLIST_ADD`, a recommendation added to a playlist (+1.00). The CHECK change rebuilt the table in batch mode, keeping its rows, index, and composite foreign key. The downgrade deletes PLAYLIST_ADD events before restoring the earlier constraint, since their playlists are dropped too.
+
 ## Prototype 1 Concepts
 
 **Planned**, except these, which exist:
 - `listener_profiles` (B1);
 - `library_sources`, `tracks`, and `track_labels` (B2);
 - `analysis_jobs` and `track_features` (B3);
-- `listening_sessions`, `session_turns`, `recommendation_occurrences`, and `feedback_events` (B4).
+- `listening_sessions`, `session_turns`, `recommendation_occurrences`, and `feedback_events` (B4);
+- `playlists` and `playlist_items` (B7).
 
 B2 also added `source_files`, which is not in this list. Concept names from spec §9:
 
@@ -405,7 +439,7 @@ Historical sessions persist, but the active queue is **not** restored after rest
 
 ### Feedback events (B6)
 
-**Table current since B4; recording planned for B6.**
+**Table current since B4; recording current since B6** (`SessionService.record_feedback()`, through `FeedbackService`). B6 needed no schema change: every event is one row of raw facts, and nothing interpreted is stored. Feedback Policy v1 reads the rows at each refresh, per track in the session (TD-017).
 
 Persist the raw fact, not only the interpreted label (spec §9):
 
@@ -421,9 +455,15 @@ timestamp
 
 Storing raw facts lets Feedback Policy v1 thresholds change later without losing evidence.
 
+Since B6:
+- **Replay:** it adds a row to `recommendation_occurrences` as well, a fresh occurrence of the replayed track with status `PLAYING`, `algorithm = 'listener-replay'`, rank 1, and `score` `NULL`. The listener chose it; no algorithm surfaced it.
+- **Not for me:** it writes nothing outside the session; long-term records are B10.
+
 ### Playlists (B7)
 
 Create, rename, delete, add, remove, and reorder, persisted in `playlists` and `playlist_items`. One occurrence of a track per playlist by default. Recommendations are never auto-saved.
+
+**Current (B7)**; see [Current Schema (B7)](#current-schema-b7).
 
 ### Long-term adaptation records (B10)
 
@@ -451,6 +491,7 @@ Still open:
   - *(B2, `ports/library.py`)* `LibrarySourceRepository` (`get`, `get_by_path`, `list_all`, `add`, `save`), `SourceFileRepository` (`list_for_source`, `add`, `save`), and `TrackRepository` (`get`, `get_by_sha256`, `list_all`, `ids_with_status`, `add`, `save`; a track's labels are saved with it);
   - *(B3, `ports/analysis.py`)* `AnalysisJobRepository` (`get`, `list_all`, `list_for_analyzer`, `add`, `save`, `claim_next`) and `TrackFeatureRepository` (`list_for_track`, `replace_for_analyzer`).
   - *(B4, `ports/sessions.py`)* `ListeningSessionRepository` (`get`, `get_active_for_listener`, `list_for_listener`, `list_active`, `add`, `save`), `SessionTurnRepository` (`list_for_session`, `add`), `RecommendationOccurrenceRepository` (`get`, `list_for_session`, `add`, `save`), and `FeedbackEventRepository` (`list_for_session`, `add`). Turns and feedback events are history: added, never changed.
+  - *(B7, `ports/playlists.py`)* `PlaylistRepository` (`get`, `get_by_name`, `list_for_listener`, `track_counts`, `add`, `save`, `delete`, `items`, `replace_items`).
 
     The occurrence repository flushes every write at once, so writes reach the database in the caller's order. That keeps the one-`PLAYING` and queue-position indexes satisfied after every statement.
 
@@ -458,14 +499,14 @@ Still open:
   - `UnitOfWork`, which exposes all of these plus `commit()` and `rollback()`.
 
   Application use cases depend only on these ports.
-- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, `SqlAlchemyAnalysisJobRepository`, `SqlAlchemyTrackFeatureRepository`, the four session repositories (B4), and `SqlAlchemyUnitOfWork`. A unit of work is not thread-safe; the analysis worker uses its own.
+- **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, `SqlAlchemyAnalysisJobRepository`, `SqlAlchemyTrackFeatureRepository`, the four session repositories (B4), `SqlAlchemyPlaylistRepository` (B7), and `SqlAlchemyUnitOfWork`. A unit of work is not thread-safe; the analysis worker uses its own.
 - A repository works inside the session it is given, never commits, and accepts and returns domain models only.
 - A unit of work is used as `with unit_of_work:`. Each block is one fresh session and transaction. `commit()` makes staged changes durable. Leaving the block always rolls back anything uncommitted, whether by an early return or an exception, then closes the session. A unit of work is not re-entrant, and it refuses use outside a `with` block. It can be reused for consecutive transactions.
 - Later phases add their repositories to the same unit of work, so one use case can change several tables atomically.
 
 ## Migration Strategy
 
-**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
+**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5); `ce0b59df2cd1` creates the playlist tables and rebuilds `feedback_events` to accept `PLAYLIST_ADD` (B7). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
 
 - From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
 - From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.

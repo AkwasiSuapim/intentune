@@ -398,15 +398,41 @@ def test_next_with_nothing_queued_or_playing_is_still_recorded(sessions, listene
 @pytest.mark.parametrize("kind", [TurnKind.NOT_FOR_ME, TurnKind.MORE_LIKE_THIS])
 def test_turns_about_a_recommendation_default_to_the_playing_one(sessions, listener, tracks, kind):
     session_id = sessions.start_session(listener, _CALM).session.session_id
-    queue = _queue(sessions, session_id, tracks[:2]).queue
+    queue = _queue(sessions, session_id, tracks[:3]).queue
     playing = sessions.advance(session_id).playing
 
     about_playing = sessions.apply_turn(session_id, kind)
-    about_queued = sessions.apply_turn(session_id, kind, occurrence_id=queue[1].occurrence_id)
+    about_queued = sessions.apply_turn(session_id, kind, occurrence_id=queue[2].occurrence_id)
 
     assert about_playing.occurrence_id == playing.occurrence_id
-    assert about_queued.occurrence_id == queue[1].occurrence_id
-    assert sessions.get_session(session_id).playing == playing  # B4 records the turn; its effect on ranking is B5/B6
+    assert about_queued.occurrence_id == queue[2].occurrence_id
+
+
+def test_more_like_this_leaves_playback_alone(sessions, listener, tracks):
+    session_id = sessions.start_session(listener, _CALM).session.session_id
+    _queue(sessions, session_id, tracks[:2])
+    playing = sessions.advance(session_id).playing
+
+    sessions.apply_turn(session_id, TurnKind.MORE_LIKE_THIS)
+
+    assert sessions.get_session(session_id).playing == playing
+
+
+def test_not_for_me_about_the_playing_track_moves_on(sessions, listener, tracks):
+    """B6: a rejected track does not keep playing. Not for me about a queued track leaves playback alone."""
+    session_id = sessions.start_session(listener, _CALM).session.session_id
+    queue = _queue(sessions, session_id, tracks[:3]).queue
+    rejected = sessions.advance(session_id).playing
+
+    sessions.apply_turn(session_id, TurnKind.NOT_FOR_ME, occurrence_id=queue[2].occurrence_id)
+    still = sessions.get_session(session_id)
+    sessions.apply_turn(session_id, TurnKind.NOT_FOR_ME)
+    after = sessions.get_session(session_id)
+
+    assert still.playing.occurrence_id == rejected.occurrence_id
+    assert after.playing.occurrence_id == queue[1].occurrence_id
+    statuses = {occurrence.occurrence_id: occurrence.status for occurrence in sessions.history(session_id).occurrences}
+    assert statuses[rejected.occurrence_id] is OccurrenceStatus.PLAYED
 
 
 def test_a_turn_about_a_recommendation_needs_one_from_this_session(sessions, listener, tracks, unit_of_work):

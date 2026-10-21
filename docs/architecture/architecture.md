@@ -186,13 +186,28 @@ A track that nothing can score is never given one. It can only be a control's pi
 
 Feature comparison reuses `scoring.category_match()` and `scoring.closeness()`, extracted from `score_candidate()` without changing its output, so there is one copy of the scoring math.
 
+*(B6)* `policy.py` also holds Feedback Policy v1:
+- the weights and passive bands, as fields of the same `RecommendationPolicy`;
+- `passive_weight()` and `event_weight()`;
+- `interpret_feedback()`: everything about one track in a session. The evidence puts explicit actions over passive playback, and the latest explicit action decides it. The exclusion is separate: once refused with Not for me, the track stays out of automatic recommendations for the session (D18).
+
+`signals_from_session()` reads the raw feedback events with the turns. Evidence is recomputed at every refresh and never stored. `domain/session.py` gained listener replays: `RecommendationOccurrence.replayed()`, labelled `listener-replay`.
+
+`src/intentune/domain/playlist.py` (B7) holds the listener's playlists:
+- `Playlist`: a name, unique per listener, 1–100 characters;
+- `PlaylistItem`;
+- `PlaylistContents`: the items in order, with pure add (at the end, one entry per track), remove (closing the gap), and reorder (an exact permutation), each touching the playlist;
+- `PlaylistSummary`.
+
+`FeedbackEventType` gained `PLAYLIST_ADD`, weighted +1.00 in Feedback Policy v1.
+
 `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
 - A listening-session domain: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (B4). The session owns current state; turns, occurrences, and feedback own history (D31). *(Current since B4; see above.)*
 - Recommendation Policy v1 (B5): eligibility, intent fit, session fit, long-term fit, combined rank, diversity/repetition re-rank, controlled exploration, and the rolling top three. Each stage is computed separately (D07, D08). All constants live in one versioned policy module. *(Current since B5; see above.)*
-- Feedback interpretation (B6) and conservative long-term adaptation (B10).
+- Feedback interpretation (B6) and conservative long-term adaptation (B10). *(Feedback interpretation is current since B6; see above.)*
 - Existing `score_candidate()`/`rank_candidates()` are preserved. New scoring extends or refactors shared primitives so the scoring math is never duplicated, and complete-input legacy outputs stay identical (D38).
 
 `Recommendation` (an algorithm result) stays distinct from `RecommendationOccurrence` (that result surfaced in a specific session at a specific moment).
@@ -226,11 +241,29 @@ Each command is one transaction and works only on an active session. It does not
 
 `src/intentune/application/recommendations.py` (B5) implements `RecommendationService`, through the `UnitOfWork` port only:
 - `refresh_queue(session_id)`: reads the session, its turns and occurrences, and the library in one transaction, asks Policy v1 for the next three tracks, and surfaces them with `SessionService.queue_recommendations()`, marking the exploration pick;
-- `decide(session_id)`: the same decision without writing.
+- `decide(session_id)`: a read-only preview of that decision. It writes nothing, uses up no control, and restores the generator's state, so it never changes the next refresh.
 
-The random generator and clock are injected, so tests are deterministic.
+The random generator and clock are injected, so tests are deterministic. *(B6: it also reads the session's feedback events.)*
 
-**Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP.
+`src/intentune/application/feedback.py` (B6) implements `FeedbackService`:
+- `react()`: Like, Save, Replay, or Not for me;
+- `report_playback()`: Skip or Complete, with the seconds played and the duration.
+
+Each call is two steps:
+1. `SessionService.record_feedback()` stores the raw event and applies its playback effect in one transaction. A skip, completion, or Not for me about the playing track moves on; Replay of a past track plays it again as a fresh occurrence.
+2. `RecommendationService.refresh_queue()` re-ranks at once.
+
+It returns the event, its weight, the track's interpretation, and the new state. See [System Workflow](system-workflow.md#feedback-and-immediate-adaptation-b6).
+
+`src/intentune/application/playlists.py` (B7) implements `PlaylistService`, through the `UnitOfWork` port only. It creates, renames, deletes, lists, and reads playlists, and adds, removes, and reorders their tracks. Each command is one transaction.
+
+An add of a recommendation from a session also goes through `FeedbackService.record_playlist_add()`, in two steps:
+1. The item is stored, after the session and occurrence are checked.
+2. A PLAYLIST_ADD event is recorded and the queue re-ranked.
+
+Nothing else writes playlist items. See [System Workflow](system-workflow.md#playlists-b7).
+
+**Planned (Prototype 1):** library use cases (register/list sources, scan, import, list/get tracks, mark unavailable), session use cases (start session, apply turn, record playback event or reaction, refill/re-rank the queue), and playlist use cases. Pure application tests come before HTTP. *(Library, session, and feedback use cases are current since B2, B4–B6; playlists are B7.)*
 
 **Dependency direction (Current):** the application layer may import the
 domain, and adapters may construct domain models. The domain does not import

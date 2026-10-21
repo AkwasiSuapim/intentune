@@ -413,7 +413,7 @@ They also forbid a second copy of the scoring math. Several things were left ope
    - it decides in memory;
    - it surfaces the result through `SessionService.queue_recommendations()`, which replaces the old queue.
 
-   `decide()` returns the same decision without writing. Callers refresh after every meaningful change (B6, B8).
+   `decide()` is a read-only preview of what `refresh_queue()` would choose now. It writes nothing and uses up no pending control. It leaves the random generator where it was: the decision runs on the service's generator, whose state is then restored. So a preview never changes what the next refresh chooses, and it shows exactly that choice. Only `refresh_queue()` draws, and only it sets `last_decision`. *(Made fully read-only at the B6 review; a regression test previews, then refreshes, against a seed whose first draw explores and second does not.)* Callers refresh after every meaningful change (B6, B8).
 10. **No new dependency, no new table.** Two columns were added (items 7 and 12).
 11. **Listener controls are one-refresh directives, part of current intent** (settled at the B5 review, then corrected before commit).
     - **One refresh:** Surprise me, Try something different, and More familiar each direct the next refresh only. A control is pending from its turn until a queue is surfaced after it, which acts on it. A refinement made before that refresh restates the whole intent and supersedes the control. So does a newer control. `decide()` without writing does not use it up. A refresh that surfaces nothing leaves it pending.
@@ -473,6 +473,153 @@ They also forbid a second copy of the scoring math. Several things were left ope
 - B11 evaluation tunes the constants (as a new version).
 - An analyzer estimates numeric features.
 - "Play something from recently liked music" (spec §20) is defined; it is not implemented.
+
+## TD-017: B6 Feedback and Playback Events
+
+**Status:** Accepted, awaiting B6 review
+
+**Date:** 2026-10-20
+
+**Context:** Execution guide §9 and spec §15, §17, and §22 fix several things:
+- the six events (LIKE, SAVE, REPLAY, SKIP, COMPLETE, NOT_FOR_ME);
+- the raw facts to store;
+- the Feedback Policy v1 weights, with the 8-second grace period;
+- explicit actions over passive playback;
+- the order: persist, then interpret, then evidence, then re-rank;
+- Not for me excluding a track for the session only.
+
+B4 had already created the `feedback_events` table. Left open:
+- how events combine when there are several;
+- whether evidence is stored;
+- what each event does to playback;
+- how the `NOT_FOR_ME` and `MORE_LIKE_THIS` turns relate to the events.
+
+The approved frontend settles two of the playback questions. Replay of a past song plays it again "as a fresh recommendation", and Not for me moves on to the next song.
+
+**Decision:**
+
+1. **Feedback Policy v1 lives in the one versioned policy object.** `RecommendationPolicy` gains the explicit weights (Like, Save, Replay 1.0; Not for me −1.0), `grace_seconds` (8), the passive bands, and `full_play_weight` (0.80), all validated.
+   - **Passive bands:** each applies below its upper bound: under 15% −0.50; 15–39% −0.20; 40–74% +0.10; 75–89% +0.50; 90% and up +0.80.
+   - **Grace period:** it includes its last second, so 8.0 s is no evidence. It is read from seconds played, and the bands from the fraction, capped at 1.
+   - **Version:** it stays `policy-v1`. B5 and B6 together implement the spec's Policy v1, and occurrences surfaced by B5's turns-only reading exist only in test databases, because no entry point runs the policy.
+2. **Interpretation is per track within the session** (`interpret_feedback()`).
+   - **Signals read:** every explicit signal about a track: the LIKE, SAVE, REPLAY, and NOT_FOR_ME events, and the `MORE_LIKE_THIS` (+1.0) and `NOT_FOR_ME` (−1.0) turns.
+   - **Precedence, for the evidence:** the track's effective evidence is decided by the latest explicit signal, so the evidence follows a listener who changes their mind. Without one, the latest playback event decides.
+   - **Why per track, not per occurrence:** each re-rank surfaces upcoming tracks as new occurrences. A Like on a queued card and the skip after the track plays are then about different occurrences of one listening. The B6 end-to-end run found this.
+   - **Exclusion, separate and sticky (D18):**
+     - Once a track has been refused with Not for me in the session, by turn or event, it stays excluded from automatic recommendations for the rest of the session.
+     - A later Like or Replay changes its evidence, so similar tracks may rise, but never makes it automatically eligible again.
+     - A Replay may still play it, as the listener's own choice.
+
+     *(Made precise at the B6 review; before, a later explicit action also lifted the exclusion.)*
+   - **Exploration outcome:** it follows the occurrence the deciding signal was about.
+   - **Raw events:** they stay stored per occurrence, never merged, for B10's long-term evidence and B11's evaluation. Only the reading is per track.
+3. **Evidence is never stored.** Policy v1 recomputes it from the raw facts at every refresh. Only the raw event is persisted (type, seconds, duration, capped fraction, occurrence, session, time), so different thresholds can read the same history differently, which a test demonstrates. No profile or other session is touched (D18; long-term adaptation is B10).
+4. **Effects on playback** (`SessionService.record_feedback()`, one transaction with the event):
+   - **SKIP, COMPLETE, or NOT_FOR_ME about the playing occurrence:** it is played, and the prepared next track starts (spec §22). A report about an occurrence that has already finished, such as a SKIP after a NEXT turn, moves nothing.
+   - **REPLAY of a track that already finished:** the playing occurrence, if any, is played, and a fresh occurrence of the replayed track starts now.
+     - It carries `algorithm = "listener-replay"`, rank 1, and no score: the listener chose it.
+     - It ignores the cooldown (spec §19).
+     - It is not a surfaced queue, so it does not use up a pending control.
+   - **REPLAY of the playing occurrence:** it changes nothing; the player restarts it.
+   - **SKIP, COMPLETE, and REPLAY** need an occurrence that has played. SKIP and COMPLETE also need played and total seconds.
+   - **The `NOT_FOR_ME` turn** about the playing occurrence now also moves on, so the turn and the event agree. B4 recorded it without moving playback.
+5. **The use case** (`FeedbackService`, `application/feedback.py`):
+   - **Calls:** `react()` takes LIKE, SAVE, REPLAY, or NOT_FOR_ME; `report_playback()` takes SKIP or COMPLETE, with the seconds played and the duration.
+   - **Steps:** each records the event, then refreshes the queue (re-rank and refill, D05, D16).
+   - **Result:** it returns the event, its own weight, the track's interpretation after precedence, and the session state.
+   - **No ticks:** only discrete events exist; there is no event type for progress.
+6. **No schema change, no new dependency.**
+
+**Alternatives Considered:**
+- Interpreting per occurrence (refresh churn breaks precedence and double-counts a track).
+- Interpreting per event, summing every event (a double Like would count twice, and precedence would mean nothing).
+- Storing interpreted weights (the spec forbids storing only the label, and stored weights would lock in today's thresholds).
+- Advancing playback on every reaction, or on none (Like and Save should not interrupt; a rejected track should not keep playing).
+- Re-ranking before the next track starts (the player has already started the prepared next track, spec §22).
+- Recording a feedback event for every `NOT_FOR_ME` turn as well (the turn is already the record; reading both is enough).
+
+**Consequences:**
+- The queue adapts immediately to every piece of feedback.
+- A track is judged once per session, however many occurrences it had.
+- Each refresh replaces the queue with new occurrences, so occurrence ids of upcoming tracks change after every event. The frontend must read the session state again (B9).
+- A Like on a queued card counts like a Like on the playing track.
+- Replay creates an occurrence no algorithm chose. History shows it by its label.
+
+**Revisit When:**
+- B7 adds PLAYLIST_ADD (+1.0 in Feedback Policy v1).
+- B8 maps routes to events: which events come as playback events and which as reactions, and how NEXT and SKIP are sent together.
+- B9 wires the frontend's playback position.
+- B10 reads feedback across sessions for long-term evidence.
+- B11 evaluation tunes the thresholds (as a new version).
+
+## TD-018: B7 Playlists
+
+**Status:** Accepted, awaiting B7 review
+
+**Date:** 2026-10-21
+
+**Context:** Spec §9 and execution guide §10 fix the B7 scope:
+- create, rename, delete, add, remove, and reorder;
+- a track at most once per playlist by default;
+- a playlist add is strong positive feedback (SAVE/PLAYLIST_ADD, +1.00), but recommendations are never auto-saved;
+- the `playlists` and `playlist_items` tables and a `PlaylistRepository` port.
+
+The approved frontend:
+- gives a playlist an id, a name, and an optional colour tone;
+- keeps names unique, numbering a new name when it is taken;
+- saves the current song to one or more playlists from a picker.
+
+**Decision:**
+
+1. **Model** (`domain/playlist.py`):
+   - **`Playlist`:** an id, the listener, a name (trimmed, 1–100 characters), and created and updated times.
+   - **`PlaylistItem`:** a track at a position.
+   - **`PlaylistContents`:** a playlist with its items in order, positions 0, 1, 2… with no gaps. Its pure operations return new contents with the playlist touched:
+     - add at the end (`TrackAlreadyInPlaylist` if present);
+     - remove, closing the gap (`TrackNotInPlaylist`);
+     - reorder (`InvalidPlaylistOrder` unless the new order lists exactly the playlist's tracks, each once).
+2. **Names are unique per listener** (exact match after trimming), as the frontend keeps them. `PlaylistNameTaken` on create or rename; keeping one's own name is fine. The database backs it with a unique (listener, name) constraint.
+3. **One entry per track per playlist.** The primary key of `playlist_items` is (playlist, track), with unique (playlist, position) and position ≥ 0.
+4. **Whole-list writes.** A change rewrites a playlist's items as a whole: delete, then insert in order, in one transaction. A swap never trips the unique positions, and the order cannot be left half-applied.
+5. **Any library track can be added,** even one whose managed copy is missing. Availability can change (B2 repairs copies), so it is shown when a playlist is read (B8), not used to refuse.
+6. **Not stored:** presentation, such as the frontend's colour tone or artwork (D32). Deleting a playlist removes its items, never the tracks or any feedback history.
+7. **A playlist add as feedback** (`PlaylistService.add_track(playlist, track, session_id, occurrence_id)`):
+   - **When:** the listener adds the track of a recommendation from a session.
+   - **Order of steps:**
+     1. The occurrence is checked: an active session, an occurrence of it, and the same track.
+     2. The item is stored.
+     3. FeedbackService records a PLAYLIST_ADD event (+1.00, a new `FeedbackEventType` and `RecommendationPolicy.playlist_add_weight`) and re-ranks the queue.
+   - **Refusals:** a refused add, for a duplicate or a bad occurrence, stores neither an item nor an event.
+   - **Several playlists:** saving one recommendation to several playlists records an event per playlist. That is still one piece of evidence: Feedback Policy v1 reads each track once.
+   - **Plain adds:** without a session, an add is not feedback.
+   - **Playback:** a playlist add does not touch playback.
+   - **Separate from SAVE:** PLAYLIST_ADD is not accepted as a plain reaction; it always stands for a stored item.
+8. **Never auto-saved.** No code path but `add_track()` writes a playlist item; a test runs likes, saves, completions, and refreshes and finds none.
+9. **Migration `ce0b59df2cd1`:**
+   - **Upgrade:** it creates both tables and rebuilds `feedback_events` (batch mode) so its type CHECK accepts PLAYLIST_ADD, keeping its rows, index, and composite foreign key.
+   - **Downgrade:** it deletes PLAYLIST_ADD events before restoring the earlier constraint, since their playlists are dropped too.
+10. **No new dependency.**
+
+**Alternatives Considered:**
+- Duplicate names (the frontend avoids them, and names are how the listener tells playlists apart).
+- Duplicate entries (not approved; spec default).
+- Position updates in place (a swap breaks unique positions mid-update).
+- Fractional positions (no gaps would be visible, but they drift).
+- Recording playlist adds as SAVE (two different raw facts with the same weight; keeping them apart keeps the history exact).
+- Storing the playlist on the feedback event (not needed by Feedback Policy v1; the playlist item records it).
+- Refusing unavailable tracks (would lose a listener's choice over a temporary state).
+
+**Consequences:**
+- Playlists persist across restarts with their exact order.
+- A playlist add from a recommendation adapts the session at once.
+- Playlist names are user text, kept as written (trimmed), up to 100 characters.
+
+**Revisit When:**
+- The product approves duplicate entries.
+- B8 maps the routes (`PATCH …/items/order` takes the full order).
+- B9 maps the frontend's Save to playlist adds.
+- Playlists need artwork or sharing (Future).
 
 ## New Decision Template
 

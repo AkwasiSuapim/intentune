@@ -41,6 +41,7 @@ from sqlalchemy.types import TypeDecorator
 
 from src.intentune.domain.analysis import AnalysisFailureReason, AnalysisJobKind, AnalysisJobStatus, FeatureName
 from src.intentune.domain.library import AudioFormat, FailureReason, LabelKind, SourceFileStatus, SourceStatus, TrackStatus
+from src.intentune.domain.playlist import MAX_PLAYLIST_NAME_LENGTH
 from src.intentune.domain.session import FeedbackEventType, OccurrenceStatus, SessionEndReason, SessionStatus, TurnKind
 
 NAMING_CONVENTION = {
@@ -403,3 +404,34 @@ class FeedbackEventRecord(Base):
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     played_fraction: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class PlaylistRecord(Base):
+    """A listener's playlist (B7). Names are unique per listener; presentation (colour, artwork) is not stored."""
+
+    __tablename__ = "playlists"
+    __table_args__ = (
+        UniqueConstraint("listener_profile_id", "name", name="uq_playlists_listener_name"),
+        CheckConstraint(f"length(name) BETWEEN 1 AND {MAX_PLAYLIST_NAME_LENGTH}", name="name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    listener_profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("listener_profiles.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(MAX_PLAYLIST_NAME_LENGTH), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class PlaylistItemRecord(Base):
+    """One track at one position in a playlist (B7). The primary key keeps a track to one entry per playlist."""
+
+    __tablename__ = "playlist_items"
+    __table_args__ = (
+        UniqueConstraint("playlist_id", "position", name="uq_playlist_items_playlist_position"),
+        CheckConstraint("position >= 0", name="position"),
+    )
+
+    playlist_id: Mapped[str] = mapped_column(String(36), ForeignKey("playlists.id"), primary_key=True)
+    track_id: Mapped[str] = mapped_column(String(36), ForeignKey("tracks.id"), primary_key=True, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)

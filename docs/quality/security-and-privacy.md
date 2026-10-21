@@ -2,7 +2,7 @@
 
 ## Status
 
-**Draft, with Prototype 1 requirements Planned.** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Draft, with Prototype 1 requirements Planned.** Reconciled with Prototype 1 in Phase B0 (2026-10-18); the feedback section was updated in B6 (2026-10-20) and B7 (2026-10-21).
 
 ## Prototype 1 Requirements
 
@@ -97,6 +97,16 @@ The first version should process prompts without automatically retaining them pe
 Anonymous feedback should use random session identifiers. Avoid collecting names or email addresses unless accounts become necessary. In Prototype 1, feedback belongs to one generated local listener profile (D01), and sessions use UUIDs.
 
 **Current (B1, 2026-10-19):** the local listener profile stores only a random UUID4, a default flag, and a UTC creation time. It holds no name, email, device identifier, or other personal data.
+
+**Current (B6, 2026-10-20):** a feedback event stores only:
+- an event type from a fixed set of six;
+- the seconds played and the track's duration (a capped fraction is derived from them);
+- the occurrence and session UUIDs;
+- a time.
+
+It has no text field, and no progress ticks are collected, only how a track ended.
+
+**Current (B7, 2026-10-21):** a playlist stores a name the listener chose, trimmed and limited to 100 characters (in the domain and by a CHECK), plus its tracks' ids, positions, and when each was added. Presentation such as the frontend's colour tone is not stored (D32). Playlists stay in the local database, like the rest of the listener's data. Feedback is validated before storage: a known event type, non-negative seconds, a positive duration, and an occurrence of the same session. Feedback changes only the current session's ranking, and a Not for me is not carried into later sessions (D18).
 
 ## External Providers
 

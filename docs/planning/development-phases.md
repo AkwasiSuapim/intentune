@@ -19,9 +19,9 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B2** Local library + managed media | Sources, safe copy, SHA-256 dedupe, tags, progressive status, scanning | **Complete and committed** (2026-10-19, `079c6f4`). 404 backend tests pass and 1 is skipped (405 collected; B2 adds 177). |
 | **B3** Background analysis | Persisted jobs, in-process worker, audio analysis, recovery, provenance/versioning | **Complete and committed** (2026-10-20, `e2991cb`). 518 backend tests pass and 1 is skipped (519 collected; B3 adds 114). |
 | **B4** Session domain | `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent`, repositories | **Complete and committed** (2026-10-20, `d4060af`). 618 backend tests pass and 1 is skipped (619 collected; B4 adds 100). |
-| **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | **Complete, awaiting review** (2026-10-20), including the review decisions and the final policy corrections. 752 backend tests pass and 1 is skipped (753 collected; B5 adds 134). |
-| **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | Not started |
-| **B7** Playlists | CRUD, add/remove/reorder, persistence | Not started |
+| **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | **Complete and committed** (2026-10-20, `8a1be05`), including the review decisions and the final policy corrections. 752 backend tests pass and 1 is skipped (753 collected; B5 adds 134). |
+| **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | **Complete, awaiting commit** (2026-10-20; review fixes 2026-10-21). 830 backend tests pass and 1 is skipped (831 collected; B6 adds 78). |
+| **B7** Playlists | CRUD, add/remove/reorder, persistence | **Complete, awaiting review** (2026-10-21), on top of the uncommitted B6. 905 backend tests pass and 1 is skipped (906 collected; B7 adds 75). |
 | **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | Not started |
 | **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | Not started. Corresponds to frontend phase F9. |
 | **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | Not started |
@@ -211,6 +211,75 @@ Not done in B5, by scope:
 - No caller refreshes the queue automatically; B6 and B8 call `refresh_queue()` after meaningful changes.
 - "Play something from recently liked music" (spec §20) is not implemented.
 - No routes (B8).
+
+*(B6 since added feedback events as evidence and the refresh after each one.)*
+
+### B6 record (2026-10-20)
+
+On branch `prototype-1`, on top of `8a1be05`. The use cases are `FeedbackService.react()` and `report_playback()` (`application/feedback.py`) over `SessionService.record_feedback()`. The interpretation is Feedback Policy v1 in `domain/policy.py`. The guide's B6 rules (execution guide §9), each tested:
+
+- **Meaningful events only:** LIKE, SAVE, REPLAY, SKIP, COMPLETE, and NOT_FOR_ME, each one discrete event; there is no progress tick.
+- **Raw facts persisted:** type, played seconds, duration, and fraction where relevant (SKIP and COMPLETE require them), with occurrence, session, and time. No interpreted weight is stored.
+- **Feedback Policy v1:**
+  - first 8 seconds: 0;
+  - then by the fraction played: under 15% −0.50, 15–39% −0.20, 40–74% +0.10, 75–89% +0.50, 90% and up +0.80;
+  - Like, Save, and Replay +1.00, Not for me −1.00.
+  - The boundary tests cover 8.0 s against 8.01 s, each band edge and just below it, a capped fraction, and short tracks.
+- **Explicit actions take precedence over passive duration,** per track in the session, with the latest explicit action deciding the track's evidence. The raw events stay stored per occurrence for B10 and B11.
+- **Persist, then interpret, then update evidence, then re-rank:** every event is recorded, then the queue is refreshed at once.
+- **Not for me** excludes the exact track for the session. A new session plays it again; nothing long-term changes.
+
+Playback effects, from the approved frontend:
+- a skip, completion, or Not for me about the playing track moves on to the prepared next track;
+- Replay of a past track plays it again now as a fresh, listener-chosen occurrence.
+
+The `NOT_FOR_ME` turn moves on too. No schema change was needed. Decisions: [TD-017](../decisions/technical-decisions.md#td-017-b6-feedback-and-playback-events). Workflow: [System Workflow](../architecture/system-workflow.md#feedback-and-immediate-adaptation-b6).
+
+Also verified:
+- an end-to-end run over real tagged FLAC files imported through the library;
+- 32 single-rule mutations, each of which makes tests fail.
+
+Details: [current system audit](../architecture/current-system-audit.md#b6-update-2026-10-20).
+
+Found and fixed while B6 was being built: evidence was first combined per occurrence. Each re-rank surfaces upcoming tracks as new occurrences, so a Like on a queued card did not take precedence over the skip when that track later played, and one track could count twice. Evidence is now combined per track within the session.
+
+Fixed at the B6 review, before commit:
+- **`decide()` is a read-only preview.** It restores the random generator's state, so a preview never changes the next refresh (a carried-over B5 fix).
+- **Not for me keeps the exact track out of automatic recommendations for the rest of the session (D18).** A later Like or Replay changes its evidence, never its exclusion. A Replay may still play it manually.
+
+Not done in B6, by scope:
+- PLAYLIST_ADD (B7).
+- No routes (B8). Which events travel as playback events or reactions, and how a NEXT turn and a SKIP report combine, are B8's to decide.
+- No playback position from the frontend yet (B9).
+- No long-term use of feedback (B10).
+
+### B7 record (2026-10-21)
+
+On branch `prototype-1`, in the same working tree as the uncommitted B6. The use cases are `PlaylistService` (`application/playlists.py`) over a `PlaylistRepository` port, with the model in `domain/playlist.py`. The guide's B7 rules (execution guide §10), each tested:
+
+- **Playlist CRUD** (create, rename, delete, list with track counts, read in order) **plus add, remove, and reorder.**
+- **One entry per track per playlist,** in the domain and as the primary key of `playlist_items`. Positions run 0, 1, 2… without gaps.
+- **A playlist add is strong positive feedback:** adding a recommendation from a session records PLAYLIST_ADD (+1.00) and re-ranks the queue.
+- **Never auto-save:** only an explicit add puts a track in a playlist; likes, saves, completions, and refreshes never do.
+
+Also:
+- names are unique per listener, as the frontend keeps them;
+- a refused add stores neither an item nor an event;
+- playlists survive a restart;
+- presentation (the frontend's colour tone) is not stored.
+
+Schema: migration `ce0b59df2cd1` creates `playlists` and `playlist_items` and lets `feedback_events` accept PLAYLIST_ADD. Decisions: [TD-018](../decisions/technical-decisions.md#td-018-b7-playlists). Schema: [Database Design](../design/database-design.md#current-schema-b7). Workflow: [System Workflow](../architecture/system-workflow.md#playlists-b7).
+
+Also verified:
+- an end-to-end run over real tagged FLAC files, with a restart in a new process;
+- 24 single-rule mutations, each of which makes tests fail.
+
+Details: [current system audit](../architecture/current-system-audit.md#b7-update-2026-10-21).
+
+Not done in B7, by scope:
+- No routes (B8).
+- The frontend's Save is not mapped to playlist adds yet (B9).
+- No artwork, sharing, or duplicate entries.
 
 ## Frontend Phases
 

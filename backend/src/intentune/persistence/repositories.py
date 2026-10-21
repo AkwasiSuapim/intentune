@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from src.intentune.domain.analysis import AnalysisJob, AnalysisJobKind, AnalysisJobStatus, TrackFeature
@@ -33,6 +33,7 @@ from src.intentune.domain.library import (
     TrackStatus,
 )
 from src.intentune.domain.listener import ListenerProfile
+from src.intentune.domain.playlist import Playlist, PlaylistItem
 from src.intentune.domain.validation import new_uuid
 from src.intentune.persistence.models import (
     AnalysisJobRecord,
@@ -40,6 +41,8 @@ from src.intentune.persistence.models import (
     LibrarySourceRecord,
     ListenerProfileRecord,
     ListeningSessionRecord,
+    PlaylistItemRecord,
+    PlaylistRecord,
     RecommendationOccurrenceRecord,
     SessionTurnRecord,
     SourceFileRecord,
@@ -705,4 +708,96 @@ class SqlAlchemyFeedbackEventRepository:
                 occurred_at=event.occurred_at,
             )
         )
+        self._session.flush()
+
+
+def _playlist_from_record(record: PlaylistRecord) -> Playlist:
+    return Playlist(
+        playlist_id=record.id,
+        listener_profile_id=record.listener_profile_id,
+        name=record.name,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+class SqlAlchemyPlaylistRepository:
+    """PlaylistRepository port implementation (see ports/playlists.py), over playlists and playlist_items (B7).
+
+    The items of a playlist are replaced as a whole: the old rows are deleted
+    first, so the unique positions hold after every statement, even when two
+    tracks swap places.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, playlist_id: str) -> Optional[Playlist]:
+        record = self._session.get(PlaylistRecord, playlist_id)
+        return _playlist_from_record(record) if record is not None else None
+
+    def get_by_name(self, listener_profile_id: str, name: str) -> Optional[Playlist]:
+        record = self._session.scalars(
+            select(PlaylistRecord).where(PlaylistRecord.listener_profile_id == listener_profile_id, PlaylistRecord.name == name)
+        ).first()
+        return _playlist_from_record(record) if record is not None else None
+
+    def list_for_listener(self, listener_profile_id: str) -> List[Playlist]:
+        statement = (
+            select(PlaylistRecord)
+            .where(PlaylistRecord.listener_profile_id == listener_profile_id)
+            .order_by(PlaylistRecord.created_at, PlaylistRecord.id)
+        )
+        return [_playlist_from_record(record) for record in self._session.scalars(statement)]
+
+    def track_counts(self, playlist_ids: Iterable[str]) -> Dict[str, int]:
+        playlist_ids = list(playlist_ids)
+        counts = {playlist_id: 0 for playlist_id in playlist_ids}
+        statement = (
+            select(PlaylistItemRecord.playlist_id, func.count())
+            .where(PlaylistItemRecord.playlist_id.in_(playlist_ids))
+            .group_by(PlaylistItemRecord.playlist_id)
+        )
+        counts.update({playlist_id: count for playlist_id, count in self._session.execute(statement)})
+        return counts
+
+    def add(self, playlist: Playlist) -> None:
+        self._session.add(
+            PlaylistRecord(
+                id=playlist.playlist_id,
+                listener_profile_id=playlist.listener_profile_id,
+                name=playlist.name,
+                created_at=playlist.created_at,
+                updated_at=playlist.updated_at,
+            )
+        )
+        self._session.flush()
+
+    def save(self, playlist: Playlist) -> None:
+        record = _require_record(self._session.get(PlaylistRecord, playlist.playlist_id), "playlist", playlist.playlist_id)
+        record.name = playlist.name
+        record.updated_at = playlist.updated_at
+        self._session.flush()
+
+    def delete(self, playlist_id: str) -> None:
+        self._session.execute(delete(PlaylistItemRecord).where(PlaylistItemRecord.playlist_id == playlist_id))
+        self._session.execute(delete(PlaylistRecord).where(PlaylistRecord.id == playlist_id))
+        self._session.flush()
+
+    def items(self, playlist_id: str) -> List[PlaylistItem]:
+        statement = select(PlaylistItemRecord).where(PlaylistItemRecord.playlist_id == playlist_id).order_by(PlaylistItemRecord.position)
+        return [
+            PlaylistItem(playlist_id=record.playlist_id, track_id=record.track_id, position=record.position, added_at=record.added_at)
+            for record in self._session.scalars(statement)
+        ]
+
+    def replace_items(self, playlist_id: str, items: Sequence[PlaylistItem]) -> None:
+        if any(item.playlist_id != playlist_id for item in items):
+            raise ValueError("every item must belong to the playlist")
+        self._session.execute(delete(PlaylistItemRecord).where(PlaylistItemRecord.playlist_id == playlist_id))
+        self._session.flush()
+        for item in items:
+            self._session.add(
+                PlaylistItemRecord(playlist_id=item.playlist_id, track_id=item.track_id, position=item.position, added_at=item.added_at)
+            )
         self._session.flush()

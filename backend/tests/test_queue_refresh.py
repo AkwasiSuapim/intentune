@@ -305,6 +305,29 @@ def test_an_exploration_pick_is_marked_on_its_occurrence(unit_of_work, sessions,
     assert stored[ids["a4"]] is True
 
 
+def test_a_preview_does_not_change_what_the_refresh_chooses(unit_of_work, sessions, listener, clock):
+    """Seed 31's first draw (0.012) explores and its second (0.112) does not, so a preview that consumed a draw
+    would turn the refresh's exploration off. Two fresh sessions over the same library, one previewed first."""
+    ids = _exploration_library(unit_of_work)
+    direct = RecommendationService(unit_of_work, rng=random.Random(31), clock=clock)
+    previewed = RecommendationService(unit_of_work, rng=random.Random(31), clock=clock)
+    first = _start(sessions, listener)
+    refreshed_directly = direct.refresh_queue(first)
+    second = _start(sessions, listener)
+
+    before = previewed._rng.getstate()
+    preview = previewed.decide(second)
+    assert previewed._rng.getstate() == before
+    assert previewed.decide(second) == preview  # previews repeat, because nothing moved
+    refreshed_after_preview = previewed.refresh_queue(second)
+
+    surfaced = lambda state: [(occurrence.track_id, occurrence.is_exploration) for occurrence in state.queue]  # noqa: E731
+    assert surfaced(refreshed_after_preview) == surfaced(refreshed_directly)
+    assert _titles(refreshed_after_preview.queue, ids) == ["a1", "a2", "a4"] and refreshed_after_preview.queue[-1].is_exploration
+    assert [(pick.candidate.track_id, pick.is_exploration) for pick in preview.picks] == surfaced(refreshed_after_preview)
+    assert previewed._rng.getstate() != before  # the refresh drew
+
+
 @pytest.mark.parametrize("kind, rate", [(TurnKind.NOT_FOR_ME, 0.05), (TurnKind.MORE_LIKE_THIS, 0.125)])
 def test_the_outcome_of_an_exploration_pick_moves_the_rate(unit_of_work, sessions, explorer, listener, kind, rate):
     _exploration_library(unit_of_work)
@@ -455,6 +478,7 @@ def test_session_signals_read_turns_and_plays_newest_first(unit_of_work, session
     sessions.apply_turn(session_id, TurnKind.MORE_LIKE_THIS)
     second = sessions.advance(session_id).playing
     sessions.apply_turn(session_id, TurnKind.NOT_FOR_ME)
+    third = sessions.get_session(session_id).playing  # Not for me about the playing track moved on (B6)
     sessions.apply_turn(session_id, TurnKind.SURPRISE_ME)
 
     history = sessions.history(session_id)
@@ -464,8 +488,8 @@ def test_session_signals_read_turns_and_plays_newest_first(unit_of_work, session
 
     assert [(item.track.candidate_id, item.weight) for item in signals.evidence] == [(second.track_id, -1.0), (first.track_id, 1.0)]
     assert signals.excluded_track_ids == {second.track_id}
-    assert signals.recent_track_ids == (second.track_id, first.track_id)
-    assert signals.last_played.track_id == second.track_id
+    assert signals.recent_track_ids == (third.track_id, second.track_id, first.track_id)
+    assert signals.last_played.track_id == third.track_id
     assert signals.pending_control is TurnKind.SURPRISE_ME  # no queue surfaced since
     assert signals.context == _AMBIENT
     assert signals.long_term is None

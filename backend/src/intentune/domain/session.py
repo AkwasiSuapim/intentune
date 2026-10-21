@@ -89,7 +89,7 @@ class OccurrenceStatus(str, Enum):
 
 
 class FeedbackEventType(str, Enum):
-    """The raw listening facts of execution guide §9. PLAYLIST_ADD arrives with playlists (B7)."""
+    """The raw listening facts of execution guide §9, and PLAYLIST_ADD (B7): a recommendation added to a playlist."""
 
     LIKE = "LIKE"
     SAVE = "SAVE"
@@ -97,9 +97,13 @@ class FeedbackEventType(str, Enum):
     SKIP = "SKIP"
     COMPLETE = "COMPLETE"
     NOT_FOR_ME = "NOT_FOR_ME"
+    PLAYLIST_ADD = "PLAYLIST_ADD"
 
 
 _EVENTS_WITH_PLAYBACK_FACTS = frozenset({FeedbackEventType.SKIP, FeedbackEventType.COMPLETE})
+
+# The algorithm label of an occurrence the listener chose to hear again (B6): no algorithm surfaced it.
+LISTENER_REPLAY_ALGORITHM = "listener-replay"
 
 
 # --- Errors ----------------------------------------------------------------------
@@ -309,6 +313,31 @@ class RecommendationOccurrence:
     @property
     def has_started(self) -> bool:
         return self.started_at is not None
+
+    @property
+    def is_listener_replay(self) -> bool:
+        return self.algorithm == LISTENER_REPLAY_ALGORITHM
+
+    def replayed(self, occurrence_id: str, now: datetime) -> "RecommendationOccurrence":
+        """A fresh occurrence of this track, playing from now, because the listener asked to hear it again (B6).
+
+        The listener chose it, not an algorithm: it carries the listener-replay label,
+        rank 1, and no score. This occurrence keeps its own history.
+        """
+        if not self.has_started:
+            raise InvalidSessionTransition("Only a recommendation that has played can be replayed.")
+        return RecommendationOccurrence(
+            occurrence_id=occurrence_id,
+            session_id=self.session_id,
+            track_id=self.track_id,
+            rank=1,
+            algorithm=LISTENER_REPLAY_ALGORITHM,
+            status=OccurrenceStatus.PLAYING,
+            surfaced_at=now,
+            updated_at=now,
+            surfaced_position=0,
+            started_at=now,
+        )
 
     def started_playing(self, now: datetime) -> "RecommendationOccurrence":
         self._require(OccurrenceStatus.QUEUED, "Only a queued recommendation can start playing.")

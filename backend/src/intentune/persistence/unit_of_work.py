@@ -20,6 +20,7 @@ from src.intentune.persistence.repositories import (
     SqlAlchemySourceFileRepository,
     SqlAlchemyFeedbackEventRepository,
     SqlAlchemyListeningSessionRepository,
+    SqlAlchemyPlaylistRepository,
     SqlAlchemyRecommendationOccurrenceRepository,
     SqlAlchemySessionTurnRepository,
     SqlAlchemyTrackFeatureRepository,
@@ -41,6 +42,7 @@ class SqlAlchemyUnitOfWork:
         self._session_turns: Optional[SqlAlchemySessionTurnRepository] = None
         self._recommendation_occurrences: Optional[SqlAlchemyRecommendationOccurrenceRepository] = None
         self._feedback_events: Optional[SqlAlchemyFeedbackEventRepository] = None
+        self._playlists: Optional[SqlAlchemyPlaylistRepository] = None
 
     @property
     def listener_profiles(self) -> SqlAlchemyListenerProfileRepository:
@@ -82,6 +84,10 @@ class SqlAlchemyUnitOfWork:
     def feedback_events(self) -> SqlAlchemyFeedbackEventRepository:
         return self._active(self._feedback_events)
 
+    @property
+    def playlists(self) -> SqlAlchemyPlaylistRepository:
+        return self._active(self._playlists)
+
     def __enter__(self) -> "SqlAlchemyUnitOfWork":
         if self._session is not None:
             raise RuntimeError("The unit of work is already active; it is not re-entrant")
@@ -96,6 +102,7 @@ class SqlAlchemyUnitOfWork:
         self._session_turns = SqlAlchemySessionTurnRepository(self._session)
         self._recommendation_occurrences = SqlAlchemyRecommendationOccurrenceRepository(self._session)
         self._feedback_events = SqlAlchemyFeedbackEventRepository(self._session)
+        self._playlists = SqlAlchemyPlaylistRepository(self._session)
         return self
 
     def __exit__(
@@ -116,6 +123,7 @@ class SqlAlchemyUnitOfWork:
         self._session_turns = None
         self._recommendation_occurrences = None
         self._feedback_events = None
+        self._playlists = None
         if session is None:
             return
         try:

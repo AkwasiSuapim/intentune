@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af`. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), and [B5](#b5-update-2026-10-20) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all five.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree; B6 and B7 are both uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), and [B7](#b7-update-2026-10-21) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all seven.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -120,6 +120,70 @@ Found and fixed during B5:
 - **An unscored #2 could have played ahead of a scored #1.** That could happen when #1 was by the artist that just played. Found while reviewing the #2 gate; it is now refused, with a test.
 - **Rejected tracks used up the cooldown.** Plays of tracks no longer eligible (rejected, unavailable) counted toward the cooldown window, so a just-played track could come straight back. Only plays of eligible tracks count now. Found while reviewing the code for the mutation checks; a test was added.
 
+## B6 Update (2026-10-20)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **830 passed, 1 skipped** (831 collected): 753 from B0–B5, plus 78 from B6, including the two review fixes. The skip is the same symbolic-link test as before. |
+| Legacy behavior | `python -m src.main` | Unchanged top five (Sunrise City 9.94, ...) |
+| Schema | `alembic upgrade head`, then `alembic check` | No migration in B6; the B4 `feedback_events` table already holds every raw fact. No drift. |
+| End to end | A scratch script with a scratch database: 8 real FLAC tones tagged with title, artist, and genre (ambient, rock, jazz), imported through `LibraryService`; one session listened through with `FeedbackService`; a draw that never explores automatically | See the steps below. |
+| Mutation checks | 32 single-rule mutations of Feedback Policy v1, precedence, evidence from history, the D18 exclusion, playback effects, the use case, and the read-only preview | All 32 make tests fail |
+
+End-to-end steps, in order:
+1. A skip at 4 s of 210 was within the grace period: the next track played and nothing was counted.
+2. A skip at 20 s of 200 (10%) counted −0.50, and rock tracks fell (combined 0.647).
+3. A Like on a queued ambient track counted +1.00, and the queue re-ranked at once.
+4. A completed track counted +0.80.
+5. A Like, then a skip at 7.5% of the same track: the Like decided (+1.00).
+6. Not for me on the playing track moved on to the prepared next track. The track never returned in six further plays, and a new session had no exclusions and no evidence.
+7. Replay of an earlier track started it again as a `listener-replay` occurrence with rank 1 and no score.
+8. The raw rows hold only event type, seconds, duration, and capped fraction. Read again with a 25-second grace period, the same history dropped the 20-second skip from the evidence.
+
+B6 tests per file:
+- `test_feedback_policy.py` 51;
+- `test_feedback_service.py` 24;
+- `test_session_service.py` gained 2;
+- `test_queue_refresh.py` gained 1 (the read-only preview).
+
+Three existing tests changed, because Not for me about the playing track now moves on: one turn test in `test_session_service.py`, the B5 migration data test, and the signals test in `test_queue_refresh.py`. No dependency was added.
+
+Fixed at the B6 review, before commit:
+- **`decide()` advanced the random generator.** The preview drew from the service's generator, so a preview before a refresh could change what the refresh chose. It now restores the generator's state and no longer sets `last_decision`. A regression test previews and then refreshes with a seed whose first draw explores and second does not.
+- **A later Like or Replay lifted the Not for me exclusion.** Evidence still follows the latest explicit action. Exclusion is now separate and sticky: once refused, a track stays out of automatic recommendations for the session (D18). A Replay may still play it manually; tests check it never comes back automatically.
+
+Found and fixed during B6:
+- **Evidence per occurrence missed precedence across a refresh.** Each re-rank surfaces upcoming tracks as new occurrences. A Like on a queued card and the skip after the track played were therefore about different occurrences: the Like did not take precedence, and the track counted twice. Found in the end-to-end run. Evidence is now combined per track within the session, with tests for both cases.
+
+## B7 Update (2026-10-21)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **905 passed, 1 skipped** (906 collected): 831 from B0–B6, plus 75 from B7. The skip is the same symbolic-link test as before. |
+| Legacy behavior | `python -m src.main` | Unchanged top five (Sunrise City 9.94, ...) |
+| Migration | `alembic upgrade head`, then `alembic check`; downgrade to `de244c476f3a` and back, with data | Both tables created with their keys, uniques, CHECKs, and foreign keys. The rebuilt `feedback_events` keeps all seven CHECKs, both foreign keys, and its index. No drift. The downgrade drops the playlist tables and only PLAYLIST_ADD events, keeping every other event exactly; the upgrade accepts PLAYLIST_ADD again. |
+| End to end, across a restart | A scratch script in two processes, with a scratch database: 6 real FLAC tones tagged with title, artist, and genre, imported through `LibraryService` | See the steps below. |
+| Mutation checks | 24 single-rule mutations of the playlist domain, service, repository, feedback weight, and migration | All 24 make tests fail |
+
+End-to-end steps, in order:
+1. Two playlists were created, with the name trimmed; a second "Evening" was refused.
+2. Adding an upcoming rock recommendation from the session recorded PLAYLIST_ADD (+1.00), and the queue re-ranked toward rock at once.
+3. Adding the playing track to the other playlist left playback alone.
+4. A duplicate add was refused with no event.
+5. Three plain adds were not feedback.
+6. Reorder worked, an order missing tracks was refused, remove closed the gap, and rename worked.
+7. A second process listed both playlists with their exact order.
+8. The tables hold only the identifying columns, positions, and times, and exactly the two PLAYLIST_ADD events were stored.
+
+B7 tests per file:
+- `test_playlist_domain.py` 27;
+- `test_playlist_repositories.py` 18;
+- `test_playlist_service.py` 28;
+- `test_migrations.py` gained 1;
+- `test_feedback_policy.py` gained 1 (the PLAYLIST_ADD weight).
+
+No existing test changed, and no dependency was added.
+
 ## Current Files
 
 ### Backend
@@ -181,6 +245,33 @@ Changed in B5:
 - `application/sessions.py`: strictly increasing times for every change within a session.
 - `tests/test_migrations.py`: data tests for the B5 rebuild and the surfaced-position backfill.
 - `tests/test_session_domain.py`, `tests/test_session_repositories.py`, `tests/test_session_service.py`: the surfaced position (helpers, invariants, storage, order, immutability), the pinned occurrence columns, and strictly ordered times.
+
+Added in B7 (2026-10-21):
+
+- `backend/alembic/versions/20261021_ce0b59df2cd1_create_playlists.py`
+- `backend/src/intentune/domain/playlist.py`
+- `backend/src/intentune/ports/playlists.py`
+- `backend/src/intentune/application/playlists.py` (`PlaylistService`)
+- `backend/tests/test_playlist_domain.py`, `backend/tests/test_playlist_repositories.py`, `backend/tests/test_playlist_service.py`
+
+Changed in B7:
+- `domain/session.py`: `FeedbackEventType.PLAYLIST_ADD`.
+- `domain/policy.py`: `playlist_add_weight` (+1.00).
+- `application/feedback.py`: `record_playlist_add()`; `react()` refuses PLAYLIST_ADD.
+- `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: playlist records and repository.
+- `tests/test_migrations.py`, `tests/test_feedback_policy.py`.
+
+Added in B6 (2026-10-20):
+
+- `backend/src/intentune/application/feedback.py` (`FeedbackService`)
+- `backend/tests/test_feedback_policy.py`, `backend/tests/test_feedback_service.py`
+
+Changed in B6:
+- `domain/policy.py`: the Feedback Policy v1 constants and `passive_weight()`, `event_weight()`, `interpret_feedback()`; `signals_from_session()` reads feedback events, per track.
+- `domain/session.py`: listener replays (`LISTENER_REPLAY_ALGORITHM`, `RecommendationOccurrence.replayed()`).
+- `application/sessions.py`: `record_feedback()`; a `NOT_FOR_ME` turn about the playing track moves on.
+- `application/recommendations.py`: reads feedback events; exposes its policy.
+- `tests/test_session_service.py`, `tests/test_migrations.py`, `tests/test_queue_refresh.py`: Not for me moving on.
 
 Added in B3 (2026-10-20):
 
@@ -368,8 +459,8 @@ There is currently no:
 - Running background analysis. The worker and analyzer exist and are tested, but nothing starts the worker until B8.
 - Estimated or semantic audio features (tempo, key, loudness in LUFS, energy, mood, and so on), background scanning, or artwork
 - Running listening sessions. Since B4, the session state machine and its history exist as a tested service, and since B5 Recommendation Policy v1 fills its queue (`RecommendationService`), but nothing calls either until B8.
-- Recording or interpreting feedback. Since B4 there is a table for raw feedback events; recording and interpretation are B6.
-- Playlists in the backend
+- Running feedback. Since B6, recording and interpreting feedback exist as tested use cases (`FeedbackService`), but nothing a listener runs calls them until B8.
+- Running playlists. Since B7, playlists exist as tested use cases (`PlaylistService`), but nothing a listener runs calls them until B8, and the frontend's playlists are still local.
 - Audio playback
 - Authentication (none is planned for Prototype 1, D01)
 - AI intent parser (deferred, D39)
@@ -392,9 +483,9 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | Local listener identity (D01) | **Yes (B1, 2026-10-19):** generated by `ensure_default_listener()`, stored in `listener_profiles` | Called at API startup from B8 |
 | Managed media library, SHA-256 dedupe, scanning (D02, D03, D24, D25) | **Yes (B2, 2026-10-19):** `LibraryService`, file adapters, library tables | Startup scan and API routes in B8; background *scanning* (D26) is not assigned to a phase (B3 covered analysis only) |
 | Background analysis jobs (D26, D28) | **Yes (B3, 2026-10-20):** persisted jobs, one worker thread, recovery, provenance-tagged signal measurements | Worker started at app startup in B8; estimated features need an evaluation set first |
-| Sessions, turns, recommendation occurrences, feedback events (D31) | **Yes (B4, 2026-10-20):** session state machine, turns, occurrences, restart rule (D35), and the raw-feedback table | Feedback recording and interpretation in B6; routes in B8 |
+| Sessions, turns, recommendation occurrences, feedback events (D31) | **Yes (B4, B6, 2026-10-20):** session state machine, turns, occurrences, restart rule (D35); raw feedback recorded and read through Feedback Policy v1, with immediate re-ranking | Routes in B8; PLAYLIST_ADD in B7 |
 | Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | **Yes (B5, 2026-10-20):** `domain/policy.py` and `RecommendationService.refresh_queue()` | Feedback events as evidence in B6; long-term profile in B10; constants tuned in B11 |
-| Playlists (D34) | No (frontend-local only) | B7 |
+| Playlists (D34) | **Yes (B7, 2026-10-21):** CRUD, add, remove, reorder; one entry per track; a playlist add from a recommendation is PLAYLIST_ADD feedback | Routes in B8; frontend in B9 |
 | FastAPI routes, error envelope, audio serving | No (FastAPI listed but unused) | B8 |
 | Frontend HTTP adapter | Service boundary only | B9 (frontend phase F9) |
 | Conservative long-term adaptation (D06) | No | B10 |

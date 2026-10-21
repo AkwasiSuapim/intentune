@@ -1,17 +1,23 @@
-"""Application use cases for listening sessions (Prototype 1, phase B4).
+"""Application use cases for listening sessions (Prototype 1, phases B4 and B6).
 
 SessionService keeps where a session is now (status, context, what is
-playing, what is queued) and records how it got there (turns and
-recommendation occurrences). Every command runs in one transaction and works
-only on an ACTIVE session.
+playing, what is queued) and records how it got there (turns, recommendation
+occurrences, and feedback events). Every command runs in one transaction and
+works only on an ACTIVE session.
 
 - start_session(): a fresh ACTIVE session with its INITIAL_INTENT turn. Any
   session the listener still had ACTIVE ends first, so there is at most one.
 - apply_turn(): record a steering action. REFINE replaces the context. NEXT
   finishes the current track and starts the next queued one. NOT_FOR_ME and
   MORE_LIKE_THIS name the occurrence they are about (the playing one by
-  default). What turns mean for ranking (exclusion, affinity, exploration) is
-  Recommendation Policy v1 (B5) and feedback handling (B6). B4 only records them.
+  default); NOT_FOR_ME about the playing one also moves on (B6), since a
+  rejected track does not keep playing. What turns mean for ranking is
+  Recommendation Policy v1 (B5).
+- record_feedback() (B6): persist one raw feedback event and apply its effect
+  on playback. SKIP, COMPLETE, and NOT_FOR_ME about the playing occurrence
+  finish it and start the next queued one. REPLAY of a track that already
+  played starts it again now, as a fresh occurrence. Interpreting the event and
+  re-ranking are FeedbackService's (application/feedback.py).
 - queue_recommendations(): surface algorithm results as the session's new
   upcoming queue. Recommendations still queued from before become REPLACED.
   Producing the recommendations is B5.
@@ -21,8 +27,7 @@ only on an ACTIVE session.
   run left ACTIVE. Their queues are discarded, not resumed, and their history
   is kept (D35).
 
-Recording feedback events (FeedbackEvent) and interpreting them is B6. No raw
-conversational text is accepted or stored (D33).
+No raw conversational text is accepted or stored (D33).
 
 Within a session, every change gets a strictly later time than the one before
 (B5), even when the clock has not moved. So turns and surfaced queues are
@@ -31,11 +36,13 @@ control has been acted on yet.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Iterable, List, Optional, Sequence
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 from src.intentune.domain.library import TrackNotFound
 from src.intentune.domain.models import ListeningContext, Recommendation
 from src.intentune.domain.session import (
+    FeedbackEvent,
+    FeedbackEventType,
     InvalidSessionTransition,
     ListenerProfileNotFound,
     ListeningSession,
@@ -56,6 +63,10 @@ from src.intentune.ports.unit_of_work import UnitOfWork
 
 _TURNS_WITHOUT_TARGET = frozenset({TurnKind.SURPRISE_ME, TurnKind.MORE_FAMILIAR, TurnKind.TRY_SOMETHING_DIFFERENT})
 _TICK = timedelta(microseconds=1)
+# Feedback that ends the playing occurrence: it stopped (SKIP), ended (COMPLETE), or was rejected (NOT_FOR_ME).
+_ENDS_PLAYBACK = frozenset({FeedbackEventType.SKIP, FeedbackEventType.COMPLETE, FeedbackEventType.NOT_FOR_ME})
+# Feedback about having heard the track, so its occurrence must have started.
+_NEEDS_PLAYBACK = frozenset({FeedbackEventType.SKIP, FeedbackEventType.COMPLETE, FeedbackEventType.REPLAY})
 
 
 def _utc_now() -> datetime:
@@ -137,6 +148,8 @@ class SessionService:
                 if target is None:
                     raise InvalidSessionTransition(f"A {kind.value} turn needs a recommendation to apply to.")
                 self._require_occurrence(session_id, target)
+                if kind is TurnKind.NOT_FOR_ME and playing is not None and playing.occurrence_id == target:
+                    self._advance(session_id, playing, now)  # a rejected track does not keep playing (B6)
 
             if kind is not TurnKind.REFINE:
                 session = session.touched(now)
@@ -146,6 +159,53 @@ class SessionService:
             self._uow.listening_sessions.save(session)
             self._uow.commit()
         return turn
+
+    # --- Feedback (B6) ------------------------------------------------------------------
+
+    def record_feedback(
+        self,
+        session_id: str,
+        occurrence_id: str,
+        event_type: FeedbackEventType,
+        played_seconds: Optional[float] = None,
+        duration_seconds: Optional[float] = None,
+    ) -> Tuple[FeedbackEvent, SessionState]:
+        """Persist one raw feedback event about an occurrence of this session, and apply its effect on playback.
+
+        Only the raw fact is stored, never what it is taken to mean (spec §9).
+        SKIP and COMPLETE carry played and total seconds, and with REPLAY they need
+        an occurrence that has played. The effects on playback:
+        - SKIP, COMPLETE, or NOT_FOR_ME about the playing occurrence: it is played,
+          and the next queued one starts. About an occurrence already finished
+          (a late report), nothing moves.
+        - REPLAY of a track that already finished: the playing one, if any, is
+          played, and a fresh occurrence of the replayed track starts now. A manual
+          replay ignores the cooldown (spec §19). REPLAY of the playing one changes
+          nothing: the player restarts it.
+        """
+        event_type = FeedbackEventType(event_type)
+        with self._uow:
+            session = self._require_active(session_id)
+            now = self._time_after(session)
+            occurrence = self._require_occurrence(session_id, occurrence_id)
+            if event_type in _NEEDS_PLAYBACK and not occurrence.has_started:
+                raise InvalidSessionTransition(f"A {event_type.value} is about a recommendation that has played.")
+            event = FeedbackEvent(new_uuid(), session_id, occurrence_id, event_type, now, played_seconds, duration_seconds)
+            self._uow.feedback_events.add(event)
+
+            playing = self._playing(session_id)
+            is_playing = playing is not None and playing.occurrence_id == occurrence_id
+            if event_type in _ENDS_PLAYBACK and is_playing:
+                self._advance(session_id, playing, now)
+            elif event_type is FeedbackEventType.REPLAY and not is_playing:
+                if playing is not None:
+                    self._uow.recommendation_occurrences.save(playing.finished_playing(now))
+                self._uow.recommendation_occurrences.add(occurrence.replayed(new_uuid(), now))
+
+            self._uow.listening_sessions.save(session.touched(now))
+            state = self._state(session_id)
+            self._uow.commit()
+        return event, state
 
     # --- Queue and playback -----------------------------------------------------------
 

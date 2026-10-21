@@ -40,7 +40,8 @@ intentune/
 │   │       ├── 20261019_2540be2956b8_create_managed_library.py  (B2)
 │   │       ├── 20261020_7a42f0b9c8bf_create_background_analysis.py  (B3)
 │   │       ├── 20261020_dd7360f46b8b_create_listening_sessions.py  (B4)
-│   │       └── 20261020_de244c476f3a_record_surfaced_position_and_exploration.py  (B5)
+│   │       ├── 20261020_de244c476f3a_record_surfaced_position_and_exploration.py  (B5)
+│   │       └── 20261021_ce0b59df2cd1_create_playlists.py  (B7)
 │   ├── data/
 │   │   └── songs.csv                  (intentune.db and media/ appear here when used; gitignored)
 │   ├── src/
@@ -59,7 +60,8 @@ intentune/
 │   │       │   ├── validation.py      (B2: shared validators)
 │   │       │   ├── analysis.py        (B3: jobs, features, analyzer identity)
 │   │       │   ├── session.py         (B4: sessions, turns, occurrences, feedback events)
-│   │       │   └── policy.py          (B5: Recommendation Policy v1 and its constants)
+│   │       │   ├── policy.py          (B5: Recommendation Policy v1 and its constants; B6: Feedback Policy v1)
+│   │       │   └── playlist.py        (B7: playlists and their ordered items)
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   ├── recommendation_service.py
@@ -68,7 +70,9 @@ intentune/
 │   │       │   ├── analysis.py        (B3: AnalysisService)
 │   │       │   ├── analysis_worker.py (B3: AnalysisWorker thread)
 │   │       │   ├── sessions.py        (B4: SessionService)
-│   │       │   └── recommendations.py (B5: RecommendationService, queue refresh)
+│   │       │   ├── recommendations.py (B5: RecommendationService, queue refresh)
+│   │       │   ├── feedback.py        (B6: FeedbackService)
+│   │       │   └── playlists.py       (B7: PlaylistService)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
@@ -77,7 +81,8 @@ intentune/
 │   │       │   ├── library.py         (B2: library repositories)
 │   │       │   ├── library_files.py   (B2: folders, inspector, media)
 │   │       │   ├── analysis.py        (B3: analyzer, job and feature repositories)
-│   │       │   └── sessions.py        (B4: session, turn, occurrence, feedback repositories)
+│   │       │   ├── sessions.py        (B4: session, turn, occurrence, feedback repositories)
+│   │       │   └── playlists.py       (B7: playlist repository)
 │   │       ├── adapters/
 │   │       │   ├── __init__.py
 │   │       │   ├── csv_catalog.py
@@ -123,7 +128,12 @@ intentune/
 │       ├── test_session_repositories.py  (B4)
 │       ├── test_session_service.py    (B4)
 │       ├── test_policy.py             (B5)
-│       └── test_queue_refresh.py      (B5)
+│       ├── test_queue_refresh.py      (B5)
+│       ├── test_feedback_policy.py    (B6)
+│       ├── test_feedback_service.py   (B6)
+│       ├── test_playlist_domain.py    (B7)
+│       ├── test_playlist_repositories.py  (B7)
+│       └── test_playlist_service.py   (B7)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -169,9 +179,23 @@ No new adapter or dependency.
 B5 added Recommendation Policy v1:
 - **Domain:** `domain/policy.py` holds every stage and every constant (one versioned `RecommendationPolicy`). `domain/scoring.py` now exposes the shared feature primitives it reuses.
 - **Application:** `application/recommendations.py` (`RecommendationService`). It is not `recommendation_service.py`, which keeps the legacy catalog use cases.
-- **Persistence:** one column on occurrence records, with a fifth migration.
+- **Persistence:** two columns on occurrence records (surfaced position and exploration mark), with a fifth migration.
 
 No new port, adapter, or dependency.
+
+B6 added feedback:
+- **Domain:** Feedback Policy v1 joined `domain/policy.py`; listener replays joined `domain/session.py`.
+- **Application:** `application/feedback.py` (`FeedbackService`), with the recording itself in `SessionService.record_feedback()`.
+
+No new port, adapter, table, migration, or dependency.
+
+B7 added playlists:
+- **Domain:** `domain/playlist.py`.
+- **Ports:** `ports/playlists.py`.
+- **Application:** `application/playlists.py` (`PlaylistService`).
+- **Persistence:** playlist records and their repository joined `persistence/`, with a sixth migration.
+
+No new adapter or dependency.
 
 Backend tests import `src.…`, so the suite runs from `backend/`. The frontend's own structure is described in [the frontend architecture](../frontend/ARCHITECTURE.md) §24.
 

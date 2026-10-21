@@ -1,4 +1,4 @@
-"""Recommendation Policy v1 (Prototype 1, phase B5): choose the next three tracks for a session.
+"""Recommendation Policy v1 (Prototype 1, phases B5 and B6): choose the next three tracks for a session.
 
 The stages run in the order of execution guide §8, each computed separately
 so every decision can be explained (D07, D08):
@@ -6,8 +6,14 @@ so every decision can be explained (D07, D08):
     eligibility -> intent fit -> session fit -> long-term fit -> combine
                 -> diversity / cooldown -> exploration -> top three (#2 may play first)
 
+Session evidence comes from the session's turns and, since B6, its raw
+feedback events, read through Feedback Policy v1 (interpret_feedback()).
+Evidence is never stored: it is recomputed from the raw facts at every
+refresh, so the feedback thresholds can change without losing anything.
+
 Every heuristic constant is in RecommendationPolicy, versioned as a whole
-("policy-v1"). They are Policy v1 heuristics, not scientific facts (spec §15).
+("policy-v1"), Feedback Policy v1 included. They are Policy v1 heuristics,
+not scientific facts (spec §15).
 
 Rules that follow from the spec:
 
@@ -61,6 +67,8 @@ Pure: no database or I/O. Randomness comes only from the injected rng.
 
 import random
 from dataclasses import dataclass, field, replace
+from datetime import datetime
+from enum import Enum
 from typing import Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from src.intentune.domain.library import LabelKind, Track, TrackStatus
@@ -74,7 +82,14 @@ from src.intentune.domain.models import (
     UserProfile,
 )
 from src.intentune.domain.scoring import category_match, closeness
-from src.intentune.domain.session import ListeningSession, RecommendationOccurrence, SessionTurn, TurnKind
+from src.intentune.domain.session import (
+    FeedbackEvent,
+    FeedbackEventType,
+    ListeningSession,
+    RecommendationOccurrence,
+    SessionTurn,
+    TurnKind,
+)
 
 _UNIT_FEATURES = ("energy", "danceability", "valence", "acousticness")
 _PLAYABLE = frozenset({TrackStatus.IMPORTED, TrackStatus.ANALYZING, TrackStatus.READY})
@@ -105,8 +120,19 @@ class RecommendationPolicy:
     # Session fit (spec §15).
     neutral_session_fit: float = 0.5
     recency_decay: float = 0.85
-    not_for_me_weight: float = -1.0  # Feedback Policy v1
-    more_like_this_weight: float = 1.0  # as strong as LIKE in Feedback Policy v1
+
+    # Feedback Policy v1 (spec §15, §17; decision register). Explicit actions first:
+    like_weight: float = 1.0
+    save_weight: float = 1.0
+    playlist_add_weight: float = 1.0  # SAVE/PLAYLIST_ADD in the register (B7)
+    replay_weight: float = 1.0
+    not_for_me_weight: float = -1.0
+    more_like_this_weight: float = 1.0  # the steering turn, as strong as Like
+    # then passive playback: nothing for the first grace_seconds, then by the fraction played,
+    # each band applying below its upper bound, and full_play_weight from the last bound up.
+    grace_seconds: float = 8.0
+    passive_bands: Tuple[Tuple[float, float], ...] = ((0.15, -0.50), (0.40, -0.20), (0.75, 0.10), (0.90, 0.50))
+    full_play_weight: float = 0.80
 
     # Cooldown and diversity (spec §19). recent_play_penalty applies in full to the last play and
     # fades to nothing at cooldown_plays; it only matters when a small library shrinks the cooldown.
@@ -147,8 +173,14 @@ class RecommendationPolicy:
         )
         if any(not 0.0 <= value <= 1.0 for value in fractions):
             raise ValueError("rates, thresholds, penalties, and margins must be between 0 and 1")
-        if not -1.0 <= self.not_for_me_weight <= 0.0 or not 0.0 <= self.more_like_this_weight <= 1.0:
-            raise ValueError("evidence weights are between -1 and 1, negative for Not for me")
+        positive = (self.like_weight, self.save_weight, self.playlist_add_weight, self.replay_weight, self.more_like_this_weight)
+        if not -1.0 <= self.not_for_me_weight <= 0.0 or any(not 0.0 <= weight <= 1.0 for weight in positive):
+            raise ValueError("evidence weights are between -1 and 1, negative for Not for me and positive for the others")
+        bounds = [bound for bound, _ in self.passive_bands]
+        if self.grace_seconds < 0 or not self.passive_bands or bounds != sorted(set(bounds)) or not 0.0 < bounds[0] or bounds[-1] > 1.0:
+            raise ValueError("grace_seconds must be non-negative and passive band bounds strictly increasing within (0, 1]")
+        if any(not -1.0 <= weight <= 1.0 for _, weight in self.passive_bands) or not -1.0 <= self.full_play_weight <= 1.0:
+            raise ValueError("passive weights are between -1 and 1")
         if self.tempo_scale_bpm <= 0 or self.exploration_failure_factor < 0 or self.exploration_success_factor < 0:
             raise ValueError("tempo scale must be positive and exploration factors non-negative")
 
@@ -736,6 +768,113 @@ def _more_novel(
     return second_similarity.value < first_similarity.value
 
 
+# --- Feedback Policy v1: what feedback means ---------------------------------------------------
+
+
+class EvidenceBasis(str, Enum):
+    """What an occurrence's evidence rests on."""
+
+    EXPLICIT = "EXPLICIT"  # Like, Save, Playlist add, Replay, Not for me, More like this
+    PASSIVE = "PASSIVE"  # how much of it was played, after the grace period
+    GRACE = "GRACE"  # played for the grace period or less: no preference evidence
+    NONE = "NONE"  # nothing was said or played
+
+
+@dataclass(frozen=True)
+class Interpretation:
+    """What everything the listener did about one track in a session means under Feedback Policy v1.
+
+    Two separate things:
+    - weight (from -1 to 1; 0 is no preference evidence) is the track's
+      effective evidence, decided by the latest explicit action or else the
+      latest playback. at is when that deciding signal was given, and
+      occurrence_id which occurrence of the track it was about.
+    - excluded is True once the track has been refused with Not for me in this
+      session, whatever came after. It stays out of automatic recommendations
+      for the rest of the session (D18). A later Like or Replay changes its
+      evidence, and a Replay may still play it manually, but neither makes it
+      eligible again.
+    """
+
+    weight: float
+    basis: EvidenceBasis
+    excluded: bool = False
+    at: Optional[datetime] = None
+    occurrence_id: Optional[str] = None
+
+
+def passive_weight(played_seconds: float, played_fraction: float, policy: RecommendationPolicy = POLICY_V1) -> float:
+    """Passive playback evidence (spec §17): nothing within the grace period, then by the fraction played."""
+    if played_seconds <= policy.grace_seconds:
+        return 0.0
+    for upper_bound, weight in policy.passive_bands:
+        if played_fraction < upper_bound:
+            return weight
+    return policy.full_play_weight
+
+
+def _explicit_event_weight(event_type: FeedbackEventType, policy: RecommendationPolicy) -> Optional[float]:
+    return {
+        FeedbackEventType.LIKE: policy.like_weight,
+        FeedbackEventType.SAVE: policy.save_weight,
+        FeedbackEventType.PLAYLIST_ADD: policy.playlist_add_weight,
+        FeedbackEventType.REPLAY: policy.replay_weight,
+        FeedbackEventType.NOT_FOR_ME: policy.not_for_me_weight,
+    }.get(event_type)
+
+
+def event_weight(event: FeedbackEvent, policy: RecommendationPolicy = POLICY_V1) -> float:
+    """What one event means on its own. An explicit action keeps its weight whatever was played."""
+    explicit = _explicit_event_weight(event.event_type, policy)
+    if explicit is not None:
+        return explicit
+    return passive_weight(event.played_seconds, event.played_fraction, policy)
+
+
+def interpret_feedback(
+    turns: Sequence[SessionTurn], events: Sequence[FeedbackEvent], policy: RecommendationPolicy = POLICY_V1
+) -> Interpretation:
+    """Combine everything said and played about one track in a session (callers pass only those turns and events).
+
+    The evidence: explicit actions take precedence over passive playback, and the
+    latest explicit action decides, so the evidence follows a listener who changes
+    their mind. Without one, the latest playback event decides.
+
+    The exclusion is separate and sticky: any Not for me in the session, turn or
+    event, keeps the track out of automatic recommendations for the rest of the
+    session (D18), even if a later action outweighs it as evidence.
+
+    It is about the track, across its occurrences, because a refresh surfaces the
+    same upcoming track as a new occurrence: a Like on the queued card and the
+    skip when it later plays are about the same listening. The raw events stay
+    stored per occurrence.
+    """
+    excluded = any(turn.kind is TurnKind.NOT_FOR_ME for turn in turns) or any(
+        event.event_type is FeedbackEventType.NOT_FOR_ME for event in events
+    )
+    explicit = [
+        (turn.created_at, policy.not_for_me_weight if turn.kind is TurnKind.NOT_FOR_ME else policy.more_like_this_weight, turn.occurrence_id)
+        for turn in turns
+        if turn.kind in (TurnKind.NOT_FOR_ME, TurnKind.MORE_LIKE_THIS)
+    ]
+    explicit += [
+        (event.occurred_at, _explicit_event_weight(event.event_type, policy), event.occurrence_id)
+        for event in events
+        if _explicit_event_weight(event.event_type, policy) is not None
+    ]
+    if explicit:
+        at, weight, occurrence_id = max(explicit, key=lambda signal: signal[0])
+        return Interpretation(weight=weight, basis=EvidenceBasis.EXPLICIT, excluded=excluded, at=at, occurrence_id=occurrence_id)
+    passive = [event for event in events if _explicit_event_weight(event.event_type, policy) is None]
+    if passive:
+        latest = max(passive, key=lambda event: event.occurred_at)
+        basis = EvidenceBasis.GRACE if latest.played_seconds <= policy.grace_seconds else EvidenceBasis.PASSIVE
+        return Interpretation(
+            weight=event_weight(latest, policy), basis=basis, at=latest.occurred_at, occurrence_id=latest.occurrence_id
+        )
+    return Interpretation(weight=0.0, basis=EvidenceBasis.NONE)
+
+
 # --- From a session's history to signals ------------------------------------------------------
 
 
@@ -746,41 +885,57 @@ def signals_from_session(
     tracks: Mapping[str, Track],
     policy: RecommendationPolicy = POLICY_V1,
     long_term: Optional[UserProfile] = None,
+    feedback_events: Sequence[FeedbackEvent] = (),
 ) -> SessionSignals:
-    """What the policy needs from a session's turns and occurrences.
+    """What the policy needs from a session's turns, occurrences, and feedback events.
 
-    - NOT_FOR_ME excludes its track for this session and is strong negative
-      evidence; MORE_LIKE_THIS is strong positive evidence (spec §11, §17).
+    - Evidence: everything said or played about each track in the session is
+      read through Feedback Policy v1 (interpret_feedback()). That gives one piece
+      of evidence per track, newest first by when its deciding signal was given,
+      and an exploration outcome when that signal was about an exploration pick.
+      A track refused with Not for me at any point in the session is excluded
+      from automatic recommendations for the rest of it, even if later feedback
+      outweighs the refusal as evidence (spec §17, D18). Nothing is changed
+      beyond the session.
     - Plays (PLAYING and PLAYED occurrences) feed the cooldown and diversity.
     - A SURPRISE_ME, TRY_SOMETHING_DIFFERENT, or MORE_FAMILIAR turn is a
       directive for the next refresh only. It is pending until a queue is
-      surfaced after it, which acts on it. A refinement made before then
-      restates the whole intent and supersedes it, and so does a newer control.
-      Within a session, SessionService gives every change a strictly later time,
-      so "after" is exact even when the clock has not moved.
-
-    Feedback events are added to the evidence in B6.
+      surfaced after it, which acts on it; a listener's replay is not a surfaced
+      queue. A refinement made before then restates the whole intent and
+      supersedes the control, and so does a newer control. Within a session,
+      SessionService gives every change a strictly later time, so "after" is
+      exact even when the clock has not moved.
     """
     by_id: Dict[str, RecommendationOccurrence] = {occurrence.occurrence_id: occurrence for occurrence in occurrences}
     newest_first = sorted(turns, key=lambda turn: turn.sequence, reverse=True)
 
-    evidence = []
+    turns_about: Dict[str, List[SessionTurn]] = {}  # by track id
+    for turn in turns:
+        if turn.occurrence_id in by_id:
+            turns_about.setdefault(by_id[turn.occurrence_id].track_id, []).append(turn)
+    events_about: Dict[str, List[FeedbackEvent]] = {}
+    for event in feedback_events:
+        if event.occurrence_id in by_id:
+            events_about.setdefault(by_id[event.occurrence_id].track_id, []).append(event)
+
+    dated_evidence = []
     excluded = set()
-    for turn in newest_first:
-        occurrence = by_id.get(turn.occurrence_id) if turn.occurrence_id is not None else None
-        track = tracks.get(occurrence.track_id) if occurrence is not None else None
-        if turn.kind is TurnKind.NOT_FOR_ME and occurrence is not None:
-            excluded.add(occurrence.track_id)
-        if turn.kind in (TurnKind.NOT_FOR_ME, TurnKind.MORE_LIKE_THIS) and track is not None:
-            weight = policy.not_for_me_weight if turn.kind is TurnKind.NOT_FOR_ME else policy.more_like_this_weight
-            evidence.append(
-                SessionEvidence(track=candidate_from_track(track).music, weight=weight, is_exploration=occurrence.is_exploration)
-            )
+    for track_id in sorted(set(turns_about) | set(events_about)):
+        interpretation = interpret_feedback(turns_about.get(track_id, ()), events_about.get(track_id, ()), policy)
+        if interpretation.excluded:
+            excluded.add(track_id)
+        track = tracks.get(track_id)
+        if interpretation.weight != 0 and track is not None:
+            exploration = by_id[interpretation.occurrence_id].is_exploration  # how the listener met it
+            dated_evidence.append((interpretation.at, SessionEvidence(candidate_from_track(track).music, interpretation.weight, exploration)))
+    evidence = tuple(item for _, item in sorted(dated_evidence, key=lambda dated: dated[0], reverse=True))
 
     plays = sorted((occurrence for occurrence in occurrences if occurrence.started_at is not None), key=lambda o: o.started_at, reverse=True)
     recent = tuple(occurrence.track_id for occurrence in plays)
     last_track = tracks.get(recent[0]) if recent else None
-    last_surfaced = max((occurrence.surfaced_at for occurrence in occurrences), default=None)
+    last_surfaced = max(
+        (occurrence.surfaced_at for occurrence in occurrences if not occurrence.is_listener_replay), default=None
+    )
     pending = None
     for turn in newest_first:
         if last_surfaced is not None and turn.created_at <= last_surfaced:
@@ -794,7 +949,7 @@ def signals_from_session(
     return SessionSignals(
         context=session.current_context,
         long_term=long_term,
-        evidence=tuple(evidence),
+        evidence=evidence,
         excluded_track_ids=frozenset(excluded),
         recent_track_ids=recent,
         last_played=candidate_from_track(last_track) if last_track is not None else None,

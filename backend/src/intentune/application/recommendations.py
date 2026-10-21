@@ -1,15 +1,16 @@
-"""Application use case: refresh a session's upcoming queue with Recommendation Policy v1 (Prototype 1, phase B5).
+"""Application use case: refresh a session's upcoming queue with Recommendation Policy v1 (Prototype 1, phases B5, B6).
 
-refresh_queue() reads the session (its context, turns, and occurrences) and
-the library, asks the policy (domain/policy.py) for the next tracks, and
+refresh_queue() reads the session (its context, turns, occurrences, and,
+since B6, feedback events) and the library, asks the policy
+(domain/policy.py) for the next tracks, and
 surfaces them through SessionService.queue_recommendations(), with the
 policy version as the algorithm and its exploration pick marked. Whatever was
 still queued becomes REPLACED.
 
 Callers refresh after anything meaningful: a session start, a refinement,
-a steering turn, or (from B6) feedback. This re-ranks the remaining
-candidates immediately (spec §21). Nothing calls it from a running entry
-point until B8.
+a steering turn, or feedback (FeedbackService refreshes after every event,
+B6). This re-ranks the remaining candidates immediately (spec §21). Nothing
+calls it from a running entry point until B8.
 
 A steering control (Surprise me, Try something different, More familiar) is
 acted on by the next refresh_queue() and only that one: surfacing the queue
@@ -51,20 +52,39 @@ class RecommendationService:
         self._policy = policy
         self._rng = rng if rng is not None else random.Random()
         self._sessions = SessionService(unit_of_work, clock=clock)
-        self.last_decision: Optional[PolicyDecision] = None
+        self.last_decision: Optional[PolicyDecision] = None  # the decision of the latest refresh_queue()
+
+    @property
+    def policy(self) -> RecommendationPolicy:
+        return self._policy
 
     def refresh_queue(self, session_id: str) -> SessionState:
-        """Replace the session's upcoming queue with Policy v1's current choice."""
-        decision = self.decide(session_id)
-        return self._sessions.queue_recommendations(
+        """Replace the session's upcoming queue with Policy v1's current choice. This draws from the generator."""
+        decision = self._decide(session_id)
+        state = self._sessions.queue_recommendations(
             session_id,
             decision.recommendations(),
             self._policy.version,
             exploration_track_ids=decision.exploration_track_ids,
         )
+        self.last_decision = decision
+        return state
 
     def decide(self, session_id: str) -> PolicyDecision:
-        """What Policy v1 would queue now, without changing the session (for refresh and for explanations)."""
+        """A read-only preview: what refresh_queue() would choose now, changing nothing.
+
+        It writes nothing, does not use up a pending control, and leaves the
+        generator where it was: the same decision runs on the service's generator,
+        whose state is then restored. So a preview never changes what the next
+        refresh chooses, and it shows exactly that choice.
+        """
+        state = self._rng.getstate()
+        try:
+            return self._decide(session_id)
+        finally:
+            self._rng.setstate(state)
+
+    def _decide(self, session_id: str) -> PolicyDecision:
         with self._uow:
             session = self._uow.listening_sessions.get(session_id)
             if session is None:
@@ -74,9 +94,8 @@ class RecommendationService:
             tracks = {track.track_id: track for track in self._uow.tracks.list_all()}
             turns = self._uow.session_turns.list_for_session(session_id)
             occurrences = self._uow.recommendation_occurrences.list_for_session(session_id)
+            events = self._uow.feedback_events.list_for_session(session_id)
 
-        signals = signals_from_session(session, turns, occurrences, tracks, self._policy)
+        signals = signals_from_session(session, turns, occurrences, tracks, self._policy, feedback_events=events)
         candidates = [candidate_from_track(track) for track in tracks.values()]
-        decision = decide(candidates, signals, self._policy, self._rng)
-        self.last_decision = decision
-        return decision
+        return decide(candidates, signals, self._policy, self._rng)
