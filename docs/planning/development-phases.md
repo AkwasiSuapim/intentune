@@ -22,8 +22,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B5** Recommendation Policy v1 | Intent/session/long-term scores, missing features, similarity, diversity, exploration, rolling top 3, legacy preservation | **Complete and committed** (2026-10-20, `8a1be05`), including the review decisions and the final policy corrections. 752 backend tests pass and 1 is skipped (753 collected; B5 adds 134). |
 | **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | **Complete and committed** (2026-10-20; review fixes 2026-10-21; committed with B7 as `116276b`). 830 backend tests pass and 1 is skipped (831 collected; B6 adds 78). |
 | **B7** Playlists | CRUD, add/remove/reorder, persistence | **Complete and committed** (2026-10-21, `116276b`, together with B6). 905 backend tests pass and 1 is skipped (906 collected; B7 adds 75). |
-| **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | **Complete, awaiting review** (2026-10-21), on top of `116276b`. 1075 backend tests pass and 1 is skipped (1076 collected; B8 adds 170). |
-| **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | Not started. Corresponds to frontend phase F9. |
+| **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | **Complete and committed** (2026-10-21, `ac23287`), on top of `116276b`. 1075 backend tests pass and 1 is skipped (1076 collected; B8 adds 170). |
+| **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | **Complete, awaiting review** (2026-10-21), on top of `ac23287`. Corresponds to frontend phase F9. 1198 backend tests pass and 1 is skipped (B9 adds 123); 251 frontend tests pass (B9 adds 37). |
 | **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | Not started |
 | **B11** Evaluation/hardening | Performance with hundreds to thousands of tracks, restart behavior, migrations, algorithm evaluation | Not started |
 
@@ -322,6 +322,87 @@ Not done in B8, by scope:
 - **Library:** no artwork route, no scan progress, and manual Import and Rescan answer when the scan ends.
 - **Sessions:** no explanation text for recommendations (Policy v1's reasons are not stored).
 - **Settings:** no `.env` loading.
+
+Carry-forward hardening after the B8 review (2026-10-21), before B9:
+- **CI:** a minimal GitHub Actions workflow (`.github/workflows/ci.yml`) runs the backend suite (Python 3.11) and the frontend's `npm ci`, test, lint, and build (Node 24) on every push and pull request. Details: [Testing Strategy](../quality/testing-strategy.md#continuous-integration).
+- **Legacy database:** `.gitignore` covers the legacy `backend/intentune.db*`, and the local `.env` points at the canonical database.
+- **Flaky tests:** two B8 API tests no longer assume an order for sources registered within one clock tick (one failed once).
+- **Kept as they are, by decision:**
+  - the B8 scan design: the startup scan stays in the background, and manual Import and Rescan stay within their request;
+  - `BEGIN IMMEDIATE` with WAL.
+
+  B11 measures contention and scan performance before either changes, unless B9 shows concrete UX evidence sooner.
+
+### B9 record (2026-10-21)
+
+On branch `prototype-1`, on top of `ac23287` (B8, committed by the user) and the post-review hardening (CI, the legacy database path). Corresponds to frontend phase F9. The F8 boundary was inspected first. The user then decided four product questions, and they shape everything below:
+- **Input:** the hybrid input model.
+- **Tune moods:** the curated moods.
+- **Like:** an explicit, reversible Like (UNLIKE).
+- **Explanations:** Why this fits is hidden.
+
+The guide's B9 rules (execution guide §12), each tested:
+- **The F8 boundary was extended, not rewritten.** `SessionService` gained session identity, structured requests (starters, quick-action controls, track ended, replay), the player's facts, a "not understood" answer, and calls for Like/Unlike, saves, and new playlists. The reducers, the composition policy, and the components keep their shape.
+- **React state is not mirrored in Python.** The HTTP adapter keeps only the backend session each frontend session maps to and that session's last context, as the backend reported it.
+- **The backend owns session identity, context, history, reactions, and playlists; the frontend owns its UI state.** The browser never sends reconstructed history.
+- **No backend logic in the frontend, and no invented behavior.** React parses no language (a test enforces it). The backend interprets typed words with a small deterministic vocabulary and refuses what it cannot act on (`MESSAGE_NOT_UNDERSTOOD`), and nothing is guessed. No explanation, artwork, or playlist hint is made up.
+
+Backend additions:
+- **Interpreter:** the `IntentInterpreter` port and `DeterministicIntentInterpreter`.
+- **Messages:** `MessageService`, which hands typed meanings to the same use cases as the controls.
+- **Next:** `ListeningService.next()`, which records NEXT and then the player's SKIP facts, re-ranking once.
+- **UNLIKE:** a raw event and its Feedback Policy v1 reading, with migration `4b1e9c7d2a6f`.
+- **Vocabulary:** the library's genres, the curated moods, the energy scale, and which dimensions the library supports, served at `GET /listening/vocabulary`.
+- **API:** the `message` input on turns and session starts, `playback` facts on `next`, and `unlike` reactions.
+
+Frontend additions:
+- **HTTP adapter:** the client, pure mappings, and the HTTP session service in `src/services/http/`, the default runtime, with Vite proxying `/api`. The mock runs only in Vite's `mock` mode (or with `VITE_SESSION_SERVICE=mock`).
+- **Real audio:** an audio element is the playback authority (`useAudioPlayback.ts`), and the simulated clock runs only for the mock's songs.
+
+Review corrections (2026-10-22), requested before the commit:
+- **Default runtime:** the HTTP service is the default; the mock is explicit (`npm run dev:mock`, `npm run build:mock`, or `VITE_SESSION_SERVICE=mock`) and stays the test double. The browser checks build in mock mode.
+- **Tune capability:** the vocabulary reports `support`. Tune marks dimensions the library has no evidence for and never sends them, and typed refinements of them are refused as `unavailable`. With today's importer a real library supports genre only.
+- **Vite 8.2.4:** `npm audit` reports 0 vulnerabilities.
+- **Next re-ranks once:** regression tests count the refreshes, clicked and typed, and check that one queue is surfaced through HTTP.
+
+Capability consistency (2026-10-22), the last correction before the commit:
+- **One rule:** `IntentCapability` is the single source of truth for genre, mood, and energy, asked by the vocabulary route, typed messages, and every structured start and REFINE.
+- **Structured intent:** a start or refinement the library cannot act on answers `422 INTENT_UNAVAILABLE`, changing nothing. Typed intent gets the same answer.
+- **Starters:** Focus, Unwind, and Move are shown unavailable on a library without mood and energy, with their reason, and send nothing; Discover stays. Tune also dims unusable mood values.
+- **Past sessions:** one whose intent the library can no longer act on cannot continue, and says so.
+
+Readiness model (2026-10-22), the final correction: today's library is judged as it is, not taken as Prototype 1's permanent capability.
+- **Not ready:** with no playable tracks, nothing starts (`409 LIBRARY_NOT_READY`), and no dimension is called unsupported.
+- **Per dimension:** each of the seven dimensions Policy v1 ranks by is `usable` or `no_data`, computed from the playable library, and becomes usable by itself once its data exists. No target was removed.
+- **Unmapped fields:** `current_mood`, `listening_goal`, and `activity` are kept and stored, reported as not yet mapped into Policy v1.
+
+**Before Prototype 1 is declared finished** (not B9 work, and not to be faked by inventing values):
+- **Mood data:** a trusted source of mood labels (the importer reads genre tags only), so mood can be usable.
+- **Measured features:** a validated pipeline for energy, danceability, tempo, valence, and acousticness (D21; B3 measures signal levels only), feeding `candidate_from_track()`, so those dimensions become usable.
+- **Unmapped fields:** an approved deterministic mapping, or interpretation rule, for `current_mood`, `listening_goal`, and `activity`.
+- **Importing:** a library screen, since importing is an API step today.
+
+Decisions: [TD-020](../decisions/technical-decisions.md#td-020-b9-frontend-integration-and-hybrid-intent-input). Contract: [API Design](../design/api-design.md#typed-messages-b9). Frontend: [frontend architecture](../frontend/ARCHITECTURE.md) §5, §23.
+
+Also verified:
+- **The approved UI against the real backend:** the Vite dev server against `python -m src.intentune.api`, with 7 real FLAC files (genre tags only). A headless-Chrome walkthrough checked each step against the backend's own records. It passed 26/26 on 2026-10-21, 30/30 after the review corrections on plain `vite` with no service setting, 34/34 after the capability consistency correction, and 34/34 after the readiness model; a separate run against an empty library passed 7/7:
+  - starter, real audio, a typed refinement, not understood with Tune opening (since the consistency correction: Focus, Unwind, and Move marked unavailable and sending nothing, and Discover starting the session);
+  - a Tune genre refine; Energy and Mood marked unavailable, with High energy sending nothing and a typed "a bit calmer" refused with the reason;
+  - Like/Unlike, a quick-action control, Next with the skip facts;
+  - typed "save this" with an explicit playlist choice, and reload with the drawer;
+  - a past Focused session refusing to continue, with its reason, and starting no backend session;
+  - with an empty library: every starter, Discover included, unavailable for the library reason, pressing one starting nothing, and typed words answered "Library not ready";
+  - no console errors.
+- **Mock regression:** the frontend browser checks pass against the mock build.
+- **Mutations:** 87 single-rule mutations (45 backend, 42 frontend), each of which makes tests fail. The readiness model added 15. The review corrections added three: a second refresh in Next, a refine of an unavailable dimension being sent, and unavailable options not being disabled. The consistency correction added 22, over the rule, both enforcement points, the error code, starters, Tune values, and the frontend's refusals. One first-run survivor (a starter's own click guard, also covered by planning) was a test gap, closed with component-level tests. Three survived the first run: one was a no-op mutation, rerun correctly; two were test gaps, closed with new tests (a typed reaction about the card in view, and a starter's phrase while pending).
+
+Details: [current system audit](../architecture/current-system-audit.md#b9-update-2026-10-21).
+
+Not done in B9, by scope:
+- **Library:** no library screen (importing is an API step) and no artwork.
+- **Explanations:** none (Policy v1's reasons are not stored).
+- **Past sessions:** a past session's songs cannot be replayed (no route plays a specific track).
+- **Features:** energy and most moods do not affect ranking until such features are measured.
 
 ## Frontend Phases
 

@@ -138,6 +138,35 @@ The first run left four survivors, and tests were tightened to kill them:
 - a relative path tested only from `backend/`;
 - two schema rules the domain also enforces, now checked by where the error points.
 
+## After B9 (2026-10-21)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **1270 passed, 1 skipped**: the 1076 B0–B8 tests plus 195 from B9 (12 from the review corrections, 31 from the capability consistency correction, 29 from the readiness model). |
+| Frontend `npm test` | **276 passed** (214 before, plus 62; 6 from the review corrections, 14 from the consistency correction, 5 from the readiness model). `npm run build` and `npm run lint` clean. `npm audit`: 0 vulnerabilities (Vite 8.2.4). |
+| Frontend `npm run check:browser` | The mock UI's layout, accessibility, and walkthrough checks pass, against the mock build (`build:mock`). |
+| The approved UI on the real backend | A headless-Chrome walkthrough against a running backend with real FLAC files, checking each step against the backend's records: 26/26, then 30/30 after the review corrections, then 34/34 after the consistency correction, then 34/34 after the readiness model, on the default HTTP runtime; and 7/7 against an empty library. |
+
+Per-file counts are in the [B9 audit](../architecture/current-system-audit.md#b9-update-2026-10-21). What B9's tests cover:
+- **Backend:**
+  - **The interpreter:** every phrase, longest-first and whole-word matching, refinements from the context in force, library genres and moods, and every refusal reason.
+  - **MessageService:** starts, every meaning reaching the controls' use case (typed and clicked Next record the same history), save requests recording nothing, refusals recording nothing, and the typed text never stored, checked by scanning every table.
+  - **UNLIKE:** in the policy (neutral, cancels Likes only, never a rejection, never lifting one), the service, the migration, and the API.
+  - **The message, playback, and vocabulary contract**, through HTTP.
+  - **Tune support** (review): the vocabulary's support from playable tracks' primary labels; typed mood or energy refinements the library cannot use refused as `unavailable`, with clearing allowed; guidance naming only supported dimensions.
+  - **One capability rule** (consistency): the pure rule (every dimension, `desired_mood` as a mood, only changes checked, clearing allowed); structured starts and REFINEs refused before anything changes, with no misleading session, no ended session, and no part applied; supported intent applied; typed and structured paths asking the same capability, getting the same answer through HTTP, and both succeeding once the library gains the feature.
+  - **Readiness** (readiness model): a library with nothing playable is not ready, never a list of unsupported dimensions; playable tracks without data leave a ready library with `no_data` dimensions; each measured dimension becomes usable by itself once a candidate carries its value; measured targets refused without data; the unmapped fields stored and shown not to change Policy v1's targets; `LIBRARY_NOT_READY` for structured and typed starts and for a refinement in an empty library; in the frontend, the library reason on every starter, Tune locked for one reason with no tab marked, and the `library_not_ready` answer.
+  - **Next re-ranks once** (review): a spy around the real `RecommendationService`, shared by the listening and feedback services, counts exactly one refresh for one Next with the player's facts, clicked or typed. Through HTTP, the occurrences one Next surfaces are exactly its new queue, and none of them is replaced. Both fail when a second refresh is injected.
+- **Frontend:**
+  - **The HTTP service:** checked against a fake backend, for every request and answer: starters as structured context, then Play; controls; refines that keep the context and Tune open; typed messages and each meaning; not understood; failures; Next and track-end facts; reactions; saves with 409 tolerated; new playlists; continuing a past session.
+  - **The audio hook:** checked against a fake audio element.
+  - **A boundary test:** no service import, network call, or phrase matching in the session feature, the components, or the app shell.
+  - **The runtime choice** (review): HTTP by default, and the mock only in `mock` mode or with `VITE_SESSION_SERVICE=mock`.
+  - **Starters and values** (consistency): starters marked from the vocabulary's support and `usable_moods`, for exactly what is missing; an unavailable starter sending no request, by planning and by the component itself; Discover still usable; the mock reporting full capability, with the design's Tune in scene showing every starter usable; unusable mood values dimmed and never chosen; the `unavailable` answer for typed words, a refused refine, and a past session that cannot continue.
+  - **Unavailable dimensions** (review): the HTTP mapping from `support`; planning sends no refine of an unavailable dimension, while the others still tune; in the DOM, the marked tabs, the panel's explanation, and options that are `aria-disabled` and change nothing.
+
+87 single-rule mutations (45 backend, 42 frontend) each make a test fail. Two first-run survivors were test gaps, now covered: a typed reaction about the card in view, and a starter's phrase while pending.
+
 ## Current Test Coverage
 
 ### Backend
@@ -471,7 +500,7 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | Feedback thresholds, including boundary values (8 s, 15%, 40%, 75%, 90%); explicit actions overriding passive playback; playback-event behavior; Not for me excluding the track for the session only | B6 — **Current** (2026-10-20) |
 | Playlist CRUD and ordering; one occurrence per playlist | B7 — **Current** (2026-10-21) |
 | API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 — **Current** (2026-10-21) |
-| Frontend service boundary against the HTTP adapter | B9 |
+| Frontend service boundary against the HTTP adapter | B9 — **Current** (2026-10-21) |
 | Long-term evidence threshold; bounded, reversible adjustments | B10 |
 | Restart behavior; migrations on existing data; performance with hundreds to thousands of tracks | B11 |
 
@@ -552,15 +581,22 @@ Tests never read from or write to the real `backend/data/intentune.db` or `backe
 
 ## Continuous Integration
 
-**Future.** No CI workflow exists (`.github/` is absent). A later GitHub Actions workflow should:
+**Current (2026-10-21).** `.github/workflows/ci.yml` runs on every push and pull request, with read-only repository access. It has two jobs, both on `ubuntu-latest`. A failing step fails the workflow.
 
-1. Check out code.
-2. Install the supported Python version.
-3. Install dependencies.
-4. Run formatting or lint checks.
-5. Run pytest from `backend/`.
-6. Run the frontend tests, build, and lint.
-7. Fail the workflow when required checks fail.
+| Job | Setup | Steps (each must pass) |
+|---|---|---|
+| Backend | Python 3.11 (`actions/setup-python`, pip cache keyed on `backend/requirements.txt`) | `python -m pip install -r requirements.txt`, then `python -m pytest -q`, from `backend/` |
+| Frontend | Node 24 (`actions/setup-node`, npm cache keyed on `frontend/package-lock.json`) | `npm ci`, `npm test`, `npm run lint`, `npm run build`, from `frontend/` |
+
+- **Versions:** Python 3.11 is the backend's development version. Node 24 is the current LTS within the frontend dependencies' supported range (`^22.22.2`, `^24.15.0`, or `>=26`, from jsdom's engines).
+- **Not run in CI:** the frontend's headless-Chrome browser checks (`npm run check:browser`), which need a local Chrome. There is no deployment, merging, or other automation.
+- **The symbolic-link test** (`test_local_folders.py`) is not special-cased. It skips only where creating a symlink fails, as on the Windows development machine, and runs normally on Linux, which allows symlinks.
+- **Checked before adding the workflow,** since no Linux machine was available locally:
+  - every pinned backend requirement, transitive ones included, has a Linux wheel for Python 3.11; soundfile's bundles its own libsndfile, and the one test that names the decoder version reads it at run time;
+  - the lockfile lists the Linux builds of the frontend's native packages (oxlint, rolldown, lightningcss);
+  - all 238 relative frontend imports match their files' exact casing (Linux is case-sensitive);
+  - `npm ci`, `npm test`, `npm run lint`, and `npm run build` pass on a fresh copy of the tracked frontend files.
+- **The workflow's first run on GitHub is the Linux verification.**
 
 ## Definition of Done for a Feature
 

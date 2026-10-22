@@ -21,8 +21,26 @@ export type SessionAction =
   | { type: 'request_answered' }
   | { type: 'request_failed' }
   | { type: 'turn_applied'; turn: SessionTurn }
+  /** The service could not act on what the listener typed. */
+  | {
+      type: 'turn_not_understood'
+      echo: string
+      message: string
+      refineTab?: RefineTab
+    }
+  /** The service understood, but the music library cannot act on what was asked. */
+  | {
+      type: 'turn_unavailable'
+      echo?: string
+      message: string
+      refineTab?: RefineTab
+    }
+  /** The music library has nothing playable yet. */
+  | { type: 'turn_library_not_ready'; echo?: string; message: string }
   | { type: 'play_toggled' }
   | { type: 'playback_ticked'; seconds: number }
+  /** The audio player's own position, and its duration once known. */
+  | { type: 'playback_progressed'; positionSeconds: number; durationSeconds?: number }
   | { type: 'why_toggled' }
   | {
       type: 'liked_set'
@@ -52,18 +70,40 @@ export type SessionAction =
       recommendationId: string
       suggestedPlaylistIds: string[]
     }
-  | { type: 'recommendation_replayed'; recommendationId: string }
+  | {
+      type: 'up_next_offered'
+      recommendationId: string
+      upNext: RecommendedSong | null
+    }
+  // A reaction or save the service did not take: the card goes back to what is true.
+  | { type: 'like_reverted'; recommendationId: string; liked: boolean }
+  | {
+      type: 'playlists_save_reverted'
+      recommendationId: string
+      savedToPlaylistIds: string[]
+    }
   | { type: 'drawer_opened' }
   | { type: 'drawer_closed' }
   | { type: 'session_resumed' }
+
+/** The event each refusal leaves in the session. */
+const REFUSAL_EVENT = {
+  turn_not_understood: 'not_understood',
+  turn_unavailable: 'unavailable',
+  turn_library_not_ready: 'library_not_ready',
+} as const
 
 const SESSION_ACTION_TYPES = new Set<string>([
   'request_sent',
   'request_answered',
   'request_failed',
   'turn_applied',
+  'turn_not_understood',
+  'turn_unavailable',
+  'turn_library_not_ready',
   'play_toggled',
   'playback_ticked',
+  'playback_progressed',
   'why_toggled',
   'liked_set',
   'refine_opened',
@@ -74,7 +114,9 @@ const SESSION_ACTION_TYPES = new Set<string>([
   'playlists_saved',
   'quick_actions_offered',
   'playlists_suggested',
-  'recommendation_replayed',
+  'up_next_offered',
+  'like_reverted',
+  'playlists_save_reverted',
   'drawer_opened',
   'drawer_closed',
   'session_resumed',
@@ -155,6 +197,30 @@ function updateCurrent(
   return { ...state.recommendations, [current.id]: { ...current, ...patch } }
 }
 
+function updateRecommendation(
+  state: SessionState,
+  recommendationId: string,
+  patch: Partial<Recommendation>,
+): SessionState {
+  const target = state.recommendations[recommendationId]
+  if (!target) return state
+  return {
+    ...state,
+    recommendations: { ...state.recommendations, [recommendationId]: { ...target, ...patch } },
+  }
+}
+
+function withUpNext(state: SessionState, upNext: RecommendedSong | null): SessionState {
+  const recommendations = { ...state.recommendations }
+  delete recommendations[UP_NEXT_ID]
+  if (upNext) recommendations[UP_NEXT_ID] = record(UP_NEXT_ID, upNext)
+  return {
+    ...state,
+    recommendations,
+    upNextRecommendationId: upNext ? UP_NEXT_ID : null,
+  }
+}
+
 function applyTurn(state: SessionState, turn: SessionTurn): SessionState {
   const events = [...state.events]
   const recommendations = { ...state.recommendations }
@@ -219,7 +285,14 @@ function applyTurn(state: SessionState, turn: SessionTurn): SessionState {
     currentRecommendationId,
     playback: turn.recommendation
       ? { playing: true, positionSeconds: 0 }
-      : state.playback,
+      : turn.restart
+        ? {
+            ...state.playback,
+            playing: true,
+            positionSeconds: 0,
+            restarts: (state.playback.restarts ?? 0) + 1,
+          }
+        : state.playback,
     whyExpanded: false,
     quickActions: turn.quickActions,
     upNextRecommendationId: turn.upNext ? UP_NEXT_ID : null,
@@ -227,32 +300,6 @@ function applyTurn(state: SessionState, turn: SessionTurn): SessionState {
     // The playlist sheet belonged to the song this turn replaces; the
     // drawer, opened while the answer was on its way, stays open.
     overlay: state.overlay?.type === 'session_drawer' ? state.overlay : null,
-  }
-}
-
-function replay(state: SessionState, recommendationId: string): SessionState {
-  const source = state.recommendations[recommendationId]
-  if (!source || recommendationId === state.currentRecommendationId) {
-    return state
-  }
-
-  // Playing a past song again is a fresh recommendation of the same song:
-  // the earlier entry stays in the history with its own outcome.
-  const events = [...state.events]
-  const id = `rec-${events.length + 1}`
-  append(events, { kind: 'recommendation', recommendationId: id })
-
-  return {
-    ...state,
-    changedDimensions: [],
-    events,
-    recommendations: {
-      ...state.recommendations,
-      [id]: { ...record(id, source), echo: undefined },
-    },
-    currentRecommendationId: id,
-    playback: { playing: true, positionSeconds: 0 },
-    whyExpanded: false,
   }
 }
 
@@ -282,6 +329,22 @@ export function sessionReducer(
     case 'turn_applied':
       return applyTurn(state, action.turn)
 
+    case 'turn_not_understood':
+    case 'turn_unavailable':
+    case 'turn_library_not_ready': {
+      const events = [...state.events]
+      if (action.echo !== undefined) append(events, { kind: 'user_message', text: action.echo })
+      append(events, { kind: REFUSAL_EVENT[action.type], message: action.message })
+      // Tune shows what can be asked instead (nothing can be, while the library is not ready).
+      const refineTab = action.type === 'turn_library_not_ready' ? undefined : action.refineTab
+      return {
+        ...state,
+        events,
+        changedDimensions: [],
+        refine: refineTab && state.intent ? { tab: refineTab } : state.refine,
+      }
+    }
+
     case 'play_toggled':
       if (!current) return state
       return {
@@ -299,6 +362,17 @@ export function sessionReducer(
             current.durationSeconds,
             state.playback.positionSeconds + action.seconds,
           ),
+        },
+      }
+
+    case 'playback_progressed':
+      if (!current) return state
+      return {
+        ...state,
+        playback: {
+          ...state.playback,
+          positionSeconds: action.positionSeconds,
+          durationSeconds: action.durationSeconds ?? state.playback.durationSeconds,
         },
       }
 
@@ -393,8 +467,21 @@ export function sessionReducer(
         },
       }
 
-    case 'recommendation_replayed':
-      return replay(state, action.recommendationId)
+    case 'up_next_offered':
+      if (action.recommendationId !== state.currentRecommendationId) {
+        return state
+      }
+      return withUpNext(state, action.upNext)
+
+    case 'like_reverted':
+      return updateRecommendation(state, action.recommendationId, {
+        liked: action.liked,
+      })
+
+    case 'playlists_save_reverted':
+      return updateRecommendation(state, action.recommendationId, {
+        savedToPlaylistIds: action.savedToPlaylistIds,
+      })
 
     case 'drawer_opened':
       return { ...state, overlay: { type: 'session_drawer' } }

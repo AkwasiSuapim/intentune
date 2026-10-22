@@ -89,7 +89,7 @@ async function waitForFile(path, timeoutMs) {
 }
 
 export async function launch({ outDir, design = false }) {
-  if (!existsSync(join(DIST, 'index.html'))) throw new Error('No production build found. Run `npm run build` first.')
+  if (!existsSync(join(DIST, 'index.html'))) throw new Error('No mock build found. Run `npm run build:mock` first.')
   await mkdir(outDir, { recursive: true })
 
   const servers = [await serve(DIST)]

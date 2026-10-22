@@ -60,7 +60,8 @@ def test_sources_are_listed_with_whether_a_scan_is_running(client, music, tmp_pa
 
     body = client.get("/api/v1/library/sources").json()
 
-    assert [source["name"] for source in body["items"]] == ["music", "other"]
+    # Oldest first; two folders registered within one clock tick have no defined order.
+    assert sorted(source["name"] for source in body["items"]) == ["music", "other"]
     assert body["scanning"] is False
 
 
@@ -111,7 +112,8 @@ def test_rescan_scans_every_source(client, music, audio, tmp_path):
     response = client.post("/api/v1/library/rescan")
 
     assert response.status_code == 200
-    assert [(report["source_id"], report["imported"]) for report in response.json()["reports"]] == [(first, 1), (second, 1)]
+    assert {report["source_id"]: report["imported"] for report in response.json()["reports"]} == {first: 1, second: 1}
+    assert len(response.json()["reports"]) == 2
 
 
 def test_a_missing_source_folder_is_reported_not_raised(client, music, audio):

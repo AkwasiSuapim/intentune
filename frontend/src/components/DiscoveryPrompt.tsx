@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import Artwork from './Artwork.tsx'
 import styles from './DiscoveryPrompt.module.css'
 
@@ -7,6 +8,8 @@ export type StarterIntent = {
   /** The prewritten first request this starter stands for. */
   phrase: string
   artworkUrl?: string | null
+  /** Why it cannot be used now. It is then shown marked, with the reason, and pressing it does nothing. */
+  unavailableReason?: string
 }
 
 type DiscoveryPromptProps = {
@@ -16,6 +19,8 @@ type DiscoveryPromptProps = {
 
 // The "Tune in" state of a new listening session.
 function DiscoveryPrompt({ starters, onStart }: DiscoveryPromptProps) {
+  const baseId = useId()
+  const reasonId = (starter: StarterIntent) => `${baseId}-${starter.id}-reason`
   return (
     <div className={styles.prompt}>
       <svg
@@ -48,22 +53,34 @@ function DiscoveryPrompt({ starters, onStart }: DiscoveryPromptProps) {
       </div>
 
       <div className={styles.starters}>
-        {starters.map((starter) => (
-          <button
-            key={starter.id}
-            type="button"
-            className={styles.starter}
-            aria-label={`${starter.label}: ${starter.phrase}`}
-            data-focus-key="starter"
-            onClick={() => onStart?.(starter.id)}
-          >
-            <Artwork src={starter.artworkUrl} className={styles.swatch} />
-            <span className={styles.starterText}>
-              <span className={styles.starterLabel}>{starter.label}</span>
-              <span className={styles.starterPhrase}>“{starter.phrase}”</span>
-            </span>
-          </button>
-        ))}
+        {starters.map((starter) => {
+          const unavailable = !!starter.unavailableReason
+          return (
+            <button
+              key={starter.id}
+              type="button"
+              className={styles.starter}
+              aria-label={`${starter.label}: ${starter.phrase}${unavailable ? ', unavailable' : ''}`}
+              aria-disabled={unavailable || undefined}
+              aria-describedby={unavailable ? reasonId(starter) : undefined}
+              data-focus-key="starter"
+              onClick={() => {
+                if (!unavailable) onStart?.(starter.id)
+              }}
+            >
+              <Artwork src={starter.artworkUrl} className={styles.swatch} />
+              <span className={styles.starterText}>
+                <span className={styles.starterLabel}>{starter.label}</span>
+                <span className={styles.starterPhrase}>“{starter.phrase}”</span>
+                {unavailable && (
+                  <span id={reasonId(starter)} className={styles.starterReason}>
+                    {starter.unavailableReason}
+                  </span>
+                )}
+              </span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

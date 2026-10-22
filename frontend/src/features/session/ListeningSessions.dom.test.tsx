@@ -4,6 +4,8 @@
 import { screen, within } from '@testing-library/react'
 import type { UserEvent } from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { mockSessionService } from '../../mocks/mockSessionService.ts'
+import type { SessionService } from './sessionService.ts'
 import {
   advance,
   renderApp,
@@ -269,6 +271,46 @@ describe('saving to a playlist', () => {
   })
 })
 
+describe('starters the library cannot act on', () => {
+  it('marks them with a reason anyone can reach, sends nothing when pressed, and keeps Discover', async () => {
+    const reason = 'Your music has no mood or energy information for this yet.'
+    const asked: string[] = []
+    const limited: SessionService = {
+      ...mockSessionService,
+      loadWorkspace: async () => {
+        const seed = await mockSessionService.loadWorkspace()
+        return {
+          ...seed,
+          starters: seed.starters.map((starter) =>
+            starter.id === 'discover' ? starter : { ...starter, unavailableReason: reason },
+          ),
+        }
+      },
+      respond: (context, request) => {
+        asked.push(request.kind)
+        return mockSessionService.respond(context, request)
+      },
+    }
+    const { user } = await renderApp(limited)
+
+    const focus = button('Focus: Help me focus, unavailable')
+    expect(focus.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(focus.getAttribute('aria-describedby') ?? '')?.textContent).toBe(reason)
+    expect(button('Unwind: Something to unwind to, unavailable').getAttribute('aria-disabled')).toBe('true')
+    expect(button('Move: Get me moving, unavailable').getAttribute('aria-disabled')).toBe('true')
+
+    await user.click(focus)
+    expect(asked).toEqual([])
+    expect(screen.getByRole('heading', { name: 'What do you need from your music right now?' })).toBeTruthy()
+
+    const discover = button('Discover: Surprise me')
+    expect(discover.getAttribute('aria-disabled')).toBeNull()
+    await user.click(discover)
+    expect(asked).toEqual(['starter'])
+    expect(heroes()).toHaveLength(1)
+  })
+})
+
 describe('tuning', () => {
   it('opens on the energy tab with focus on it, and arrow keys move between tabs', async () => {
     const { user } = await renderApp()
@@ -346,6 +388,81 @@ describe('tuning', () => {
     await user.click(button('Close tuning'))
 
     expect(document.activeElement).toBe(button('Tune energy, mood or genre'))
+  })
+
+  it('marks what the library cannot use, explains it, and changes nothing when it is pressed', async () => {
+    const limited: SessionService = {
+      ...mockSessionService,
+      loadWorkspace: async () => ({
+        ...(await mockSessionService.loadWorkspace()),
+        unavailableDimensions: ['mood', 'energy'],
+      }),
+    }
+    const { user } = await renderApp(limited)
+    await startFocus(user)
+    const before = intent()
+
+    await user.click(button('Tune energy, mood or genre'))
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label') ?? tab.textContent)).toEqual([
+      'Energy, unavailable',
+      'Mood, unavailable',
+      'Genre',
+    ])
+    const panel = screen.getByRole('tabpanel')
+    const note = document.getElementById(panel.getAttribute('aria-describedby') ?? '')
+    expect(note?.textContent).toBe(
+      'Your music has no energy information yet, so this can’t change what plays.',
+    )
+    const high = within(screen.getByRole('group', { name: 'Energy level' })).getByRole('button', {
+      name: 'High energy',
+    })
+    expect(high.getAttribute('aria-disabled')).toBe('true')
+
+    await user.click(high)
+    expect(intent()).toEqual(before)
+    expect(high.getAttribute('aria-pressed')).toBe('false')
+
+    // Genre has evidence: no note, and its choices apply as usual.
+    await user.click(screen.getByRole('tab', { name: 'Genre' }))
+    expect(screen.getByRole('tabpanel').getAttribute('aria-describedby')).toBeNull()
+    const amapiano = screen.getByRole('button', { name: 'Amapiano' })
+    expect(amapiano.getAttribute('aria-disabled')).toBeNull()
+    await user.click(amapiano)
+    expect(intent()).toContain('Amapiano')
+  })
+
+  it('dims a mood the library cannot use, says why, and does not choose it', async () => {
+    const limited: SessionService = {
+      ...mockSessionService,
+      loadWorkspace: async () => {
+        const seed = await mockSessionService.loadWorkspace()
+        return {
+          ...seed,
+          refineOptions: {
+            ...seed.refineOptions,
+            mood: seed.refineOptions.mood.map((value) => (value.id === 'calm' ? { ...value, unavailable: true } : value)),
+          },
+        }
+      },
+    }
+    const { user } = await renderApp(limited)
+    await startFocus(user)
+    await user.click(button('Tune energy, mood or genre'))
+    await user.click(screen.getByRole('tab', { name: 'Mood' }))
+    const before = intent()
+
+    const calm = screen.getByRole('button', { name: 'Calm' })
+    expect(calm.getAttribute('aria-disabled')).toBe('true')
+    const panel = screen.getByRole('tabpanel')
+    expect(document.getElementById(panel.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Dimmed moods aren’t in your music yet, so they can’t change what plays.',
+    )
+    await user.click(calm)
+    expect(intent()).toEqual(before)
+
+    await user.click(screen.getByRole('button', { name: 'Driven' }))
+    expect(intent()).toContain('Driven')
   })
 
   it('opens from an intent chip on that dimension, and the chip closes it again', async () => {

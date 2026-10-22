@@ -21,7 +21,7 @@ node browser-checks/run.mjs quality           # run some checks against the exis
 node browser-checks/accessibility.mjs keys    # one part of a check: axe | keys | text
 ```
 
-The checks test the production build in `dist/`, so run `npm run build` after changing code. Each check starts its own browser on free ports and removes its temporary profile. A full run takes about four to five minutes.
+The checks test the mock-mode production build in `dist/` (`npm run build:mock`, which `npm run check:browser` runs first), so they need no backend. Run it again after changing code. Each check starts its own browser on free ports and removes its temporary profile. A full run takes about four to five minutes.
 
 Results and screenshots are written to `browser-checks/output/<check>/` (ignored by git). Each check's `results.txt` lists every check as `ok` or `FAIL` with the measured values. A check exits with code 1 if anything failed.
 

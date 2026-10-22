@@ -85,6 +85,20 @@ describe('waiting for an answer', () => {
     expect(announcer().textContent).toContain('Now playing Last Last by Burna Boy.')
   })
 
+  it('shows a starter’s phrase as the listener’s words while its answer is on the way', async () => {
+    const { held, user } = await openHeld()
+
+    await user.click(button('Unwind: Something to unwind to'))
+
+    expect(screen.getByText('Something to unwind to')).toBeTruthy()
+    expect(screen.getByText('Working on it…')).toBeTruthy()
+
+    await held.answer()
+
+    expect(screen.getAllByText('Something to unwind to')).toHaveLength(1)
+    expect(screen.queryByText('Working on it…')).toBeNull()
+  })
+
   it('sends one request at a time and keeps what is typed meanwhile', async () => {
     const { held, user } = await openHeld()
     await user.click(button('Focus: Help me focus'))
@@ -169,15 +183,16 @@ describe('an answer that never comes', () => {
     expect(screen.getByText('Working on it…')).toBeTruthy()
   })
 
-  it('goes on without a hint the service cannot give', async () => {
+  it('takes back a like the service could not record, without a failure note', async () => {
     const { held, user } = await openHeld()
     await user.click(button('Focus: Help me focus'))
     await held.answer()
 
     await user.click(button('Like'))
+    expect(button('Liked').getAttribute('aria-pressed')).toBe('true') // at once, while it is recorded
     await held.fail()
 
-    expect(button('Liked').getAttribute('aria-pressed')).toBe('true')
+    expect(button('Like').getAttribute('aria-pressed')).toBe('false')
     expect(screen.queryByText('That didn’t go through.')).toBeNull()
     expect(
       within(screen.getByRole('group', { name: 'Suggested refinements' }))

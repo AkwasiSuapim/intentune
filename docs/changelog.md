@@ -101,6 +101,82 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
 - TD-015 records the B4 implementation decisions.
 
+### Added — Phase B9: Frontend integration (2026-10-21)
+
+- **Typed words and the interpreter:**
+  - **The model:** hybrid intent input. Known controls are sent as meaning; typed words are interpreted in the backend.
+  - **The interpreter:** the `IntentInterpreter` port and `DeterministicIntentInterpreter` (`domain/intent.py`, `ports/intent.py`, `adapters/deterministic_intent.py`): spec §11's commands, typed reactions, energy up and down, and the library's genres and moods. It refuses instead of guessing.
+  - **`MessageService`** (`application/messages.py`) hands each meaning to the use case the matching control uses.
+  - **API:** a `message` input on turns and session starts, and `422 MESSAGE_NOT_UNDERSTOOD`.
+- **Next:** `ListeningService.next()`, with the player's facts recorded as the SKIP. The `next` turn accepts `playback`.
+- **UNLIKE:** a raw feedback event that takes a Like back (neutral, never a rejection), with migration `4b1e9c7d2a6f` and the `unlike` reaction.
+- **Vocabulary:** `GET /api/v1/listening/vocabulary` serves the library's genres, the curated moods, the energy scale, and which of them the library supports (`support`).
+- **Frontend:**
+  - **The HTTP client:** `src/services/http/` (the client, mappings, and the HTTP `SessionService`), the default runtime; Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock` selects the mock. Vite proxies `/api` (`INTENTUNE_API_URL`).
+  - **Real audio:** `useAudioPlayback.ts` makes the audio element the playback authority.
+  - **The service boundary:** session identity, structured requests (starters, quick-action controls, track ended, replay), `react()`, `savePlaylists()`, `createPlaylist()`, and a `not_understood` answer.
+- **Tests:** 195 backend tests (the suite is 1270 passed, 1 skipped) and 62 frontend tests (276).
+- **TD-020** records the B9 decisions.
+
+### Changed — Phase B9 (2026-10-21)
+
+- **Frontend requests:**
+  - **Quick actions** carry their request: label is presentation, request is behavior. Starters are sent as their id and their meaning, not their phrase.
+  - **Likes and saves** are recorded by the service, and one that is not recorded is undone. Replay is a service request.
+- **Frontend display:**
+  - **Why this fits** is hidden for recommendations that carry no explanation (all real ones).
+  - **A song** played through real audio is no longer moved by the simulated clock.
+- **Feedback Policy v1** reads an UNLIKE as cancelling earlier Likes (decision register updated).
+
+### Changed — at the B9 review (2026-10-22)
+
+- **Default runtime:** the frontend runs on the HTTP service by default (`src/chooseService.ts`). The mock is chosen only explicitly, with Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock`. The tests, the design demo, and the browser checks keep using it (`check:browser` builds in mock mode).
+- **Tune shows what the library can use:**
+  - **Backend:** the vocabulary answers `support` (genre, mood, energy), computed from the same projection of each playable track that Policy v1 ranks. Genres and library moods are now the primary labels only, as Policy v1 reads them. A typed refinement that sets a mood no track declares, or an energy target, is refused as `unavailable` with the reason, and refusal guidance names only the supported dimensions.
+  - **Frontend:** Tune marks an unavailable dimension (a struck-through tab, "unavailable" in its accessible name, an explanation in the panel), and its options do nothing; a refine of it is never sent. The five moods and the energy scale stay in the vocabulary. The component gallery shows both states.
+- **Next:** regression tests prove that one Next with the player's facts re-ranks exactly once, clicked or typed (a counted refresh in the services, one surfaced queue through HTTP). The raw SKIP is kept.
+
+### Security — at the B9 review (2026-10-22)
+
+- **Vite 8.2.1 → 8.2.4**, the patched release (only the lockfile's Vite entry changed). `npm audit`: 0 vulnerabilities.
+
+### Changed — B9 capability consistency (2026-10-22)
+
+- **One capability rule:** `IntentCapability` (`application/capability.py`) is the single source of truth for whether the playable library can use genre, mood, and energy. The vocabulary route, `MessageService`, and `ListeningService` ask it; `LibraryService.vocabulary()` moved there. The rule is the pure `unavailable_dimensions()` in `domain/intent.py`.
+- **Structured intent is checked:** a structured start or REFINE that asks for a genre, mood, or energy the library cannot act on is refused with the new `422 INTENT_UNAVAILABLE`, with nothing started, ended, recorded, or re-ranked, and no part applied. `desired_mood` counts as a mood, as Policy v1 reads it.
+- **Typed intent converges:** a typed refinement the library cannot act on gets the same `INTENT_UNAVAILABLE` (it was understood), replacing the `unavailable` reason of `MESSAGE_NOT_UNDERSTOOD` from the review correction.
+- **Vocabulary:** adds `usable_moods`, Tune's moods that some playable track declares.
+- **Frontend:**
+  - Starters defined by a mood or energy the library lacks (Focus, Unwind, Move) are shown unavailable, with an accessible reason, and send nothing; Discover stays usable. The mock reports full capability.
+  - Tune dims mood values no track declares.
+  - `INTENT_UNAVAILABLE` is shown as "Not available yet", not as a failure. A past session the library can no longer act on cannot continue, and says so.
+- **Changed tests (consistency):** two B8 API tests had relied on a silently accepted intent: a refine with `target_energy`, and a genre start over an empty library. They now send what the library can use, and new tests cover the refusals.
+
+### Changed — B9 readiness model (2026-10-22)
+
+- **Readiness first:** a library with no playable tracks is not ready, a setup state rather than unsupported dimensions. No session starts (`409 LIBRARY_NOT_READY`, a new code), a typed first message answers it whatever it says, and the vocabulary reports `library: {ready, playable_tracks}`.
+- **Every dimension, judged as the library is now:** the vocabulary's `support` booleans became `dimensions`, each `usable`, `no_data`, or `library_not_ready`, for all seven dimensions Policy v1 ranks by: genre, mood, energy, danceability, tempo, valence, and acousticness. Each becomes usable by itself once its data exists (`vocabulary_from_candidates`). Starts and refinements asking for a measured target without data answer `INTENT_UNAVAILABLE`. No target was removed, and nothing is invented.
+- **Unmapped fields:** `current_mood`, `listening_goal`, and `activity` stay in the domain and are stored; the vocabulary lists them as `unmapped_fields`, and the domain documents that Policy v1 does not read them yet.
+- **Guidance:** with no usable dimension, a not-understood message suggests "surprise me" instead of the quick actions (there may be no song yet).
+- **Frontend:** `libraryReady` reaches the environment. While it is false, every starter (Discover included) carries the library reason, Tune locks every tab with one library note and marks none, and `LIBRARY_NOT_READY` is shown as "Library not ready".
+- **Changed tests (readiness):** the B8 test that started a session over an empty library now expects `LIBRARY_NOT_READY`; a message-service test that started without a library now imports one.
+
+### Added — after the B8 review (2026-10-21)
+
+- **CI:** `.github/workflows/ci.yml`, a minimal GitHub Actions workflow on every push and pull request.
+  - **Backend job:** Python 3.11, `pip install -r requirements.txt`, then `python -m pytest -q`.
+  - **Frontend job:** Node 24, then `npm ci`, `npm test`, `npm run lint`, and `npm run build`.
+  - **Not included:** deployment, merging, or other automation.
+
+### Security — after the B8 review (2026-10-21)
+
+- `.gitignore` also ignores `backend/intentune.db*`, the pre-Prototype 1 database location, as a safeguard.
+- The developer's local, ignored `backend/.env` now sets `DATABASE_URL=sqlite:///./data/intentune.db`, the canonical database (not committed).
+
+### Fixed — after the B8 review (2026-10-21)
+
+- Two B8 API tests (`test_api_library.py`) assumed an order for library sources registered within one clock tick. Sources are listed oldest first, by creation time then id, so such a tie has no defined order, and one test failed once on this machine (~1 ms clock). The tests now check the sources and reports without that order.
+
 ### Added — Phase B8: FastAPI boundary (2026-10-21)
 
 - **The HTTP API, `src/intentune/api/`.** Run it from `backend/` with `python -m src.intentune.api`, which serves on `API_HOST:API_PORT`, by default `127.0.0.1:8000`.

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current (B8, 2026-10-21)** for the Prototype 1 routes, bodies, status codes, and error envelope below. **Superseded** for the earlier contract at the end. Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B8, extended in B9, 2026-10-21)** for the Prototype 1 routes, bodies, status codes, and error envelope below. B9 added typed messages, Next with the player's facts, the Unlike reaction, and the listening vocabulary. **Superseded** for the earlier contract at the end. Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 The HTTP API is `backend/src/intentune/api/`, a thin FastAPI boundary over the application layer. Run it from `backend/` with:
 
@@ -12,7 +12,7 @@ python -m src.intentune.api        # or: uvicorn --factory src.intentune.api.app
 
 It listens on `API_HOST:API_PORT` (default `127.0.0.1:8000`). FastAPI also serves its generated OpenAPI document at `/openapi.json` and interactive docs at `/docs`.
 
-The frontend does not call it yet. Reconciling the frontend's service boundary with these routes is B9 ([Frontend Contract Alignment](#frontend-contract-alignment)).
+The frontend calls it through `frontend/src/services/http/`, its default runtime since the B9 review; Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock` runs it on the mock instead (B9 / F9; [Frontend Contract Alignment](#frontend-contract-alignment)).
 
 ## API Principles
 
@@ -45,6 +45,7 @@ GET    /api/v1/library/sources
 POST   /api/v1/library/rescan
 GET    /api/v1/library/jobs
 GET    /api/v1/tracks/{track_id}/audio          (and HEAD)
+GET    /api/v1/listening/vocabulary             (B9)
 
 POST   /api/v1/sessions
 GET    /api/v1/sessions
@@ -63,7 +64,7 @@ DELETE /api/v1/playlists/{playlist_id}/items/{track_id}
 PATCH  /api/v1/playlists/{playlist_id}/items/order
 ```
 
-These are exactly the spec's §24 routes, plus `HEAD` on audio. Nothing else is exposed (no artwork, no session end, no queue refresh).
+These are the spec's §24 routes, plus `HEAD` on audio and (B9) the listening vocabulary. Nothing else is exposed (no artwork, no session end, no queue refresh).
 
 | Route | Use case | Success |
 |---|---|---|
@@ -75,12 +76,13 @@ These are exactly the spec's §24 routes, plus `HEAD` on audio. Nothing else is 
 | `POST /library/rescan` | `rescan_library()`: every source | 200 `{reports: [...]}` |
 | `GET /library/jobs?status=` | `AnalysisService.list_jobs(status)`, oldest first | 200 page of jobs |
 | `GET`/`HEAD /tracks/{id}/audio` | `LibraryService.track_audio()` | 200, or 206 for a range |
-| `POST /sessions` `{context}` | `ListeningService.start()`: start, then surface the first queue | 201 session state |
+| `POST /sessions` `{context}` or `{message}` | `ListeningService.start()`, or (B9) `MessageService.start()` for typed words | 201 session state, with `meaning` for a message; 409 `LIBRARY_NOT_READY` while nothing is playable; 422 `INTENT_UNAVAILABLE` for an intent the library has no data for |
 | `GET /sessions` | `list_sessions(listener)`, newest first | 200 page of sessions |
 | `GET /sessions/{id}` | `get_session()` and `history()` | 200 session detail |
-| `POST /sessions/{id}/turns` | `ListeningService.steer()`: the turn, then re-rank | 200 `{turn, state}` |
+| `POST /sessions/{id}/turns` | `ListeningService.steer()` / `next()`, or (B9) `MessageService.send()` for a `message` | 200 `{turn, state}`; a message adds `meaning` (and `feedback`); 422 `INTENT_UNAVAILABLE` for a refinement the library cannot act on |
 | `POST /sessions/{id}/playback-events` | `FeedbackService.report_playback()` | 201 feedback outcome |
-| `POST /sessions/{id}/recommendations/{occ}/reactions` | `FeedbackService.react()` | 201 feedback outcome |
+| `POST /sessions/{id}/recommendations/{occ}/reactions` | `FeedbackService.react()` (B9: also `unlike`) | 201 feedback outcome |
+| `GET /listening/vocabulary` (B9) | `LibraryService.vocabulary()` | 200 `{genres, moods, energy, support}` |
 | `GET /playlists` | `list_playlists(listener)`, oldest first | 200 `{items}` with track counts |
 | `POST /playlists` `{name}` | `create_playlist()` | 201 playlist |
 | `GET /playlists/{id}` | `get_playlist()` | 200 playlist with its tracks |
@@ -158,35 +160,140 @@ Every occurrence carries its track. `score` is the normalized score Policy v1 st
 
 `GET /sessions/{id}` adds how the session got here, oldest first: `turns` (`sequence`, `kind`, the `context` in force after it, `occurrence_id`), every `occurrence`, and every raw `feedback_event` (`event_type`, `played_seconds`, `duration_seconds`, `played_fraction`, `occurred_at`).
 
-**Starting** (`POST /sessions` with `{"context": {...}}`) ends the listener's previous active session (`replaced_by_new_session`), records the initial intent, and surfaces the first queue. Nothing plays yet. An empty library starts with an empty queue; that is not an error.
+**Starting** (`POST /sessions` with `{"context": {...}}`, or (B9) `{"message": "..."}`, exactly one) ends the listener's previous active session (`replaced_by_new_session`), records the initial intent, and surfaces the first queue. Nothing plays yet. While the library has no playable tracks, nothing starts, whatever the intent: `409 LIBRARY_NOT_READY` (music must be imported). In a ready library, a context that asks for a dimension the library has no usable data for starts nothing (`422 INTENT_UNAVAILABLE`). Either way the previous session goes on ([What the library can act on](#what-the-library-can-act-on-b9)). A start from a message answers `meaning` and, when the words were a control, the control's `turn` ([Typed messages](#typed-messages-b9)).
 
 ### Turns
 
-`POST /sessions/{id}/turns` takes `{"kind": ..., "context"?: {...}, "occurrence_id"?: ...}` with the spec's variants:
+`POST /sessions/{id}/turns` takes `{"kind": ..., "context"?: {...}, "occurrence_id"?: ..., "text"?: ..., "playback"?: {...}}` with the spec's variants, plus `message` (B9):
 
 | Kind | Body | Effect |
 |---|---|---|
-| `refine` | `context` (required) | replaces the context |
-| `next` | `occurrence_id` optional, must be the playing one | finishes the playing track and starts the next queued one. **While nothing plays, it starts the first queued track: this is Play.** |
+| `refine` | `context` (required) | replaces the context. Refused as a whole (`422 INTENT_UNAVAILABLE`) if the new context asks for what the library cannot act on |
+| `next` | `occurrence_id` optional, must be the playing one; `playback` optional (B9): `{played_seconds, duration_seconds}` as the player measured them | finishes the playing track and starts the next queued one, then records the player's facts as the SKIP about the track it ended. **While nothing plays, it starts the first queued track: this is Play** (and no skip is recorded). |
 | `not_for_me` | `occurrence_id` optional (the playing one by default) | excludes the track for the session (D18); about the playing track, it moves on |
 | `more_like_this` | `occurrence_id` optional (the playing one by default) | positive evidence |
 | `surprise_me`, `more_familiar`, `try_something_different` | neither | a one-refresh steering control (B5) |
 | `initial_intent` | none | refused with `409 INVALID_SESSION_TRANSITION`: the intent is set when the session starts |
+| `message` (B9) | `text` (required, 1–500 characters); `occurrence_id` (the recommendation in view) and `playback` optional | interpreted by the backend into one of the use cases above ([Typed messages](#typed-messages-b9)) |
 
 After every turn the queue is re-ranked (spec §21), and the answer is `{turn, state}`. Recording the turn and re-ranking are two transactions. If the re-rank fails, the turn stays recorded and the next command re-ranks again.
 
-Turns carry no free text. A body with any field beyond these is refused, so no raw prompt can be stored (D33). Mapping the frontend's typed messages onto turns is B9's ([alignment](#frontend-contract-alignment)).
+Only a `message` turn carries text, and it is interpreted, then dropped: only the structured turn or event it leads to is stored (D33). `text` on any other kind, `context` on any kind but `refine`, and `playback` on anything but `next` and `message` are refused (`422`).
 
 ### Feedback
 
 Which events travel where (decided in B8):
 
 - **`POST /sessions/{id}/playback-events`**: how a track's playback ended. Body `{occurrence_id, event_type: "skip" | "complete", played_seconds, duration_seconds}`; seconds are non-negative and the duration positive. A skip or completion of the playing track moves on. One about a track that never played answers `409`. No progress ticks are accepted (spec §22).
-- **`POST /sessions/{id}/recommendations/{occurrence_id}/reactions`**: body `{reaction: "like" | "save" | "replay" | "not_for_me"}`. Not for me about the playing track moves on. Replay of a track that has played starts it again now, as a fresh occurrence with the `listener-replay` algorithm and no score.
+- **`POST /sessions/{id}/recommendations/{occurrence_id}/reactions`**: body `{reaction: "like" | "unlike" | "save" | "replay" | "not_for_me"}`. Not for me about the playing track moves on. Replay of a track that has played starts it again now, as a fresh occurrence with the `listener-replay` algorithm and no score. **Unlike (B9)** takes a Like back. It is stored as its own raw event, the LIKE stays stored, and it weighs 0.00. The track's evidence is then what it would be without the Like, and it is never a rejection: a Not-for-me exclusion stays as it was (D18).
 - **Playlist adds** are recorded by `POST /playlists/{id}/items` with the recommendation's `session_id` and `occurrence_id` (below), never as a reaction.
-- **Not for me and Next** may each be sent as a turn or as feedback. Both forms are read together and both move on. A late skip about a finished track moves nothing, so sending a `next` turn and a SKIP event for the same track is safe.
+- **Not for me and Next** may each be sent as a turn or as feedback. Both forms are read together and both move on. A late skip about a finished track moves nothing, so sending a `next` turn and a SKIP event for the same track is safe. Since B9 the frontend sends Next as one `next` turn with the player's facts, and the backend records the SKIP itself.
 
 Each answers `201` with the stored raw event, its `event_weight` under Feedback Policy v1, the track's `interpretation` in this session (`weight`, `basis`: `explicit`, `passive`, `grace`, or `none`, `excluded`, `at`, `occurrence_id`), and the session `state` after re-ranking.
+
+### Typed messages (B9)
+
+**Hybrid input** (the B9 decision): a control whose meaning the UI knows is sent as that meaning (the turn kinds above, starters as contexts); only what the listener typed is sent as text, unread. The backend interprets it (`IntentInterpreter` port, Prototype 1's `DeterministicIntentInterpreter`) and hands the meaning to the same use cases the controls use. The recommendation policy never sees the text.
+
+The vocabulary is deliberately small. It is matched on whole words, ignoring case, longer phrases first:
+
+| Words | Meaning | Use case |
+|---|---|---|
+| "more like this", "more like that" | `more_like_this` | the turn, about the recommendation in view |
+| "surprise me" / "more familiar" / "try something different", "something different" | the control | the turn |
+| "not for me" | `not_for_me` | the turn, about the recommendation in view |
+| "skip this", "skip", "next" | `next` | `ListeningService.next()`, with the player's facts as the SKIP |
+| "play that again", "play this again", "replay this", "replay" | `replay` | the reaction |
+| "like this", "love this" | `like` | the reaction |
+| "save this", "save" | save requested | nothing is recorded; the UI opens the playlist picker, and only an explicit choice adds a track |
+| "more energetic", "more energy" / "calmer", "less energetic", "less energy" | energy one level up / down (from Medium when unset) | a `refine` turn |
+| a genre the library declares, or "any genre" | that genre (or none) | a `refine` turn |
+| a curated mood, or a mood the library declares | that mood | a `refine` turn |
+
+A message means one thing: one command, or one refinement, which may change several dimensions ("calmer jazz"). Other words are ignored.
+
+The answer is the usual `{turn, state}` plus:
+- **`meaning`:** what the message was understood as. Its `kind` is `refine`, `turn`, `reaction`, or `save_requested`, with the `turn` or `reaction` it named.
+- **`feedback`:** for a reaction, the `{event, event_weight, interpretation}` it recorded, instead of a turn. A save request records neither.
+
+**Not understood.** Nothing is guessed. The answer is `422 MESSAGE_NOT_UNDERSTOOD`, and nothing is changed or recorded. `details` is `{reason, dimensions}`, and the words are not echoed. `dimensions` lists the dimensions this library can use now (those the vocabulary reports `usable`, in its order), and the guidance names only Tune's among them: "Try a genre." for a library with genre tags only, "Try a mood, a genre, or more or less energy." when all three are usable, and 'Try "surprise me".' when none is. Words that were understood, but ask for what the library cannot act on ("a bit calmer" in a library without energy), are not "not understood": they get `INTENT_UNAVAILABLE`, exactly as a structured request would ([What the library can act on](#what-the-library-can-act-on-b9)). The reasons:
+
+| `reason` | When | `message` |
+|---|---|---|
+| `unrecognized` | nothing in the words is in the vocabulary | Intentune can't act on that yet. Try a genre. *(guidance as above)* |
+| `ambiguous` | two commands, a command and a refinement, two genres, two moods, or energy both up and down | That asks for more than one thing at once. Try one change at a time. |
+| `unsupported` | a genre or mood right after "no", "not", "without", "less", or "never" | Intentune can't leave a genre or mood out yet. Try naming what you want instead. |
+| `no_recommendation` | it is about a recommendation, and there is none yet (a session's first words "like this") | There's no song yet for that to be about. |
+
+### Vocabulary (B9)
+
+`GET /api/v1/listening/vocabulary` answers what Tune offers:
+
+```json
+{
+  "genres": ["Ambient", "Jazz", "Rock"],
+  "moods": ["Emotional", "Focused", "Calm", "Joyful", "Driven"],
+  "energy": [{"id": "very-low", "label": "Very low", "target_energy": 0.1}, "... low 0.3, medium 0.5, high 0.7 ...",
+             {"id": "very-high", "label": "Very high", "target_energy": 0.9}],
+  "library": {"ready": true, "playable_tracks": 7},
+  "dimensions": {"mood": "no_data", "genre": "usable", "energy": "no_data", "danceability": "no_data",
+                 "tempo": "no_data", "valence": "no_data", "acousticness": "no_data"},
+  "usable_moods": [],
+  "unmapped_fields": ["current_mood", "listening_goal", "activity"]
+}
+```
+
+- **Genres:** the primary genre labels of the playable tracks, as Policy v1 reads them, deduplicated ignoring case. Nothing is offered that no track declares.
+- **Moods:** the approved design's five, always offered, never the library's mood tags. Typed messages may also name the library's primary mood labels.
+- **Energy:** a fixed scale, always offered (D21).
+- **Library:** whether anything can be recommended. With no playable tracks the library is `ready: false`: a setup state, in which music must be imported. It is not reported as unsupported dimensions.
+- **Dimensions:** for each dimension Policy v1 ranks by, computed from the same projection of each playable track that Policy v1 ranks:
+  - `usable`: some playable track has usable data for it (a genre label; one of Tune's moods; a value for energy, danceability, tempo, valence, or acousticness from an approved feature pipeline);
+  - `no_data`: tracks are playable, but none has usable data for it yet. This is unfinished feature coverage: Policy v1 keeps the target, and nothing is invented;
+  - `library_not_ready`: nothing is playable, so no dimension is judged.
+
+  Each becomes `usable` by itself as soon as the data exists. With today's importer (genre tags only) and no feature pipeline, a real library has only genre usable. Tune marks what is not usable and does not send it, and any start or refinement asking for it is refused ([below](#what-the-library-can-act-on-b9)).
+- **Usable moods:** Tune's moods that some playable track declares, in Tune's order. Tune marks the others, and a starter whose mood is not among them (or that needs energy the library lacks) is shown unavailable, with its reason, and is never sent in part.
+
+- **Unmapped fields:** `current_mood`, `listening_goal`, and `activity` are accepted and stored with the session, but their mapping into Policy v1 is unfinished: they change no recommendation yet. They wait for an approved deterministic mapping or a future interpretation rule.
+
+All of it comes from `IntentCapability` (`application/capability.py`), the same authority every start and refinement is checked against. The frontend reads it when the workspace loads.
+
+### What the library can act on (B9)
+
+One authority, for every way intent arrives, judging the library as it is now. Three situations are told apart:
+
+| Situation | Vocabulary | A start or refinement |
+|---|---|---|
+| No playable tracks | `library.ready: false`; every dimension `library_not_ready` | `409 LIBRARY_NOT_READY`: "Your library has no playable music yet. Import some music to start listening." |
+| Playable tracks, no usable data for a dimension asked for | that dimension `no_data` | `422 INTENT_UNAVAILABLE` |
+| Playable tracks with usable data | the dimension `usable` | applied, by structured controls, typed words, and Policy v1 alike |
+
+Typed words that are not understood are a third, separate answer: `422 MESSAGE_NOT_UNDERSTOOD`. A typed first message in a library that is not ready answers `LIBRARY_NOT_READY`, whatever it says.
+
+The order of checks:
+
+```text
+typed words        -> interpret -> capability check -> use case
+structured start   ->              capability check -> use case
+structured refine  ->              capability check -> use case
+```
+
+- **Genre and mood:** each value asked for must be declared by some playable track (primary labels, compared ignoring case and surrounding space, as Policy v1 compares them). The moods asked for are `temporary_moods`, or `desired_mood` when there are none, as Policy v1 reads them.
+- **Measured targets** (`target_energy`, `target_danceability`, `target_tempo_bpm`, `target_valence`, `target_acousticness`): each needs that feature on some playable track. None has one yet, because no feature pipeline provides them; each becomes acceptable by itself once one does.
+- **Only what changes is checked.** A start is checked against an empty intent, and a refinement against the intent in force. A value kept from before is not checked again, and clearing a dimension is always accepted.
+
+If anything asked for fails, the whole request is refused with `422 INTENT_UNAVAILABLE`: nothing is started, ended, recorded, or re-ranked, and no part of it is applied. The request was understood, so this is not `MESSAGE_NOT_UNDERSTOOD`. Typed and structured requests get the same answer, for example:
+
+| `details` | `message` |
+|---|---|
+| `{"unavailable": ["mood", "energy"], "dimensions": ["genre"]}` | Your library doesn't describe that mood or energy yet, so that can't change what plays. Try a genre. |
+
+`unavailable` lists what failed, in the vocabulary's dimension order; the message names it ("that mood", "that genre", "energy", "valence"). `dimensions` and the guidance are those of a not-understood answer.
+
+`current_mood`, `listening_goal`, and `activity` are not intent dimensions here: they are accepted and stored, and change no ranking until their mapping exists ([Vocabulary](#vocabulary-b9)).
+
+**Before Prototype 1 is finished:** the capability is truthful about today's library, not a ceiling. Mood labels from a trusted source, a validated pipeline for the five measured features (D21), and an approved mapping for the three unmapped fields are still to come ([Development Phases](../planning/development-phases.md)).
 
 ## Playlists
 
@@ -209,6 +316,8 @@ Adding with `session_id` and `occurrence_id` (always together, `422` otherwise) 
 | Ids in bodies | at most 64 characters |
 | A folder path to register | 1 to 4096 characters |
 | A playlist order | at most 10,000 track ids |
+| A typed message (B9) | trimmed, 1 to 500 characters |
+| `playback` (B9) | `played_seconds` non-negative, `duration_seconds` positive |
 | `limit` / `offset` | 1 to 500 / 0 or more |
 
 Numbers must be JSON numbers: `"0.5"` and `true` are refused, as are NaN and infinities. Unknown fields are refused everywhere. The domain checks every value again when it builds its own objects. A domain refusal (for example a `refine` turn without a context) answers `422 VALIDATION_ERROR` with the domain's message.
@@ -248,6 +357,9 @@ Every error answers one envelope (spec §26):
 | 409 | `TRACK_UNAVAILABLE` | the track's managed copy is missing |
 | 409 | `CONFLICT` | a playlist name already used, a track already in the playlist, or a scan already running |
 | 422 | `VALIDATION_ERROR` | the request breaks a schema rule, or the domain refuses a value |
+| 422 | `MESSAGE_NOT_UNDERSTOOD` | (B9) typed words Intentune cannot act on; nothing changed ([Typed messages](#typed-messages-b9)) |
+| 409 | `LIBRARY_NOT_READY` | (B9) a start or refinement while the library has no playable tracks: music must be imported first; nothing changed ([What the library can act on](#what-the-library-can-act-on-b9)) |
+| 422 | `INTENT_UNAVAILABLE` | (B9) an intent, typed or structured, asks for a dimension a ready library has no usable data for; nothing changed ([What the library can act on](#what-the-library-can-act-on-b9)) |
 | 500 | `INTERNAL_ERROR` | anything unexpected; the details stay in the server log |
 
 `UNSUPPORTED_AUDIO`, `IMPORT_FAILED`, and `ANALYSIS_FAILED` are not used: per-file import and analysis failures are recorded and counted in scan reports and job listings, not raised to the client (spec §7). `RECOMMENDATION_UNAVAILABLE` is not used either: an empty queue is a normal state (nothing eligible), answered as such. `503` is not used: nothing in Prototype 1 depends on an external service.
@@ -273,15 +385,18 @@ At shutdown, the worker stops after its current job, a running scan is waited fo
 
 ## Frontend Contract Alignment
 
-**Open, to be resolved in B9.** The backend side is now fixed by the routes above. The frontend's current `SessionService` (see [frontend architecture](../frontend/ARCHITECTURE.md) §23 and `frontend/src/features/session/sessionService.ts`) differs:
+**Resolved in B9 (2026-10-21).** The frontend's `SessionService` was extended, not rewritten (see [frontend architecture](../frontend/ARCHITECTURE.md) §5, §23), and `frontend/src/services/http/` implements it over these routes:
 
-- The frontend sends starters, quick actions, and typed text as one `message` kind with free text. The API takes only structured turns and contexts and stores no text (D33). B9 must map one to the other without the React UI parsing language; a small, fixed phrase mapping (D30) would sit behind a backend port, not in React.
-- Frontend intent is categorical (mood, genre, and a five-level energy scale). `ListeningContext` uses numeric targets (for example `target_energy` from 0.0 to 1.0) plus temporary genre and mood lists.
-- Like, Save, Replay, and playlist creation are local-only in the frontend, and its service interface has no methods for reactions, playback events, or playlist CRUD. The routes for them now exist.
-- The frontend has no real playback, so it cannot yet report played seconds. Audio is now served with range support.
-- The frontend shows one hero and at most one Up Next peek. The backend keeps three candidates.
-- The frontend needs artwork URLs. The API serves no artwork (B2 does not extract it).
-- The frontend never shows scores, ranks, or confidence. The API carries `rank` and `score` on occurrences, but no explanation text. Policy v1's reasons are not stored, so nothing is invented to fill `why`.
+- **Typed words, starters, and quick actions:**
+  - Typed words become `message` turns, interpreted by the backend.
+  - Starters send the approved design's structured intent (Focus: Focused/Medium; Unwind: Calm/Low; Move: Driven/High; Discover: `surprise_me`).
+  - Quick actions carry their control. React parses no language, and a check in the frontend's tests enforces it.
+- **Categorical intent:** the frontend's mood, genre, and energy map onto `temporary_moods`, `temporary_genres`, and `target_energy`. The options come from the vocabulary route.
+- **Like, Unlike, Save, Replay, and playlists:** these are service calls now, through reactions and playlist items. Saving a recommendation from the playing session is PLAYLIST_ADD feedback. The SAVE reaction stays unused.
+- **Playback:** songs play from `audio_url` with real audio. The player's position and end are reported: Next carries the facts, and an ended song is a `complete` playback event.
+- **One hero and one Up Next:** the hero is the backend's playing occurrence, and Up Next is the first queued one. A refinement re-ranks what follows while the song plays on ("music leads").
+- **Artwork:** still none; the frontend's fallback shows.
+- **Explanations:** none. Why this fits is hidden for real recommendations (decided in B9), because Policy v1's reasons are not stored.
 
 ## Superseded: Pre-Prototype 1 Draft Contract
 
@@ -376,11 +491,16 @@ This route may be included for development or administrative use. It should not 
 
 ## Open Decisions
 
-- How the frontend's message, quick-action, and refine requests map to turn variants and contexts (B9)
-- Whether the frontend's Save sends playlist adds only, leaving the SAVE reaction unused (B9)
 - Whether and how artwork is served (no route; B2 extracts none)
-- Whether manual Import and Rescan should answer at once and scan in the background, with progress, instead of within the request ([trade-off](../decisions/trade-offs.md))
-- Whether the API should expose explanation text for a recommendation; Policy v1's reasons are not stored today
+- Whether manual Import and Rescan should answer at once and scan in the background, with progress, instead of within the request ([trade-off](../decisions/trade-offs.md)). *Decided after the B8 review: they stay synchronous for Prototype 1; B11 revisits performance and progress, unless B9 shows concrete UX evidence sooner.*
+- Whether the API should expose explanation text for a recommendation; Policy v1's reasons are not stored today (B9 hides Why this fits instead)
+- Whether a past session's songs should be playable again in a new session: there is no route to play a specific track, so Replay works only within the playing session
+
+Resolved in B9 (2026-10-21):
+
+- How the frontend's messages, quick actions, starters, and Tune values reach the backend: the hybrid input model, with structured commands, and a `message` turn for typed words.
+- Whether Save sends playlist adds only: yes. The picker's choices are playlist items, PLAYLIST_ADD from the playing session, and the SAVE reaction is unused.
+- How a Like is taken back: the UNLIKE reaction, a raw event of its own.
 
 Resolved in B8 (2026-10-21):
 

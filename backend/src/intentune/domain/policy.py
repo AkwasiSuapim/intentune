@@ -266,6 +266,11 @@ class SessionSignals:
 # --- Feature fit and similarity ---------------------------------------------------------
 
 
+def requested_moods(context: ListeningContext) -> Tuple[str, ...]:
+    """The moods an intent asks for, as Policy v1 reads them: the temporary moods, or else the desired mood."""
+    return context.temporary_moods or ((context.desired_mood,) if context.desired_mood else ())
+
+
 @dataclass(frozen=True)
 class Targets:
     """What each feature should be. Empty or None means no target for that feature."""
@@ -294,9 +299,12 @@ class Targets:
 
     @classmethod
     def effective(cls, context: ListeningContext, profile: Optional[UserProfile]) -> "Targets":
-        """Current intent first, long-term profile second, otherwise no target (spec §14)."""
+        """Current intent first, long-term profile second, otherwise no target (spec §14).
+
+        current_mood, listening_goal, and activity are not read: their mapping into Policy v1 is unfinished (B9).
+        """
         history = cls.from_profile(profile)
-        current_moods = context.temporary_moods or ((context.desired_mood,) if context.desired_mood else ())
+        current_moods = requested_moods(context)
 
         def first(current, fallback):
             return current if current is not None else fallback
@@ -823,12 +831,31 @@ def _explicit_event_weight(event_type: FeedbackEventType, policy: Recommendation
     }.get(event_type)
 
 
+_PASSIVE_EVENTS = frozenset({FeedbackEventType.SKIP, FeedbackEventType.COMPLETE})
+
+
 def event_weight(event: FeedbackEvent, policy: RecommendationPolicy = POLICY_V1) -> float:
-    """What one event means on its own. An explicit action keeps its weight whatever was played."""
+    """What one event means on its own. An explicit action keeps its weight whatever was played.
+
+    UNLIKE (B9) is neutral: 0.00. It is no preference of its own; it only cancels an earlier Like.
+    """
     explicit = _explicit_event_weight(event.event_type, policy)
     if explicit is not None:
         return explicit
+    if event.event_type not in _PASSIVE_EVENTS:
+        return 0.0
     return passive_weight(event.played_seconds, event.played_fraction, policy)
+
+
+def _uncancelled(events: Sequence[FeedbackEvent]) -> List[FeedbackEvent]:
+    """The events that still count, in time order. An UNLIKE cancels every Like before it and is itself no evidence."""
+    kept: List[FeedbackEvent] = []
+    for event in sorted(events, key=lambda event: event.occurred_at):
+        if event.event_type is FeedbackEventType.UNLIKE:
+            kept = [earlier for earlier in kept if earlier.event_type is not FeedbackEventType.LIKE]
+        else:
+            kept.append(event)
+    return kept
 
 
 def interpret_feedback(
@@ -844,6 +871,11 @@ def interpret_feedback(
     event, keeps the track out of automatic recommendations for the rest of the
     session (D18), even if a later action outweighs it as evidence.
 
+    An Unlike (B9) takes back the Likes before it: they no longer count, and the
+    rest of the evidence decides, as if they had not been given. The Unlike is not
+    a preference of its own, so it never reads as Not for me and leaves a
+    Not-for-me exclusion as it was.
+
     It is about the track, across its occurrences, because a refresh surfaces the
     same upcoming track as a new occurrence: a Like on the queued card and the
     skip when it later plays are about the same listening. The raw events stay
@@ -852,6 +884,7 @@ def interpret_feedback(
     excluded = any(turn.kind is TurnKind.NOT_FOR_ME for turn in turns) or any(
         event.event_type is FeedbackEventType.NOT_FOR_ME for event in events
     )
+    events = _uncancelled(events)
     explicit = [
         (turn.created_at, policy.not_for_me_weight if turn.kind is TurnKind.NOT_FOR_ME else policy.more_like_this_weight, turn.occurrence_id)
         for turn in turns
@@ -865,7 +898,7 @@ def interpret_feedback(
     if explicit:
         at, weight, occurrence_id = max(explicit, key=lambda signal: signal[0])
         return Interpretation(weight=weight, basis=EvidenceBasis.EXPLICIT, excluded=excluded, at=at, occurrence_id=occurrence_id)
-    passive = [event for event in events if _explicit_event_weight(event.event_type, policy) is None]
+    passive = [event for event in events if event.event_type in _PASSIVE_EVENTS]
     if passive:
         latest = max(passive, key=lambda event: event.occurred_at)
         basis = EvidenceBasis.GRACE if latest.played_seconds <= policy.grace_seconds else EvidenceBasis.PASSIVE

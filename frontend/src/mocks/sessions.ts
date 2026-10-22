@@ -9,6 +9,7 @@ import { createSession } from '../features/session/sessionReducer.ts'
 import { mockIntent } from './environment.ts'
 import { songs } from './songs.ts'
 import type { MockSongId } from './songs.ts'
+import { mockQuickAction } from './quickActions.ts'
 
 function recommendation(
   id: string,
@@ -128,8 +129,8 @@ const initial: SessionState = {
   currentRecommendationId: calmDown.id,
   playback: { playing: true, positionSeconds: 72 },
   quickActions: [
-    { id: 'more-like-this', label: 'More like this' },
-    { id: 'a-bit-calmer', label: 'A bit calmer' },
+    mockQuickAction('More like this', 'more-like-this'),
+    mockQuickAction('A bit calmer', 'a-bit-calmer'),
   ],
 }
 
@@ -145,8 +146,8 @@ const change: SessionState = {
   currentRecommendationId: lastLast.id,
   playback: { playing: true, positionSeconds: 41 },
   quickActions: [
-    { id: 'keep-this-energy', label: 'Keep this energy' },
-    { id: 'more-energetic', label: 'More energetic' },
+    mockQuickAction('Keep this energy', 'keep-this-energy'),
+    mockQuickAction('More energetic', 'more-energetic'),
   ],
 }
 
@@ -185,8 +186,8 @@ const discovery: SessionState = {
   currentRecommendationId: loveNwantiti.id,
   playback: { playing: true, positionSeconds: 23 },
   quickActions: [
-    { id: 'more-like-this', label: 'More like this' },
-    { id: 'something-new', label: 'Something new' },
+    mockQuickAction('More like this', 'more-like-this'),
+    mockQuickAction('Something new', 'something-new'),
   ],
   upNextRecommendationId: monalisa.id,
 }
@@ -225,8 +226,8 @@ const refine: SessionState = {
   currentRecommendationId: monalisa.id,
   playback: { playing: true, positionSeconds: 64 },
   quickActions: [
-    { id: 'keep-this-energy', label: 'Keep this energy' },
-    { id: 'a-bit-calmer', label: 'A bit calmer' },
+    mockQuickAction('Keep this energy', 'keep-this-energy'),
+    mockQuickAction('A bit calmer', 'a-bit-calmer'),
   ],
   refine: { tab: 'energy' },
 }
@@ -276,8 +277,8 @@ const gymEnergy = openingSession(
   }),
   30,
   [
-    { id: 'push-it-harder', label: 'Push it harder' },
-    { id: 'switch-genre', label: 'Switch genre' },
+    mockQuickAction('Push it harder', 'push-it-harder'),
+    mockQuickAction('Switch genre', 'switch-genre'),
   ],
 )
 
@@ -295,8 +296,8 @@ const coding = openingSession(
   }),
   95,
   [
-    { id: 'keep-this-energy', label: 'Keep this energy' },
-    { id: 'a-bit-calmer', label: 'A bit calmer' },
+    mockQuickAction('Keep this energy', 'keep-this-energy'),
+    mockQuickAction('A bit calmer', 'a-bit-calmer'),
   ],
 )
 
@@ -308,8 +309,8 @@ const morningFocus = openingSession(
   { ...essence, id: 'essence-morning' },
   12,
   [
-    { id: 'keep-this-mood', label: 'Keep this mood' },
-    { id: 'even-calmer', label: 'Even calmer' },
+    mockQuickAction('Keep this mood', 'keep-this-mood'),
+    mockQuickAction('Even calmer', 'even-calmer'),
   ],
 )
 

@@ -555,6 +555,8 @@ The approved frontend settles two of the playback questions. Replay of a past so
 - B10 reads feedback across sessions for long-term evidence.
 - B11 evaluation tunes the thresholds (as a new version).
 
+*B9 update (2026-10-21, TD-020):* UNLIKE joins the raw events. It cancels the Likes before it on that track in the session, weighs 0.00, and is never a rejection; a Not-for-me exclusion stays (D18).
+
 ## TD-018: B7 Playlists
 
 **Status:** Accepted, awaiting B7 review
@@ -704,7 +706,7 @@ B8 is also the first phase that runs everything at once: request threads, the an
 - The worker and the startup scan run for the first time outside tests.
 - SQLite transactions serialize, reads included.
 - A long first import keeps its request open until the scan ends (other requests are still served).
-- A local `backend/.env` written before B1's default moved still says `DATABASE_URL=sqlite:///./intentune.db` (backend/intentune.db, not gitignored). It is not read by `python -m src.intentune.api`. A tool that loads `.env` would use that file instead of `backend/data/intentune.db`, so such a `.env` should be updated or removed first.
+- A local `backend/.env` written before B1's default moved still says `DATABASE_URL=sqlite:///./intentune.db` (backend/intentune.db, not gitignored). It is not read by `python -m src.intentune.api`. A tool that loads `.env` would use that file instead of `backend/data/intentune.db`, so such a `.env` should be updated or removed first. *(Done after the B8 review, 2026-10-21: the local value now points at `backend/data/intentune.db`, and `.gitignore` covers `backend/intentune.db*`.)*
 - The Starlette test client warns that its httpx support is deprecated (it asks for `httpx2`); no dependency was added for it.
 
 **Revisit When:**
@@ -713,6 +715,118 @@ B8 is also the first phase that runs everything at once: request threads, the an
 - **Settings:** settings loading is wanted (and the `.env` above is dealt with).
 - **Frontend:** B9 maps the frontend to these routes.
 - **Upgrades:** Starlette or FastAPI changes the range behavior the tests pin, or drops httpx from its test client.
+
+## TD-020: B9 Frontend Integration and Hybrid Intent Input
+
+**Status:** Accepted, awaiting B9 review (review corrections, the capability consistency correction, and the readiness model applied 2026-10-22)
+
+**Date:** 2026-10-21
+
+**Context:** Execution guide §12 and spec B9: inspect the F8 service boundary, then add the HTTP adapter the existing frontend use-case interface needs, without rewriting the frontend's state architecture or moving backend logic into it. The inspection found the boundary was built around the mock:
+- `respond()` carried no session identity;
+- starters and quick actions were sent as text for the mock to read again;
+- Like, Save, and playlists were device-only;
+- playback was a simulated clock;
+- the mock wrote explanations, titles, and quick actions the backend has no counterpart for.
+
+The user made the product decisions at the B9 review (2026-10-21), recorded below. The final review (2026-10-22) asked for four corrections, folded in below: the HTTP service as the default runtime (8), Tune marking what the library cannot use (6), Vite 8.2.4, and a regression test that one Next re-ranks once (3). A consistency correction followed the same day: one capability rule for every entry point, structured as well as typed (3, 6, 8). The last correction made it a readiness model: today's library is judged as it is, not taken as Prototype 1's permanent capability (6).
+
+**Decision:**
+
+1. **Hybrid intent input** (the user's decision):
+   - **The rule:** if the UI already knows what the listener did, it sends that meaning; if all it has is language, the backend interprets it.
+   - **What travels as meaning:** starters (their structured intent), quick actions (their control), Tune values, Next, Not for me, Like, Replay, and playlist choices.
+   - **What travels as text:** only typed words. React parses no language, and the recommendation policy never sees text.
+2. **The interpreter boundary:**
+   - **Port:** `IntentInterpreter` (`ports/intent.py`).
+   - **Prototype 1's implementation:** `DeterministicIntentInterpreter` (`adapters/deterministic_intent.py`), a small fixed vocabulary matched on whole words, longest phrase first: spec §11's commands, typed reactions, energy up and down, and the genres and moods the vocabulary holds.
+   - **Its output:** a structured `MessageMeaning` (refine with a new context, a turn, a reaction, or save requested), or a reason it has none (unrecognized, ambiguous, unsupported, no recommendation).
+   - **Nothing is guessed.** An LLM interpreter would implement the same port later (D30, D39).
+3. **One path for typed and clicked actions:**
+   - `MessageService` (`application/messages.py`) hands each meaning to the use case the control uses: `ListeningService.steer()`, `ListeningService.next()`, or `FeedbackService.react()`.
+   - The clicked Next and a typed "next" both reach `next()`, which records the NEXT turn and then the player's facts as the SKIP about the track it ended, re-ranking once. The SKIP is recorded through `SessionService` as a raw late report, which does not re-rank; regression tests count the refreshes (exactly one, clicked or typed) and check that one Next surfaces a single new queue.
+   - **One capability rule** (consistency correction): `ListeningService.start()` and `steer(REFINE)` ask `IntentCapability` before anything is recorded, and typed refinements reach those same use cases: typed text → interpret → capability check → use case; structured control → capability check → use case. The interpreter still only says what the words mean.
+   - A typed "save this" records nothing; the UI opens the picker, and only an explicit choice adds a track.
+4. **The contract:**
+   - **Typed words:** a `message` kind on the existing turns route, and `message` as an alternative to `context` on `POST /sessions`, rather than a stateless interpretation route, so React never orchestrates backend semantics.
+   - **Answers:** a message's answer adds `meaning` (and `feedback` for a reaction), and words it cannot act on answer `422 MESSAGE_NOT_UNDERSTOOD` with the reason, changing nothing.
+   - **Next:** a `next` turn may carry `playback` facts.
+   - **Text:** the typed text is never stored (D33), and a test scans every table for it.
+5. **UNLIKE** (the user's decision):
+   - **The event:** a new raw `FeedbackEventType.UNLIKE`, migration `4b1e9c7d2a6f`. The LIKE stays stored.
+   - **How Feedback Policy v1 reads it:** an Unlike cancels the Likes before it on that track in the session, weighs 0.00, and is never a rejection. A Not-for-me exclusion stays (D18).
+   - **Exposure:** the reactions route accepts `unlike`.
+6. **Vocabulary** (the user's decisions):
+   - **Genres:** Tune offers the library's genre labels.
+   - **Moods:** Tune offers the approved design's five curated moods, never the library's mood tags. The interpreter recognizes the curated moods and the library's mood labels.
+   - **Energy:** a fixed five-level scale (0.1 to 0.9), kept and shown but ranking nothing until energy is measured (D21). `GET /api/v1/listening/vocabulary` serves all three.
+   - **Support** (review correction, 2026-10-22): the vocabulary also answers which dimensions the library has evidence for, from the same projection of each playable track that Policy v1 ranks (`candidate_from_track`): genre when a track declares a genre, mood when a track's mood is one of the five, energy when a track has measured energy. Genres and library moods are the primary labels, as Policy v1 reads them. Tune marks an unsupported dimension as unavailable and never sends it, refusal guidance names only supported dimensions, and no candidate value is invented. With today's importer (genre tags only) a real library supports genre alone.
+   - **The source of truth** (consistency correction): `IntentCapability` (`application/capability.py`) reads the playable library and applies the pure `unavailable_dimensions()` (`domain/intent.py`). The vocabulary route, `MessageService`, and `ListeningService` all ask it, so the rule exists once and stays out of the recommendation domain.
+   - **The readiness model** (last correction): no playable tracks is a library state, not unsupported dimensions: nothing starts (`409 LIBRARY_NOT_READY`), and the vocabulary reports `library.ready: false` with every dimension `library_not_ready`. In a ready library, each dimension is `usable` or `no_data`, computed from the candidates Policy v1 ranks, for all seven: genre, mood, energy, danceability, tempo, valence, acousticness. Each becomes usable by itself once its data exists. A missing feature is unfinished coverage, so the domain and Policy v1 keep every target, and nothing is invented.
+   - **The rule:** each genre or mood value asked for must be declared by some playable track (moods as Policy v1 reads them: `temporary_moods`, else `desired_mood`), and each measured target needs that feature on some playable track. Only what an intent changes is checked; clearing is always accepted.
+   - **Unmapped fields:** `current_mood`, `listening_goal`, and `activity` stay in the domain and are stored, but their mapping into Policy v1 is unfinished; the vocabulary lists them as `unmapped_fields`, and nothing claims they change a recommendation.
+   - **The answer:** a start or refinement that fails it, typed or structured, is refused as a whole with `422 INTENT_UNAVAILABLE` (`{unavailable, dimensions}`): nothing is started, ended, recorded, or re-ranked. It is not `MESSAGE_NOT_UNDERSTOOD`, because the request was understood.
+   - **Values and starters:** the vocabulary adds `usable_moods`. Tune marks unusable mood values, and starters defined by a mood or energy the library lacks (Focus, Unwind, Move) are shown unavailable with an accessible reason and send nothing. Discover, an exploration control, stays usable. The mock reports full capability.
+7. **The frontend boundary, extended in place:**
+   - **TurnContext:** gains the frontend session id and the service's reference for the song in view.
+   - **TurnRequest:** gains `starter`, `control` (with its label for display), `track_ended`, `replay`, and player facts on `next` and `message`.
+   - **TurnResponse:** gains `not_understood`.
+   - **SessionTurn:** may keep the hero playing (`recommendation: null`) or `restart` it.
+   - **New service methods:** `react()`, `savePlaylists()`, and `createPlaylist()`.
+   - **Quick actions** carry their request.
+   - **Unchanged:** the reducers, the composition policy, and the components keep their shape. Composition and the hero card were only adjusted for an optional "why" and the "not understood" acknowledgement.
+8. **The HTTP adapter** (`frontend/src/services/http/`):
+   - **What it is:** a client, pure mappings (backend bodies to typed state, and back), and the HTTP `SessionService`. It is the default runtime (review correction): `chooseService()` picks it unless Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock` asks for the mock. Vite proxies `/api`.
+   - **What it keeps:** for each frontend session, only the backend session it maps to and that session's last context, as the backend reported it, never a rebuilt history.
+   - **Play:** a session that has just started is told to play, because the approved UI's hero plays at once.
+   - **Refusals:** `INTENT_UNAVAILABLE` is answered as `unavailable` ("Not available yet", with the reason), not as a failure. A past session whose intent the library can no longer act on cannot continue, in part or at all, and says so (consistency correction).
+9. **Playback authority:**
+   - A recommendation with audio plays through an audio element (`useAudioPlayback.ts`), whose position, duration, and end drive the session.
+   - The simulated clock runs only for recommendations without audio (the mock's), as the F5 boundary required.
+10. **Sessions** (the user's decision): a past session continued from the drawer becomes a new backend session with its last context (D35's one active session). Its old songs can be saved to playlists, but not liked or replayed.
+11. **Why this fits** (the user's decision): hidden for real recommendations. Nothing is invented while Policy v1's reasons are not stored.
+12. **Smaller choices:**
+    - **Quick actions:** the D36 controls ("More like this", plus "Try something different", or "More familiar" after an exploration pick).
+    - **Session titles:** worded from the intent labels.
+    - **Playlist tones:** derived from the playlist id (presentation, D32).
+    - **Artwork:** the existing fallback.
+    - **The drawer:** the 20 most recent sessions.
+    - **Tune:** stays open on the tuned dimension, as in the approved design.
+13. **No new dependency** on either side. Vite moved from 8.2.1 to the patched 8.2.4 at the review (`npm audit`: 0 vulnerabilities).
+
+**Alternatives Considered:**
+- **Starters and quick actions as phrases** for the backend to parse: rejected by the hybrid rule, since their meaning is already known.
+- **A stateless `POST /interpretations`:** React would receive an interpretation and pick the next route itself.
+- **Local-only Unlike:** the backend would keep evidence the listener withdrew.
+- **Library mood tags in Tune:** they are rare and uncurated.
+- **Hiding unavailable Tune tabs:** the approved design's three tabs stay, marked, so the listener sees what could be tuned and why it cannot be yet.
+- **Accepting a structured intent the library cannot use, and relying on the frontend not to send it:** the first review correction did this; the consistency correction rejected it, since the API would report success for a preference that changes nothing.
+- **`MESSAGE_NOT_UNDERSTOOD` for an intent the library cannot use:** the words were understood.
+- **Sending only the usable part of a starter, or continuing a past session with only its usable part:** either would change its meaning silently.
+- **Leaving the other measured targets out of the capability model:** the consistency correction did; the readiness model covers them, so they become usable automatically once a pipeline provides their values.
+- **Removing targets the local library cannot populate today:** rejected; that would shrink the domain for unfinished coverage.
+- **Reporting each dimension as unsupported in an empty library:** rejected; that is a setup state (`LIBRARY_NOT_READY`).
+- **Refusing `current_mood`, `listening_goal`, and `activity`:** they are part of the listener's stated intent and kept; they are documented, and reported, as not yet mapped.
+- **Inventing explanations from track metadata.**
+- **Resuming ended sessions in the backend:** contradicts D35.
+- **Skipping a never-played queued track:** there is no such fact to record.
+- **Mirroring the frontend's session history in Python:** forbidden by the guide.
+
+**Consequences:**
+- **What the UI does now:** it runs on real sessions, real audio, real feedback, and real playlists, by default. The mock is opt-in (`mock` mode) and remains the test double.
+- **What can be said:** typed control is deliberately narrow. Words outside the vocabulary are acknowledged as not understood, and Tune opens to show what can be asked.
+- **Refining:** a refinement no longer changes the song at once; the next song reflects it ("music leads").
+- **Intent dimensions:** energy and most moods have no effect on ranking until features exist. Tune marks them unavailable and typed refinements of them are refused, so no control pretends to change what plays. Starters defined by them are shown unavailable, and a past session asking for them cannot continue. With no playable music, nothing starts, and the UI says the library is not ready.
+- **Not yet possible:**
+  - replaying a past session's songs (no route plays a specific track);
+  - artwork;
+  - a library screen (importing is an API step).
+
+**Revisit When:**
+- **Language:** listeners need more vocabulary (extend the interpreter, or add the LLM port, D30).
+- **Features and explanations:** energy or mood features are measured, or Policy v1's reasons are stored for explanation.
+- **Library:** an artwork or library screen is designed.
+- **Playback:** playing a specific track becomes a product need.
 
 ## New Decision Template
 

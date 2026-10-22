@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from src.intentune.api.container import Container
 from src.intentune.api.errors import REQUEST_ID_HEADER, RequestIdMiddleware, install_error_handling
-from src.intentune.api.routes import health, library, playlists, sessions, tracks
+from src.intentune.api.routes import health, library, listening, playlists, sessions, tracks
 from src.intentune.api.settings import ApiSettings
 
 
@@ -46,7 +46,7 @@ def create_app(settings: Optional[ApiSettings] = None, rng_factory: Callable[[],
     )
     app.state.container = container
     install_error_handling(app)
-    for module in (health, library, tracks, sessions, playlists):
+    for module in (health, library, tracks, listening, sessions, playlists):
         app.include_router(module.router)
 
     # The request id middleware sits inside CORS, so its error responses get CORS headers too.

@@ -16,14 +16,14 @@ import type {
 
 export type WorkspaceState = Pick<
   SessionEnvironment,
-  'starters' | 'refineOptions'
+  'starters' | 'refineOptions' | 'unavailableDimensions' | 'libraryReady'
 > & {
   sessions: Record<string, SessionState>
   /** Session ids in the order the drawer lists them. */
   sessionOrder: string[]
   activeSessionId: string
   playlists: Playlist[]
-  /** Sessions and playlists created so far, used to give new ones unique ids. */
+  /** Sessions created so far, used to give new ones unique ids. */
   createdCount: number
 }
 
@@ -36,7 +36,8 @@ export type WorkspaceAction =
   | { type: 'answer_received'; sessionId: string; actions: SessionAction[] }
   | { type: 'session_created' }
   | { type: 'session_opened'; sessionId: string }
-  | { type: 'playlist_created' }
+  /** The service created a playlist from the picker of this session. */
+  | { type: 'playlist_created'; sessionId: string; playlist: Playlist }
 
 export function activeSession(workspace: WorkspaceState): SessionState {
   return workspace.sessions[workspace.activeSessionId]
@@ -49,6 +50,8 @@ export function createWorkspace(seed: WorkspaceSeed): WorkspaceState {
   return {
     starters: seed.starters,
     refineOptions: seed.refineOptions,
+    unavailableDimensions: seed.unavailableDimensions ?? [],
+    libraryReady: seed.libraryReady ?? true,
     sessions: Object.fromEntries(
       [fresh, ...seed.sessions].map((session) => [session.id, session]),
     ),
@@ -66,6 +69,8 @@ export function selectEnvironment(
   return {
     starters: workspace.starters,
     refineOptions: workspace.refineOptions,
+    unavailableDimensions: workspace.unavailableDimensions,
+    libraryReady: workspace.libraryReady,
     playlists: workspace.playlists,
     sessions: workspace.sessionOrder.map((id) => {
       const { title, intent } = workspace.sessions[id]
@@ -99,32 +104,36 @@ function leaveActive(workspace: WorkspaceState): WorkspaceState {
   return { ...workspace, sessions }
 }
 
-function createPlaylist(workspace: WorkspaceState): WorkspaceState {
+/** The name a playlist created from the open session's picker gets: the session's, made unique. */
+export function newPlaylistName(workspace: WorkspaceState): string {
   const session = activeSession(workspace)
-  if (session.overlay?.type !== 'playlist_picker') return workspace
-
   const base =
     session.title === NEW_SESSION_TITLE ? 'New playlist' : session.title
   const taken = new Set(workspace.playlists.map((playlist) => playlist.name))
   let name = base
   for (let copy = 2; taken.has(name); copy++) name = `${base} ${copy}`
+  return name
+}
 
-  const createdCount = workspace.createdCount + 1
-  const playlist: Playlist = { id: `playlist-${createdCount}`, name }
-
-  // Creating a playlist from the picker is itself the user choosing it.
-  return {
-    ...workspace,
-    createdCount,
-    playlists: [...workspace.playlists, playlist],
-    sessions: {
-      ...workspace.sessions,
-      [session.id]: sessionReducer(session, {
-        type: 'playlist_toggled',
-        playlistId: playlist.id,
-      }),
-    },
+function addPlaylist(
+  workspace: WorkspaceState,
+  sessionId: string,
+  playlist: Playlist,
+): WorkspaceState {
+  if (workspace.playlists.some((existing) => existing.id === playlist.id)) {
+    return workspace
   }
+  const session = workspace.sessions[sessionId]
+  const sessions = { ...workspace.sessions }
+  // Creating a playlist from the picker is itself the user choosing it,
+  // if the picker it was created from is still open.
+  if (session?.overlay?.type === 'playlist_picker') {
+    sessions[session.id] = sessionReducer(session, {
+      type: 'playlist_toggled',
+      playlistId: playlist.id,
+    })
+  }
+  return { ...workspace, playlists: [...workspace.playlists, playlist], sessions }
 }
 
 export function workspaceReducer(
@@ -190,6 +199,6 @@ export function workspaceReducer(
     }
 
     case 'playlist_created':
-      return createPlaylist(workspace)
+      return addPlaylist(workspace, action.sessionId, action.playlist)
   }
 }

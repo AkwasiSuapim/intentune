@@ -21,16 +21,19 @@ from typing import Callable, Optional
 
 from src.intentune.adapters.local_folders import LocalSourceFolders
 from src.intentune.adapters.managed_media import LocalManagedMedia
+from src.intentune.adapters.deterministic_intent import DeterministicIntentInterpreter
 from src.intentune.adapters.mutagen_audio import MutagenAudioInspector
 from src.intentune.adapters.signal_levels import SignalLevelAnalyzer
 from src.intentune.api.settings import ApiSettings
 from src.intentune.application.analysis import AnalysisService
 from src.intentune.application.analysis_worker import AnalysisWorker
+from src.intentune.application.capability import IntentCapability
 from src.intentune.application.feedback import FeedbackService
 from src.intentune.application.library import LibraryService
 from src.intentune.application.library_scans import LibraryScanCoordinator
 from src.intentune.application.listening import ListeningService
 from src.intentune.application.local_listener import ensure_default_listener
+from src.intentune.application.messages import MessageService
 from src.intentune.application.playlists import PlaylistService
 from src.intentune.application.recommendations import RecommendationService
 from src.intentune.application.sessions import SessionService
@@ -53,6 +56,7 @@ class Container:
         self._folders = LocalSourceFolders(excluded_directories=[self._media.root])
         self._inspector = MutagenAudioInspector()
         self._analyzer = SignalLevelAnalyzer()
+        self._interpreter = DeterministicIntentInterpreter()
         self.worker = AnalysisWorker(self.analysis(), idle_seconds=settings.analysis_idle_seconds)
         self.scans = LibraryScanCoordinator(self.library, on_scanned=self.worker.wake)
         self._listener_profile_id: Optional[str] = None
@@ -97,7 +101,23 @@ class Container:
 
     def listening(self) -> ListeningService:
         unit_of_work = self._unit_of_work()
-        return ListeningService(SessionService(unit_of_work), self._recommendations(unit_of_work))
+        return ListeningService(SessionService(unit_of_work), self._recommendations(unit_of_work), IntentCapability(unit_of_work))
+
+    def capability(self) -> IntentCapability:
+        return IntentCapability(self._unit_of_work())
+
+    def messages(self) -> MessageService:
+        unit_of_work = self._unit_of_work()
+        recommendations = self._recommendations(unit_of_work)
+        sessions = SessionService(unit_of_work)
+        capability = IntentCapability(unit_of_work)
+        return MessageService(
+            self._interpreter,
+            sessions,
+            ListeningService(sessions, recommendations, capability),
+            FeedbackService(unit_of_work, recommendations),
+            capability,
+        )
 
     def feedback(self) -> FeedbackService:
         unit_of_work = self._unit_of_work()

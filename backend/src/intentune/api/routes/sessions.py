@@ -9,7 +9,15 @@ Feedback travels two ways:
   seconds played and the track's duration);
 - reactions: like, save, replay, or not for me, about one recommendation.
 A playlist add is feedback too, recorded by the playlist items route.
+
+Typed words (B9) arrive as a `message` turn, or as the start's `message`. The
+backend interprets them (application/messages.py) into the same use cases
+the controls reach, and stores only the resulting structured turn or event.
+Next may carry the player's facts about the track it ends, recorded as a
+SKIP.
 """
+
+from typing import Optional
 
 from fastapi import APIRouter
 
@@ -19,15 +27,19 @@ from src.intentune.api.dependencies import DEFAULT_LIMIT, ERROR_RESPONSES, Conta
 from src.intentune.api.schemas import (
     FeedbackOut,
     PlaybackEventIn,
+    PlaybackIn,
     ReactionIn,
     SessionDetailOut,
     SessionPageOut,
+    SessionStartOut,
     SessionStateOut,
     StartSessionIn,
     TurnIn,
     TurnResultOut,
 )
 from src.intentune.application.feedback import FeedbackOutcome
+from src.intentune.application.listening import PlaybackFacts
+from src.intentune.application.messages import MessageOutcome
 from src.intentune.domain.session import FeedbackEventType, SessionState, TurnKind
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"], responses=ERROR_RESPONSES)
@@ -41,11 +53,37 @@ def _feedback_out(container: Container, outcome: FeedbackOutcome) -> FeedbackOut
     return views.feedback_out(outcome, container.library().get_tracks(views.track_ids_of(outcome.state)))
 
 
-@router.post("", response_model=SessionStateOut, status_code=201)
-def start_session(body: StartSessionIn, container: ContainerDep) -> SessionStateOut:
-    """Start a session with this intent. The listener's previous active session ends. Nothing plays yet."""
-    state = container.listening().start(container.listener_profile_id, body.context.to_domain())
-    return _state_out(container, state)
+def _facts(playback: Optional[PlaybackIn]) -> Optional[PlaybackFacts]:
+    return PlaybackFacts(playback.played_seconds, playback.duration_seconds) if playback is not None else None
+
+
+def _message_result(container: Container, outcome: MessageOutcome) -> TurnResultOut:
+    return TurnResultOut(
+        meaning=views.meaning_out(outcome.meaning),
+        turn=views.turn_out(outcome.turn) if outcome.turn is not None else None,
+        feedback=views.feedback_fact_out(outcome.feedback) if outcome.feedback is not None else None,
+        state=_state_out(container, outcome.state),
+    )
+
+
+@router.post("", response_model=SessionStartOut, status_code=201)
+def start_session(body: StartSessionIn, container: ContainerDep) -> SessionStartOut:
+    """Start a session from a context, or from the listener's typed words (B9). The previous active session ends.
+
+    Nothing plays yet. Words Intentune cannot act on start nothing (422 MESSAGE_NOT_UNDERSTOOD).
+    """
+    if body.message is not None:
+        outcome = container.messages().start(container.listener_profile_id, body.message)
+        state = _state_out(container, outcome.state)
+        return SessionStartOut(
+            session=state.session,
+            playing=state.playing,
+            queue=state.queue,
+            meaning=views.meaning_out(outcome.meaning),
+            turn=views.turn_out(outcome.turn) if outcome.turn is not None else None,
+        )
+    state = _state_out(container, container.listening().start(container.listener_profile_id, body.context.to_domain()))
+    return SessionStartOut(session=state.session, playing=state.playing, queue=state.queue)
 
 
 @router.get("", response_model=SessionPageOut)
@@ -66,10 +104,20 @@ def get_session(session_id: str, container: ContainerDep) -> SessionDetailOut:
 
 @router.post("/{session_id}/turns", response_model=TurnResultOut)
 def apply_turn(session_id: str, body: TurnIn, container: ContainerDep) -> TurnResultOut:
-    context = body.context.to_domain() if body.context is not None else None
-    turn, state = container.listening().steer(
-        session_id, TurnKind(body.kind.upper()), context=context, occurrence_id=body.occurrence_id
-    )
+    """A steering turn, or (B9) a typed message the backend interprets into one of the same use cases.
+
+    A message Intentune cannot act on changes nothing (422 MESSAGE_NOT_UNDERSTOOD).
+    """
+    if body.kind == "message":
+        outcome = container.messages().send(session_id, body.text, body.occurrence_id, _facts(body.playback))
+        return _message_result(container, outcome)
+    if body.kind == "next":
+        turn, state = container.listening().next(session_id, body.occurrence_id, _facts(body.playback))
+    else:
+        context = body.context.to_domain() if body.context is not None else None
+        turn, state = container.listening().steer(
+            session_id, TurnKind(body.kind.upper()), context=context, occurrence_id=body.occurrence_id
+        )
     return TurnResultOut(turn=views.turn_out(turn), state=_state_out(container, state))
 
 

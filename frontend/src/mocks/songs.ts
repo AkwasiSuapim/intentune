@@ -117,3 +117,7 @@ export const songs = {
 } satisfies Record<string, MockSong>
 
 export type MockSongId = keyof typeof songs
+
+export function isMockSongId(songId: string): songId is MockSongId {
+  return songId in songs
+}

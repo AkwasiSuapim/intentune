@@ -266,6 +266,29 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 - **Status:** Current since B8 (2026-10-21).
 - **Revisit when:** a Starlette upgrade changes the pinned behavior, or a browser needs something it does not do.
 
+### Hybrid intent input (TD-020)
+
+- **Gain:** a control's meaning never depends on its wording, and relabelling changes nothing. Only language needs interpreting, and that happens in one place, the backend, behind a port an LLM could later implement. The policy never sees text, and refusals are honest.
+- **Cost:** two kinds of request instead of one. A deliberately small vocabulary means many free sentences are not understood.
+- **Status:** Current since B9 (2026-10-21).
+- **Revisit when:** listeners need more vocabulary, or the LLM port is approved (D30, D39).
+
+### A refinement re-ranks what follows; the song plays on (TD-020)
+
+- **Gain:** "music leads". The backend's queue and the UI agree, there is no forced skip that would record a false listening fact, and the next song reflects the new intent.
+- **Cost:** in the mock, a refinement changed the song at once, so the integrated app feels less immediate after a Tune change.
+- **Status:** Current since B9 (2026-10-21).
+- **Revisit when:** listeners expect the immediate switch. A "play the new direction now" action would be a product decision.
+
+### A past session continues as a new backend session (TD-020)
+
+- **Gain:** D35 holds (one active session, no stale queue), and the UI keeps showing one session.
+- **Cost:**
+  - Each continuation adds a backend session to the history.
+  - The past session's own songs can be saved to playlists, but not liked or replayed in the new one.
+- **Status:** Current since B9 (2026-10-21).
+- **Revisit when:** session history views need the continuations linked, or replaying a past song becomes a need.
+
 ### Conservative long-term learning (D06)
 
 - **Gain:** one session or one skip never rewrites long-term taste.

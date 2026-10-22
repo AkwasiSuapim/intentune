@@ -112,3 +112,28 @@
   color: var(--color-text-muted);
   font-size: var(--text-control);
 }
+
+/*
+ * A starter the music library cannot act on: the same marking as an
+ * unavailable Tune dimension (struck through, dimmed), with its reason.
+ */
+.starter[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.starter[aria-disabled='true'] .starterLabel {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.starter[aria-disabled='true'] .swatch,
+.starter[aria-disabled='true'] .starterLabel,
+.starter[aria-disabled='true'] .starterPhrase {
+  opacity: 0.45;
+}
+
+.starterReason {
+  margin-top: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm);
+}

@@ -4,6 +4,8 @@ Capabilities (execution guide §5): register a source, list sources, scan a
 source (and rescan them all), import one discovered file, list tracks, get a
 track, and mark a track unavailable. B8 adds get_tracks() (several tracks by
 id) and track_audio() (a playable track's managed copy, for the audio route).
+The vocabulary B9 serves (genre and mood labels, and what the library supports)
+is IntentCapability's (application/capability.py).
 Scans that must not overlap are run through LibraryScanCoordinator
 (application/library_scans.py).
 

@@ -22,7 +22,8 @@ type RecommendationCardHeroProps = {
   playing: boolean
   positionSeconds: number
   durationSeconds: number
-  whySummary: string
+  /** Why it fits. Without one, Why this fits is not shown. */
+  whySummary?: string
   whyReasons?: string[]
   whyExpanded?: boolean
   liked?: boolean
@@ -123,12 +124,14 @@ function RecommendationCardHero({
           </button>
         </div>
 
-        <WhyThisFits
-          summary={whySummary}
-          reasons={whyReasons}
-          expanded={whyExpanded}
-          onToggle={onToggleWhy}
-        />
+        {whySummary && (
+          <WhyThisFits
+            summary={whySummary}
+            reasons={whyReasons}
+            expanded={whyExpanded}
+            onToggle={onToggleWhy}
+          />
+        )}
 
         <div className={styles.reactions}>
           <button

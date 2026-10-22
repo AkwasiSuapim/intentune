@@ -79,8 +79,9 @@ SessionService (B4): start / turn / queue / play / advance / end / restart clean
 UnitOfWork: listening_sessions, session_turns, recommendation_occurrences, feedback_events (+ listener_profiles, tracks)
 
 
-React frontend (frontend/) --> SessionService interface --> mock implementation
-                               (no connection to the backend yet)
+React frontend (frontend/) --> SessionService interface --> HTTP implementation (B9, the default): src/services/http/ -> the API above
+                                                        --> mock implementation (tests, design demo, browser checks; `mock` mode)
+   typed words travel unread; the backend's IntentInterpreter (DeterministicIntentInterpreter) reads them
 ```
 
 ## Prototype 1 Target Architecture
@@ -300,6 +301,11 @@ frameworks.
 
 Authentication is **not** part of Prototype 1 (D01). Routes stay thin: no scoring, ranking, or persistence logic inside route functions. No inner layer imports the API.
 
+**Current (B9, 2026-10-21):**
+- **New routes:** typed messages arrive as a `message` turn (or the start's `message`), and `GET /listening/vocabulary` serves Tune's options.
+- **Interpretation:** `application/messages.py` (`MessageService`) asks the `IntentInterpreter` port (`ports/intent.py`) what typed words mean, and hands the structured meaning to the same use cases the controls use. Prototype 1's interpreter is `adapters/deterministic_intent.py`, a small fixed vocabulary that refuses rather than guesses.
+- **The policy:** it never sees text.
+
 ### Repository and Port Layer
 
 Defines interfaces for data access and external capabilities.
@@ -357,7 +363,11 @@ Implements ports using specific technology.
 
 **Current:** a React + TypeScript + Vite application in `frontend/`, governed by [the frontend architecture](../frontend/ARCHITECTURE.md). It calls a `SessionService` interface and never contains scoring or ranking rules.
 
-**Planned (B9 / frontend F9):** an HTTP implementation of the service boundary. The backend owns session identity, structured context, recommendation occurrences and history, reactions, and playlist state. The frontend owns modal and drawer state, the composer draft, animation, scrolling and focus, and visual expansion state (D32).
+**Current (B9 / frontend F9, 2026-10-21):** an HTTP implementation of the service boundary (`frontend/src/services/http/`), chosen in `App.tsx`. Since the B9 review (2026-10-22) it is the default runtime; the mock is selected only explicitly, with Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock`, and stays the test double.
+- **Ownership:** the backend owns session identity, structured context, recommendation occurrences and history, reactions, and playlist state. The frontend owns modal and drawer state, the composer draft, animation, scrolling and focus, and visual expansion state (D32).
+- **Requests carry meaning;** only typed words travel as text.
+- **Playback:** real audio plays through an audio element that is the playback authority.
+- **Details:** see the [frontend architecture](../frontend/ARCHITECTURE.md) §23.
 
 ## Core Architectural Rule
 

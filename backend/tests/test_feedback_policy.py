@@ -206,6 +206,68 @@ def test_nothing_said_or_played_is_no_evidence():
     assert interpret_feedback((), ()) == Interpretation(weight=0.0, basis=EvidenceBasis.NONE)
 
 
+# --- Unlike (B9) ----------------------------------------------------------------------------
+
+
+def test_an_unlike_is_neutral_on_its_own():
+    unlike = _event(FeedbackEventType.UNLIKE)
+
+    assert event_weight(unlike) == 0.0
+    assert interpret_feedback((), (unlike,)) == Interpretation(weight=0.0, basis=EvidenceBasis.NONE)
+
+
+def test_an_unlike_takes_back_the_like_and_leaves_no_positive_evidence():
+    taken_back = interpret_feedback((), (_event(FeedbackEventType.LIKE, 1), _event(FeedbackEventType.UNLIKE, 2)))
+
+    assert taken_back == Interpretation(weight=0.0, basis=EvidenceBasis.NONE)
+
+
+def test_after_an_unlike_the_rest_of_the_evidence_decides_as_if_the_like_had_not_been_given():
+    played_then_taken_back = interpret_feedback(
+        (), (_played(10.0, at=1), _event(FeedbackEventType.LIKE, 2), _event(FeedbackEventType.UNLIKE, 3))
+    )
+    saved_then_taken_back = interpret_feedback(
+        (), (_event(FeedbackEventType.SAVE, 1), _event(FeedbackEventType.LIKE, 2), _event(FeedbackEventType.UNLIKE, 3))
+    )
+    more_like_this_kept = interpret_feedback(
+        (_turn(TurnKind.MORE_LIKE_THIS, 1),), (_event(FeedbackEventType.LIKE, 2), _event(FeedbackEventType.UNLIKE, 3))
+    )
+
+    assert (played_then_taken_back.weight, played_then_taken_back.basis, played_then_taken_back.at) == (-0.5, EvidenceBasis.PASSIVE, _at(1))
+    assert (saved_then_taken_back.weight, saved_then_taken_back.at) == (1.0, _at(1))  # an Unlike takes back only a Like
+    assert (more_like_this_kept.weight, more_like_this_kept.at) == (1.0, _at(1))
+
+
+def test_a_like_after_an_unlike_counts_again():
+    liked_again = interpret_feedback(
+        (), (_event(FeedbackEventType.LIKE, 1), _event(FeedbackEventType.UNLIKE, 2), _event(FeedbackEventType.LIKE, 3))
+    )
+
+    assert (liked_again.weight, liked_again.basis, liked_again.at) == (1.0, EvidenceBasis.EXPLICIT, _at(3))
+
+
+def test_an_unlike_is_never_a_rejection_and_never_lifts_one():
+    unliked = interpret_feedback((), (_event(FeedbackEventType.LIKE, 1), _event(FeedbackEventType.UNLIKE, 2)))
+    refused_then_liked_then_unliked = interpret_feedback(
+        (), (_event(FeedbackEventType.NOT_FOR_ME, 1), _event(FeedbackEventType.LIKE, 2), _event(FeedbackEventType.UNLIKE, 3))
+    )
+
+    assert unliked.excluded is False and unliked.weight == 0.0
+    assert refused_then_liked_then_unliked.excluded is True  # D18: the exclusion stays
+    assert (refused_then_liked_then_unliked.weight, refused_then_liked_then_unliked.at) == (-1.0, _at(1))
+
+
+def test_an_unlike_takes_back_a_like_given_on_another_occurrence_of_the_track():
+    """Evidence is per track in the session (B6), so a Like on the queued card is taken back from the playing one."""
+    queued, playing = str(uuid.uuid4()), str(uuid.uuid4())
+
+    interpretation = interpret_feedback(
+        (), (_event(FeedbackEventType.LIKE, 1, occurrence_id=queued), _event(FeedbackEventType.UNLIKE, 2, occurrence_id=playing))
+    )
+
+    assert interpretation.weight == 0.0
+
+
 # --- From raw history to session evidence -------------------------------------------------------
 
 

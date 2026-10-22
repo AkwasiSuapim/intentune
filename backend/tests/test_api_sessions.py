@@ -62,10 +62,29 @@ def test_starting_a_session_surfaces_its_first_queue_with_the_tracks(client, lib
     assert first["track"] == library_tracks[first["track"]["title"]]
 
 
-def test_a_session_over_an_empty_library_starts_with_an_empty_queue(client):
-    state = _start(client)
+@pytest.mark.parametrize("context", [{}, {"temporary_genres": ["Ambient"]}, {"temporary_moods": ["Calm"], "target_energy": 0.5}])
+def test_no_session_starts_before_the_library_has_playable_music(client, context):
+    """A setup state, not an unsupported intent: music must be imported first, whatever the intent asks for."""
+    response = client.post("/api/v1/sessions", json={"context": context})
 
-    assert (state["playing"], state["queue"]) == (None, [])
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert (error["code"], error["details"]) == ("LIBRARY_NOT_READY", {})
+    assert error["message"] == "Your library has no playable music yet. Import some music to start listening."
+    assert client.get("/api/v1/sessions").json()["total"] == 0
+
+
+def test_the_unmapped_context_fields_are_accepted_and_stored(client, library_tracks):
+    """Their mapping into Policy v1 is unfinished, so they rank nothing, but they are part of the intent and kept."""
+    context = {"temporary_genres": ["Ambient"], "current_mood": "tired", "listening_goal": "focus", "activity": "reading"}
+
+    session = _start(client, genres=())  # a session in progress first
+    response = client.post("/api/v1/sessions", json={"context": context})
+
+    assert response.status_code == 201
+    stored = response.json()["session"]["context"]
+    assert {key: stored[key] for key in context} == context
+    assert session["session"]["session_id"] != response.json()["session"]["session_id"]
 
 
 def test_starting_again_ends_the_previous_session(client, library_tracks):
@@ -145,11 +164,51 @@ def test_next_moves_on_to_another_track(client, library_tracks):
 def test_refine_replaces_the_context_and_re_ranks(client, library_tracks):
     session_id = _start(client)["session"]["session_id"]
 
-    body = _turn(client, session_id, kind="refine", context={"temporary_genres": ["Jazz"], "target_energy": 0.3}).json()
+    body = _turn(client, session_id, kind="refine", context={"temporary_genres": ["Jazz"]}).json()
 
     assert body["turn"]["context"]["temporary_genres"] == ["Jazz"]
-    assert body["state"]["session"]["context"]["target_energy"] == 0.3
+    assert body["state"]["session"]["context"]["temporary_genres"] == ["Jazz"]
     assert sorted(_titles(body["state"]["queue"])) == ["j1", "j2", "j3"]
+
+
+@pytest.mark.parametrize(
+    "context, unavailable",
+    [
+        ({"temporary_genres": ["Ambient"], "temporary_moods": ["Calm"]}, ["mood"]),
+        ({"temporary_genres": ["Ambient"], "desired_mood": "Calm"}, ["mood"]),
+        ({"temporary_genres": ["Ambient"], "target_energy": 0.3}, ["energy"]),
+        ({"temporary_genres": ["Polka"]}, ["genre"]),
+        ({"temporary_genres": ["Jazz"], "target_energy": 0.3}, ["energy"]),
+        ({"temporary_genres": ["Ambient"], "target_valence": 0.6, "target_tempo_bpm": 120}, ["tempo", "valence"]),
+    ],
+    ids=["mood", "desired-mood", "energy", "undeclared-genre", "usable-genre-with-energy", "measured-targets"],
+)
+def test_a_structured_refine_the_library_cannot_use_is_refused_and_changes_nothing(client, library_tracks, context, unavailable):
+    """The library declares Ambient and Jazz, no moods, and no energy. Nothing of the refinement is applied, not even its usable part."""
+    session_id = _start(client)["session"]["session_id"]
+    _turn(client, session_id, kind="next")
+    before = client.get(f"/api/v1/sessions/{session_id}").json()
+
+    response = _turn(client, session_id, kind="refine", context=context)
+
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert (error["code"], error["details"]) == ("INTENT_UNAVAILABLE", {"unavailable": unavailable, "dimensions": ["genre"]})
+    assert client.get(f"/api/v1/sessions/{session_id}").json() == before  # no turn, no context change, no new queue
+
+
+def test_a_structured_start_the_library_cannot_use_starts_nothing(client, library_tracks):
+    """The Focus starter's intent (Focused, Medium energy) over a library with genres only."""
+    playing_on = _start(client)["session"]["session_id"]
+
+    response = client.post("/api/v1/sessions", json={"context": {"temporary_moods": ["Focused"], "target_energy": 0.5}})
+
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert (error["code"], error["details"]) == ("INTENT_UNAVAILABLE", {"unavailable": ["mood", "energy"], "dimensions": ["genre"]})
+    assert error["message"] == "Your library doesn't describe that mood or energy yet, so that can't change what plays. Try a genre."
+    sessions = client.get("/api/v1/sessions").json()
+    assert [(session["session_id"], session["status"]) for session in sessions["items"]] == [(playing_on, "active")]
 
 
 def test_not_for_me_about_the_playing_track_moves_on_and_keeps_it_out(client, library_tracks):
@@ -320,6 +379,23 @@ def test_a_like_is_explicit_positive_evidence_and_leaves_playback_alone(client, 
     assert (body["event"]["event_type"], body["event"]["played_seconds"], body["event_weight"]) == ("like", None, 1.0)
     assert (body["interpretation"]["weight"], body["interpretation"]["basis"]) == (1.0, "explicit")
     assert body["state"]["playing"]["occurrence_id"] == occurrence_id
+
+
+def test_an_unlike_takes_a_like_back_and_both_stay_in_the_history(client, library_tracks):
+    session_id, playing = _playing(client)
+    occurrence_id = playing["playing"]["occurrence_id"]
+    reactions = f"/api/v1/sessions/{session_id}/recommendations/{occurrence_id}/reactions"
+    client.post(reactions, json={"reaction": "like"})
+
+    response = client.post(reactions, json={"reaction": "unlike"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert (body["event"]["event_type"], body["event_weight"]) == ("unlike", 0.0)
+    assert (body["interpretation"]["weight"], body["interpretation"]["basis"], body["interpretation"]["excluded"]) == (0.0, "none", False)
+    assert body["state"]["playing"]["occurrence_id"] == occurrence_id
+    events = client.get(f"/api/v1/sessions/{session_id}").json()["feedback_events"]
+    assert [event["event_type"] for event in events] == ["like", "unlike"]
 
 
 def test_not_for_me_as_a_reaction_excludes_the_track_and_moves_on(client, library_tracks):

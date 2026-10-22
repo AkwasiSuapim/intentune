@@ -121,6 +121,8 @@ const SAMPLES: { block: SessionBlock; shows: string[] }[] = [
       moodId: 'focused',
       genres: mockEnvironment.refineOptions.genre,
       genreId: 'afrobeats',
+      unavailable: [],
+      libraryReady: true,
     },
     shows: ['Tune the session', 'Medium energy'],
   },
@@ -293,5 +295,28 @@ describe('session view', () => {
     expect(markup).toContain('What do you need from your music right now?')
     expect(markup).not.toContain('<article')
     expect(markup).not.toContain('aria-label="Current intent"')
+    // The mock reports full capability, so the approved design's four starters are all usable.
+    for (const name of ['Focus: Help me focus', 'Unwind: Something to unwind to', 'Move: Get me moving', 'Discover: Surprise me']) {
+      expect(markup).toContain(`aria-label="${name}"`)
+    }
+    expect(markup).not.toContain('aria-disabled')
+  })
+
+  it('marks a starter the library cannot act on, with its reason, and leaves the others alone', () => {
+    const markup = renderToStaticMarkup(
+      <SessionView
+        state={mockSessions.new}
+        environment={{
+          ...mockEnvironment,
+          starters: mockEnvironment.starters.map((starter) =>
+            starter.id === 'focus' ? { ...starter, unavailableReason: 'Your music has no energy information for this yet.' } : starter,
+          ),
+        }}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Focus: Help me focus, unavailable" aria-disabled="true"')
+    expect(markup).toContain('Your music has no energy information for this yet.')
+    expect(markup.match(/aria-disabled/g)).toHaveLength(1)
   })
 })

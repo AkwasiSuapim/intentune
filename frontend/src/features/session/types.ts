@@ -10,6 +10,8 @@ export const INTENT_DIMENSIONS: IntentDimension[] = ['mood', 'genre', 'energy']
 export type IntentValue = {
   id: string
   label: string
+  /** A tuning value the music library cannot act on: offered, marked, and never sent. */
+  unavailable?: boolean
 }
 
 /** The interpreted listening intent: one value per dimension. */
@@ -31,10 +33,15 @@ export type Recommendation = {
   descriptors: string[]
   artworkUrl: string | null
   durationSeconds: number
-  why: {
+  /** Why it fits, when the service explains it. Real recommendations carry none yet. */
+  why?: {
     summary: string
     reasons: string[]
   }
+  /** The service's own reference for this recommendation, for anything later said about it. */
+  ref?: string
+  /** Where its audio plays from. Without one, playback is simulated. */
+  audioUrl?: string | null
   /** The user's own words this recommendation answers, when worth echoing. */
   echo?: string
   liked: boolean
@@ -56,6 +63,12 @@ export type SessionEvent =
   | { kind: 'intent_kept'; id: string; intent: Intent; label: string }
   | { kind: 'intent_unchanged'; id: string; cause: 'not_for_me' }
   | { kind: 'session_resumed'; id: string; intent: Intent }
+  /** The service could not act on what the listener typed; nothing changed. */
+  | { kind: 'not_understood'; id: string; message: string }
+  /** The service understood, but the music library cannot act on what was asked; nothing changed. */
+  | { kind: 'unavailable'; id: string; message: string }
+  /** The music library has nothing playable yet, so nothing can be recommended; nothing changed. */
+  | { kind: 'library_not_ready'; id: string; message: string }
   | { kind: 'recommendation'; id: string; recommendationId: string }
 
 export type RefineTab = IntentDimension
@@ -91,10 +104,14 @@ export type SessionState = {
   playback: {
     playing: boolean
     positionSeconds: number
+    /** The duration the player reports, once it knows it. */
+    durationSeconds?: number
+    /** Counts requests to start the hero again from the beginning. */
+    restarts?: number
   }
   whyExpanded: boolean
   /** Contextual refinements offered for the current recommendation. */
-  quickActions: { id: string; label: string }[]
+  quickActions: QuickAction[]
   /** A single peek at what follows, when one is worth showing. */
   upNextRecommendationId: string | null
   /** The open refine mode, or null when the quick actions show instead. */
@@ -102,6 +119,16 @@ export type SessionState = {
   overlay: SessionOverlay | null
   /** At most one request is open at a time. */
   openRequest: OpenRequest | null
+}
+
+/**
+ * A quick action. The label is presentation; the request is what it does, so
+ * relabelling an action never changes its behavior.
+ */
+export type QuickAction = {
+  id: string
+  label: string
+  request: TurnRequest
 }
 
 export type Playlist = {
@@ -122,6 +149,11 @@ export type StarterIntent = {
   /** The prewritten first request this starter stands for. */
   phrase: string
   artworkUrl: string | null
+  /**
+   * Why this starter cannot be used now: the music library cannot act on what
+   * defines it. It is shown marked, with this reason, and sends nothing.
+   */
+  unavailableReason?: string
 }
 
 /** Data around a session that its view needs but the session does not own. */
@@ -131,4 +163,15 @@ export type SessionEnvironment = {
   starters: StarterIntent[]
   /** The values offered when tuning, per dimension. Energy runs low to high. */
   refineOptions: Record<IntentDimension, IntentValue[]>
+  /**
+   * Dimensions the music library has no evidence for, so tuning them would
+   * change nothing that plays. Tune shows them marked and does not send them.
+   */
+  unavailableDimensions?: IntentDimension[]
+  /**
+   * False while the music library has no playable tracks: nothing can be
+   * recommended until music is imported. That is a setup state, so nothing is
+   * called unavailable dimension by dimension for it. Unset means ready.
+   */
+  libraryReady?: boolean
 }

@@ -101,6 +101,8 @@ The Python backend lives in `backend/`. Run the commands below from that directo
 
    It creates and migrates `backend/data/intentune.db` on first start. Settings come from the process environment (see `backend/.env.example`); `backend/.env` is not loaded. Routes: [API Design](docs/design/api-design.md).
 
+5. Run the frontend against it (from `frontend/`): `npm run dev`. The backend is the default; `npm run dev:mock` runs the frontend on its mock service instead. See [frontend/README.md](frontend/README.md).
+
 ### Running Tests
 
 Run the starter tests from the `backend/` directory with:

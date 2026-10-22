@@ -10,17 +10,30 @@ Run from this directory:
 
 ```bash
 npm install      # install dependencies
-npm run dev      # start the development server
-npm run build    # typecheck and build for production
+npm run dev      # start the development server, against the backend
+npm run dev:mock # start it on the mock service instead
+npm run build    # typecheck and build for production (against the backend)
+npm run build:mock  # build on the mock service (what the browser checks use)
 npm run lint     # lint with oxlint
 npm test         # run all tests with Vitest (unit, static-render and DOM-level)
-npm run check:browser  # build, then run the browser checks (see browser-checks/README.md)
+npm run check:browser  # build on the mock, then run the browser checks (see browser-checks/README.md)
 npm run preview  # serve the production build locally
 ```
 
 ## What runs
 
-The app root is an interactive listening session on mock data. Nothing is persisted: state resets on reload.
+The app root is an interactive listening session. By default it runs against the backend (B9 / F9), so start the backend first (`python -m src.intentune.api` in `backend/`), then:
+
+```bash
+npm run dev                                          # backend on 127.0.0.1:8000
+INTENTUNE_API_URL=http://127.0.0.1:8888 npm run dev  # or wherever it listens
+```
+
+The dev server proxies `/api` to the backend. Sessions, likes, playlists, and history live in the backend, and songs play from your imported library with real audio. Importing music has no screen yet: register and import a folder through the API (`POST /api/v1/library/sources`, then `POST /api/v1/library/import`).
+
+Tune offers energy, mood, and genre, as the approved design does, but marks a dimension your library has no information for as unavailable, and does not send it. The same goes for the starters that need it: Focus, Unwind, and Move are defined by a mood and an energy, so they show as unavailable, with the reason, while Discover always works. Today the importer reads genre tags only, so energy and mood show as unavailable. With no playable music at all, the library is not ready: every starter, Discover included, says so, and nothing starts until music is imported. What is available is read from the backend when the app loads, so it changes as the library does.
+
+The mock service runs only when asked for: `npm run dev:mock` (Vite's `mock` mode), or `VITE_SESSION_SERVICE=mock`. It uses mock data, persists nothing, and resets on reload. The tests, the design demo, and the browser checks use it.
 
 `?demo=…` opens the development demo instead:
 
@@ -45,4 +58,8 @@ The app root is an interactive listening session on mock data. Nothing is persis
 5. `composeSession.ts` is the composition policy: a pure function from state to typed blocks (`blocks.ts`).
 6. `BlockRenderer.tsx` maps each block type to its approved component. An unrecognised type renders a visible notice in development and nothing in production.
 
-`src/mocks/mockSessionService.ts` is the current implementation of the service: fixed phrase tables, hand-ordered song lists and sentence templates. It is wired in at `src/App.tsx`.
+There are two implementations of the service:
+- **`src/mocks/mockSessionService.ts`:** fixed phrase tables, hand-ordered song lists, and sentence templates.
+- **`src/services/http/httpSessionService.ts`:** the backend. Requests carry meaning (a starter, a quick action's control, a Tune value); only typed words travel as text, for the backend to interpret.
+
+`src/App.tsx` chooses between them. Real audio plays through `useAudioPlayback.ts`, whose audio element is the playback authority; the simulated clock runs only for the mock's songs.

@@ -170,6 +170,8 @@ function RefineControlBlock({
       moodId={block.moodId}
       genres={block.genres}
       genreId={block.genreId}
+      unavailable={block.unavailable}
+      libraryReady={block.libraryReady}
       onTabChange={(tab) => onCommand({ type: 'change_refine_tab', tab })}
       onEnergyChange={refine('energy')}
       onMoodChange={refine('mood')}

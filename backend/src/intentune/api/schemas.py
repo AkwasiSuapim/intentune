@@ -7,6 +7,8 @@ Requests are strict: unknown fields are rejected, numbers must be JSON numbers
   after trimming, at most 20 genres and 20 moods;
 - playlist names: the domain's limit (MAX_PLAYLIST_NAME_LENGTH);
 - ids: at most 64 characters (an id of nothing is a not-found error);
+- a typed message: 1 to 500 characters after trimming (B9). It is interpreted,
+  then dropped, never stored (D33);
 - a folder path to register: at most 4096 characters.
 
 Enumerations travel in lowercase (`not_for_me`, `queued`), in snake_case as
@@ -19,7 +21,7 @@ audio_url, which names its id.
 from datetime import datetime
 from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from src.intentune.domain.models import ListeningContext
 from src.intentune.domain.playlist import MAX_PLAYLIST_NAME_LENGTH
@@ -28,6 +30,7 @@ MAX_LABEL_LENGTH = 100
 MAX_LABELS = 20
 MAX_ID_LENGTH = 64
 MAX_PATH_LENGTH = 4096
+MAX_MESSAGE_LENGTH = 500
 MAX_PLAYLIST_ORDER = 10_000
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
@@ -40,6 +43,7 @@ Seconds = Annotated[float, Field(ge=0.0, strict=True, allow_inf_nan=False)]
 Duration = Annotated[float, Field(gt=0.0, strict=True, allow_inf_nan=False)]
 Id = Annotated[str, StringConstraints(min_length=1, max_length=MAX_ID_LENGTH)]
 PlaylistName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_PLAYLIST_NAME_LENGTH)]
+MessageText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_MESSAGE_LENGTH)]
 
 TurnKindName = Literal[
     "initial_intent",
@@ -50,6 +54,7 @@ TurnKindName = Literal[
     "surprise_me",
     "more_familiar",
     "try_something_different",
+    "message",
 ]
 
 
@@ -79,16 +84,52 @@ class ContextIn(_Request):
         return ListeningContext(**self.model_dump())
 
 
+class PlaybackIn(_Request):
+    """How far the player got through the track that is ending, as it measured (B9)."""
+
+    played_seconds: Seconds
+    duration_seconds: Duration
+
+
 class StartSessionIn(_Request):
-    context: ContextIn
+    """Start from a structured context (a starter, Tune), or from the listener's typed words (B9). Exactly one."""
+
+    context: Optional[ContextIn] = None
+    message: Optional[MessageText] = None
+
+    @model_validator(mode="after")
+    def _one_way_to_start(self) -> "StartSessionIn":
+        if (self.context is None) == (self.message is None):
+            raise ValueError("A session starts from a context or from a message, exactly one of them.")
+        return self
 
 
 class TurnIn(_Request):
-    """A steering turn. refine carries the new context; not_for_me and more_like_this may name an occurrence."""
+    """A steering turn. refine carries the new context; not_for_me and more_like_this may name an occurrence.
+
+    B9:
+    - next may carry the player's facts about the track it ends (playback), so
+      the skip is recorded as evidence.
+    - message carries typed text, interpreted by the backend. occurrence_id is
+      then the recommendation in view ("this"), and playback is the player's
+      facts, used if the message means next.
+    """
 
     kind: TurnKindName
     context: Optional[ContextIn] = None
     occurrence_id: Optional[Id] = None
+    text: Optional[MessageText] = None
+    playback: Optional[PlaybackIn] = None
+
+    @model_validator(mode="after")
+    def _fields_fit_the_kind(self) -> "TurnIn":
+        if (self.kind == "message") != (self.text is not None):
+            raise ValueError("A message turn carries text, and only a message turn does.")
+        if self.context is not None and self.kind != "refine":
+            raise ValueError("A REFINE turn carries the new context, and only a REFINE turn does.")
+        if self.playback is not None and self.kind not in ("next", "message"):
+            raise ValueError("Only next and message turns carry playback facts.")
+        return self
 
 
 class PlaybackEventIn(_Request):
@@ -101,7 +142,9 @@ class PlaybackEventIn(_Request):
 
 
 class ReactionIn(_Request):
-    reaction: Literal["like", "save", "replay", "not_for_me"]
+    """unlike (B9) takes back a Like: the Like stays recorded, and no longer counts as evidence."""
+
+    reaction: Literal["like", "unlike", "save", "replay", "not_for_me"]
 
 
 class RegisterSourceIn(_Request):
@@ -292,9 +335,56 @@ class SessionDetailOut(SessionStateOut):
     feedback_events: List[FeedbackEventOut]
 
 
-class TurnResultOut(BaseModel):
-    turn: TurnOut
-    state: SessionStateOut
+class MeaningOut(BaseModel):
+    """What a typed message was understood as (B9): a refinement, a steering turn, a reaction, or a save request."""
+
+    kind: Literal["refine", "turn", "reaction", "save_requested"]
+    turn: Optional[str] = None
+    reaction: Optional[str] = None
+
+
+class EnergyLevelOut(BaseModel):
+    id: str
+    label: str
+    target_energy: float
+
+
+class LibraryReadinessOut(BaseModel):
+    """Whether anything can be recommended: a library with no playable tracks is not ready (a setup state)."""
+
+    ready: bool
+    playable_tracks: int
+
+
+DimensionStateName = Literal["usable", "no_data", "library_not_ready"]
+
+
+class DimensionsOut(BaseModel):
+    """What each intent dimension's data allows, with the library as it is now.
+
+    usable: some playable track has usable data for it. no_data: tracks are playable, but none has usable data
+    for it yet. library_not_ready: nothing is playable, so no dimension can be judged.
+    """
+
+    mood: DimensionStateName
+    genre: DimensionStateName
+    energy: DimensionStateName
+    danceability: DimensionStateName
+    tempo: DimensionStateName
+    valence: DimensionStateName
+    acousticness: DimensionStateName
+
+
+class VocabularyOut(BaseModel):
+    """What Tune offers (B9): the library's genres, the curated moods, the energy scale, and what the library can act on now."""
+
+    genres: List[str]
+    moods: List[str]
+    energy: List[EnergyLevelOut]
+    library: LibraryReadinessOut
+    dimensions: DimensionsOut
+    usable_moods: List[str]  # the curated moods some playable track declares; choosing another changes nothing
+    unmapped_fields: List[str]  # context fields that are stored but not yet mapped into Policy v1
 
 
 class InterpretationOut(BaseModel):
@@ -312,6 +402,35 @@ class FeedbackOut(BaseModel):
     event_weight: float
     interpretation: InterpretationOut
     state: SessionStateOut
+
+
+class FeedbackFactOut(BaseModel):
+    """The feedback a typed message recorded (B9); the session after it is the result's state."""
+
+    event: FeedbackEventOut
+    event_weight: float
+    interpretation: InterpretationOut
+
+
+class TurnResultOut(BaseModel):
+    """The turn recorded and the session after the re-rank.
+
+    For a typed message (B9), meaning says what it was understood as. A message
+    that was a reaction records feedback instead of a turn, and a save request
+    records neither.
+    """
+
+    meaning: Optional[MeaningOut] = None
+    turn: Optional[TurnOut] = None
+    feedback: Optional[FeedbackFactOut] = None
+    state: SessionStateOut
+
+
+class SessionStartOut(SessionStateOut):
+    """A started session. Started from a message (B9), meaning says how it was read, and turn is the control it applied."""
+
+    meaning: Optional[MeaningOut] = None
+    turn: Optional[TurnOut] = None
 
 
 class PlaylistSummaryOut(BaseModel):

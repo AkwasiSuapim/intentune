@@ -136,6 +136,23 @@ def test_a_like_is_stored_as_a_raw_fact_and_re_ranks_at_once(feedback, sessions,
     )
 
 
+def test_an_unlike_is_stored_after_the_like_and_takes_it_back(feedback, sessions, ids, playing_session):
+    """B9: both raw facts stay stored; the queue goes back to what it was before the Like."""
+    session_id, state = playing_session
+    calm = state.queue[2]
+    feedback.react(session_id, calm.occurrence_id, FeedbackEventType.LIKE)
+
+    outcome = feedback.react(session_id, calm.occurrence_id, FeedbackEventType.UNLIKE)
+
+    assert (outcome.event_weight, outcome.interpretation.weight, outcome.interpretation.basis) == (0.0, 0.0, EvidenceBasis.NONE)
+    assert outcome.interpretation.excluded is False
+    assert _titles(outcome.state.queue, ids) == ["a2", "a3", "b1"]  # as before the Like
+    assert outcome.state.playing.occurrence_id == state.playing.occurrence_id  # an Unlike does not touch playback
+    assert [event.event_type for event in sessions.history(session_id).feedback_events] == [
+        FeedbackEventType.LIKE, FeedbackEventType.UNLIKE
+    ]
+
+
 def test_a_save_is_as_strong_as_a_like(feedback, ids, playing_session):
     session_id, state = playing_session
 

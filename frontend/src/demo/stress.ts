@@ -8,6 +8,7 @@ import type {
 } from '../features/session/types.ts'
 import { mockEnvironment } from '../mocks/environment.ts'
 import whiteArt from './artwork/white.svg'
+import { mockQuickAction } from '../mocks/quickActions.ts'
 
 const intent: Intent = {
   mood: { id: 'bittersweet', label: 'Bittersweet and nostalgic' },
@@ -76,8 +77,8 @@ const base: SessionState = {
   currentRecommendationId: 'current',
   playback: { playing: true, positionSeconds: 3601 },
   quickActions: [
-    { id: 'a', label: 'Keep this exact energy going' },
-    { id: 'b', label: 'Something completely different' },
+    mockQuickAction('Keep this exact energy going', 'a'),
+    mockQuickAction('Something completely different', 'b'),
   ],
   upNextRecommendationId: 'up-next',
 }

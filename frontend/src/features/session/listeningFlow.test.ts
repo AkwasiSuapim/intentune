@@ -187,6 +187,72 @@ describe('steering with words', () => {
   })
 })
 
+describe('starters the library cannot act on', () => {
+  const limitedStarters = async () => {
+    const base = await service.loadWorkspace()
+    return createWorkspace({
+      ...base,
+      starters: base.starters.map((starter) =>
+        starter.id === 'discover'
+          ? starter
+          : { ...starter, unavailableReason: 'Your music has no mood or energy information for this yet.' },
+      ),
+    })
+  }
+
+  it('sends nothing for an unavailable starter', async () => {
+    const workspace = await limitedStarters()
+
+    for (const starterId of ['focus', 'unwind', 'move']) {
+      expect(planCommand(workspace, { type: 'select_starter', starterId })).toEqual({ actions: [] })
+    }
+  })
+
+  it('keeps Discover usable, since it is an exploration control and needs no mood or energy', async () => {
+    const workspace = await limitedStarters()
+
+    const discovering = await act(workspace, { type: 'select_starter', starterId: 'discover' })
+
+    expect(planCommand(workspace, { type: 'select_starter', starterId: 'discover' }).question).toBeDefined()
+    expect(hero(discovering)).toBeDefined()
+  })
+
+  it('sends nothing for any starter, Discover included, while the library is not ready', async () => {
+    const base = await service.loadWorkspace()
+    const notReady = createWorkspace({
+      ...base,
+      libraryReady: false,
+      unavailableDimensions: ['mood', 'genre', 'energy'],
+      starters: base.starters.map((starter) => ({
+        ...starter,
+        unavailableReason: 'Your library has no playable music yet. Import music to start listening.',
+      })),
+    })
+
+    for (const starterId of ['focus', 'unwind', 'move', 'discover']) {
+      expect(planCommand(notReady, { type: 'select_starter', starterId })).toEqual({ actions: [] })
+    }
+    expect(selectEnvironment(notReady).libraryReady).toBe(false)
+  })
+
+  it('is never the mock: it reports full capability, so the design can show every starter', async () => {
+    const seed = await service.loadWorkspace()
+
+    expect(seed.starters.map((starter) => [starter.id, starter.unavailableReason])).toEqual([
+      ['focus', undefined],
+      ['unwind', undefined],
+      ['move', undefined],
+      ['discover', undefined],
+    ])
+    expect(seed.unavailableDimensions ?? []).toEqual([])
+    expect(createWorkspace(seed).libraryReady).toBe(true)
+    expect(Object.values(seed.refineOptions).flat().some((value) => value.unavailable)).toBe(false)
+    for (const starterId of ['focus', 'unwind', 'move', 'discover']) {
+      expect(planCommand(createWorkspace(seed), { type: 'select_starter', starterId }).question).toBeDefined()
+    }
+  })
+})
+
 describe('tuning', () => {
   it('opens from Tune, changes the energy and stays open on the same tab', async () => {
     const tuning = await act(await inEmotionalAfrobeats(), { type: 'open_refine' })
@@ -243,6 +309,55 @@ describe('tuning', () => {
     expect(
       await act(tuning, { type: 'refine', dimension: 'energy', valueId: 'low' }),
     ).toBe(tuning)
+  })
+
+  it('marks what the library cannot use, sends nothing for it, and still tunes the rest', async () => {
+    const limited = await act(
+      createWorkspace({
+        ...(await service.loadWorkspace()),
+        unavailableDimensions: ['mood', 'energy'],
+      }),
+      { type: 'open_session', sessionId: 'emotional-afrobeats' },
+      { type: 'open_refine' },
+    )
+
+    expect(view(limited).contextualControl).toMatchObject({
+      type: 'refine_control',
+      unavailable: ['mood', 'energy'],
+    })
+    expect(planCommand(limited, { type: 'refine', dimension: 'energy', valueId: 'high' })).toEqual({
+      actions: [],
+    })
+    expect(planCommand(limited, { type: 'refine', dimension: 'mood', valueId: 'driven' })).toEqual({
+      actions: [],
+    })
+    const switched = await act(limited, { type: 'refine', dimension: 'genre', valueId: 'amapiano' })
+    expect(view(switched).content.at(-2)).toMatchObject({ label: 'Genre switched' })
+  })
+
+  it('sends nothing for a mood value the library cannot use, and still sends the others', async () => {
+    const base = await service.loadWorkspace()
+    const limited = await act(
+      createWorkspace({
+        ...base,
+        refineOptions: {
+          ...base.refineOptions,
+          mood: base.refineOptions.mood.map((value) => (value.id === 'calm' ? { ...value, unavailable: true } : value)),
+        },
+      }),
+      { type: 'open_session', sessionId: 'emotional-afrobeats' },
+      { type: 'toggle_refine_tab', tab: 'mood' },
+    )
+
+    expect(planCommand(limited, { type: 'refine', dimension: 'mood', valueId: 'calm' })).toEqual({ actions: [] })
+    expect(planCommand(limited, { type: 'refine', dimension: 'mood', valueId: 'driven' }).question).toBeDefined()
+  })
+
+  it('marks nothing unavailable when the library supports every dimension', async () => {
+    expect(view(await inEmotionalAfrobeats()).contextualControl).not.toHaveProperty('unavailable')
+    expect(
+      view(await act(await inEmotionalAfrobeats(), { type: 'open_refine' })).contextualControl,
+    ).toMatchObject({ type: 'refine_control', unavailable: [] })
   })
 
   it('opens from an intent chip and closes when the same chip is tapped again', async () => {

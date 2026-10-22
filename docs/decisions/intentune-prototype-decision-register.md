@@ -57,7 +57,10 @@ REPLAY              +1.00
 <15% after 8 sec    -0.50
 NOT_FOR_ME          -1.00
 0-8 sec             0.00
+UNLIKE               0.00   cancels the earlier Like (B9)
 ```
+
+*Added at the B9 review (2026-10-21, TD-020):* UNLIKE is stored as its own raw event; the LIKE it takes back stays stored. It is never negative evidence and never lifts a Not-for-me exclusion.
 
 Raw playback facts are stored separately so these thresholds can change later.
 

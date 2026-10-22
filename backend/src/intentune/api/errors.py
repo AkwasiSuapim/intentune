@@ -34,6 +34,7 @@ from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.intentune.application.library_scans import ScanInProgress
+from src.intentune.domain.intent import IntentUnavailable, LibraryNotReady, MessageNotUnderstood, NotUnderstoodReason
 from src.intentune.domain.library import InvalidLibrarySource, LibrarySourceNotFound, TrackNotFound, TrackUnavailable
 from src.intentune.domain.playlist import (
     InvalidPlaylistOrder,
@@ -64,9 +65,46 @@ _ERRORS: Dict[Type[Exception], Tuple[int, str, Optional[str]]] = {
     TrackAlreadyInPlaylist: (409, "CONFLICT", "The track is already in this playlist."),
     TrackNotInPlaylist: (404, "TRACK_NOT_FOUND", "The track is not in this playlist."),
     InvalidPlaylistOrder: (422, "VALIDATION_ERROR", None),
+    # B9: a setup state, not an unsupported intent. Nothing is playable, so nothing can be recommended yet.
+    LibraryNotReady: (409, "LIBRARY_NOT_READY", "Your library has no playable music yet. Import some music to start listening."),
     # The domain's and application's own checks on values that passed the request schema.
     ValueError: (422, "VALIDATION_ERROR", None),
 }
+
+# A typed message Intentune cannot act on (B9): nothing was changed or recorded. Each reason gets its own guidance.
+# The guidance names only the dimensions the listener's library can use.
+_ASK_FOR = {"mood": "a mood", "genre": "a genre", "energy": "more or less energy"}
+
+
+def _try(dimensions) -> str:
+    asks = [_ASK_FOR[dimension] for dimension in dimensions if dimension in _ASK_FOR]
+    if not asks:
+        return 'Try "surprise me".'
+    if len(asks) == 1:
+        return f"Try {asks[0]}."
+    return f"Try {', '.join(asks[:-1])}, or {asks[-1]}."
+
+
+def _not_understood_message(error: MessageNotUnderstood) -> str:
+    reason = error.reason
+    if reason is NotUnderstoodReason.UNRECOGNIZED:
+        return f"Intentune can't act on that yet. {_try(error.supported)}"
+    if reason is NotUnderstoodReason.AMBIGUOUS:
+        return "That asks for more than one thing at once. Try one change at a time."
+    if reason is NotUnderstoodReason.UNSUPPORTED:
+        return "Intentune can't leave a genre or mood out yet. Try naming what you want instead."
+    return "There's no song yet for that to be about."
+
+
+# An intent the library cannot act on (B9): understood, but it would change nothing that plays. Typed and
+# structured intent get the same answer, since they meet the same rule (application/capability.py).
+_DESCRIBE = {"mood": "that mood", "genre": "that genre"}
+
+
+def _unavailable_message(error: IntentUnavailable) -> str:
+    missing = " or ".join(_DESCRIBE.get(dimension, dimension) for dimension in error.unavailable)
+    return f"Your library doesn't describe {missing} yet, so that can't change what plays. {_try(error.supported)}"
+
 
 _HTTP_CODES = {404: ("NOT_FOUND", "There is nothing here."), 405: ("METHOD_NOT_ALLOWED", "This method is not allowed here.")}
 
@@ -141,6 +179,16 @@ async def _domain_error(request: Request, error: Exception) -> JSONResponse:
     return error_response(_request_id(request), status_code, code, message if message is not None else str(error))
 
 
+async def _message_not_understood(request: Request, error: MessageNotUnderstood) -> JSONResponse:
+    details = {"reason": error.reason.value.lower(), "dimensions": list(error.supported)}
+    return error_response(_request_id(request), 422, "MESSAGE_NOT_UNDERSTOOD", _not_understood_message(error), details)
+
+
+async def _intent_unavailable(request: Request, error: IntentUnavailable) -> JSONResponse:
+    details = {"unavailable": list(error.unavailable), "dimensions": list(error.supported)}
+    return error_response(_request_id(request), 422, "INTENT_UNAVAILABLE", _unavailable_message(error), details)
+
+
 async def _response_model_error(request: Request, error: Exception) -> JSONResponse:
     """A Pydantic error outside request parsing is the server's fault, not the client's."""
     request_id = _request_id(request)
@@ -168,6 +216,8 @@ async def _http_error(request: Request, error: HTTPException) -> JSONResponse:
 def install_error_handling(app: FastAPI) -> None:
     for error_type in _ERRORS:
         app.add_exception_handler(error_type, _domain_error)
+    app.add_exception_handler(MessageNotUnderstood, _message_not_understood)
+    app.add_exception_handler(IntentUnavailable, _intent_unavailable)
     app.add_exception_handler(ValidationError, _response_model_error)
     app.add_exception_handler(RequestValidationError, _request_validation_error)
     app.add_exception_handler(HTTPException, _http_error)

@@ -68,7 +68,7 @@ the legacy `load_songs()`/`recommend_songs()` path shown above, unchanged.
 
 ### Current frontend workflow
 
-The React frontend runs its own loop on a mock service and never reaches the backend:
+On the mock service (Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock`; the tests, the design demo, and the browser checks use it), the React frontend runs its own loop and never reaches the backend:
 
 ```text
 User types, picks a starter or quick action, tunes, presses Next or Not for me
@@ -78,7 +78,27 @@ User types, picks a starter or quick action, tunes, presses Next or Not for me
    -> composeSession() turns state into approved blocks
 ```
 
-Playback is a mock timer. When a song's duration runs out, the frontend sends `next`, exactly as if the user had pressed Next.
+Playback is a mock timer. When a song's duration runs out, the frontend sends `track_ended`, which the mock answers as Next.
+
+**Against the backend (B9; the default runtime since the B9 review):**
+
+```text
+starter tap      -> POST /sessions {context: the starter's structured intent} -> POST .../turns {next} (Play)
+                    (a starter whose mood or energy the library lacks is marked, and sends nothing)
+quick action     -> POST .../turns {its control}
+Tune value       -> POST .../turns {refine, context with that dimension}       (the song plays on; what follows re-ranks)
+typed words      -> POST .../turns {message, text, occurrence in view, player facts}
+                    -> IntentInterpreter -> the same use case a control would reach; or 422 MESSAGE_NOT_UNDERSTOOD
+every start and refine, typed or structured -> IntentCapability check first: 409 LIBRARY_NOT_READY while nothing is playable,
+                    or 422 INTENT_UNAVAILABLE for a dimension without data; nothing changed
+Next             -> POST .../turns {next, player facts}  (the backend records NEXT, then the SKIP)
+song ends        -> POST .../playback-events {complete, player facts}
+Like / Unlike    -> POST .../reactions {like | unlike}
+Replay           -> POST .../reactions {replay}
+Save             -> POST /playlists/{id}/items {track, session, occurrence}   (PLAYLIST_ADD; only an explicit choice)
+```
+
+The audio element is the playback authority: its position, duration, and end drive the session (`useAudioPlayback.ts`).
 
 ## Planned Prototype 1 Workflows
 
@@ -367,6 +387,24 @@ POST /playlists/{id}/items {track, session, occurrence} -> item stored, PLAYLIST
 Every command answers the session as it stands after the re-rank. Recording a change and re-ranking are separate transactions; if the re-rank fails, the change stays recorded and the next command re-ranks again.
 
 Concurrency: request threads, the worker, and the startup scan share one SQLite file. Every transaction begins with `BEGIN IMMEDIATE`, so transactions queue on SQLite's 5-second busy timeout instead of failing with "database is locked" (TD-019). Transactions are short; file I/O and analysis happen between them.
+
+### Typed messages (B9)
+
+**Current (B9, 2026-10-21).**
+
+```text
+typed words -> API (message turn) -> MessageService -> IntentInterpreter (deterministic, Prototype 1)
+   -> a structured meaning:
+        refinement   -> ListeningService.steer(REFINE, new context)
+        control      -> ListeningService.steer(control)
+        next         -> ListeningService.next(player facts)       (the same use case as the clicked Next)
+        not for me   -> ListeningService.steer(NOT_FOR_ME, the song in view)
+        like, replay -> FeedbackService.react()                    (the same use case as the buttons)
+        save         -> nothing recorded; the UI opens the playlist picker
+   -> or not understood (unrecognized, ambiguous, unsupported, no recommendation): nothing changes, 422
+```
+
+The text is interpreted, then dropped; only the structured turn or event is stored (D33). See [API Design](../design/api-design.md#typed-messages-b9).
 
 ### Long-term adaptation (B10)
 

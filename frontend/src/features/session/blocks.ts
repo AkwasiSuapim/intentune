@@ -40,7 +40,8 @@ export type SessionBlock =
       playing: boolean
       positionSeconds: number
       durationSeconds: number
-      whySummary: string
+      /** Absent when the recommendation carries no explanation. */
+      whySummary?: string
       whyReasons: string[]
       whyExpanded: boolean
       liked: boolean
@@ -74,6 +75,10 @@ export type SessionBlock =
       moodId: string | null
       genres: RefineOption[]
       genreId: string | null
+      /** Tabs the library has no evidence for: shown, marked, and not tunable. */
+      unavailable: RefineTab[]
+      /** False while nothing in the library is playable: nothing is tunable, for that one reason. */
+      libraryReady: boolean
     }
   | {
       type: 'playlist_picker'

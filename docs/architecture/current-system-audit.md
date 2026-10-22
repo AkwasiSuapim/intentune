@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), and [B8](#b8-update-2026-10-21) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all eight.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and committed as `ac23287`. Phase B9 (frontend integration, frontend phase F9) followed the same day on top of `ac23287` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), [B8](#b8-update-2026-10-21), and [B9](#b9-update-2026-10-21) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all nine.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -221,6 +221,60 @@ B8 tests per file:
 
 One existing test changed: `test_listener_repository.py::test_uncommitted_changes_are_invisible_to_another_unit_of_work` held two overlapping units of work in one thread. Under `BEGIN IMMEDIATE` the second waits for the first, so the test now reads from another thread. It still shows that uncommitted changes are invisible, and also that the reader waits. No dependency was added.
 
+## B9 Update (2026-10-21)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **1270 passed, 1 skipped**: 1076 from B0–B8, plus 195 from B9 (12 from the review corrections, 31 from the capability consistency correction, 29 from the readiness model). One warning (Starlette's test client and httpx), as before. |
+| Frontend tests | `npm test`, `npm run build`, `npm run lint`, from `frontend/` | **276 passed** (214 before, plus 62; 6 from the review corrections, 14 from the consistency correction, 5 from the readiness model). Build and lint clean. |
+| Frontend audit | `npm audit`, from `frontend/` | **0 vulnerabilities**, with Vite 8.2.4 (from 8.2.1, at the review). |
+| Migration | `alembic upgrade head`, then `alembic check`; downgrade to `ce0b59df2cd1` and back, with data | `feedback_events` accepts `UNLIKE`; the downgrade removes only UNLIKE events. No drift. |
+| The approved UI on the real backend | `python -m src.intentune.api` (scratch database, 7 real FLAC files with genre tags only), the Vite dev server, and a headless-Chrome walkthrough checked against the backend's records | **26/26 checks pass** (2026-10-21, with `VITE_SESSION_SERVICE=http`), then **30/30** after the review corrections (2026-10-22, plain `vite`: HTTP is the default), then **34/34** after the capability consistency correction, then **34/34** after the readiness model (the same day), and **7/7** against a fresh, empty library. Steps below. |
+| The mock UI | `npm run check:browser` | The existing layout, accessibility, and walkthrough checks pass against the mock build (`build:mock`). |
+
+Walkthrough steps, in order:
+1. **Starters:** the app opens on Tune in, with the starters. Since the consistency correction, Focus, Unwind, and Move are marked unavailable, each with its reason ("Your music has no mood or energy information for this yet."), and pressing Focus starts nothing. Discover starts the session instead, with no mood or energy.
+2. **Focus:** started a session with mood Focused and energy Medium. The phrase was not stored, and the hero is the backend's playing track.
+3. **Audio:** real audio plays. The position advanced with the audio element (4% → 17%).
+4. **A typed refinement:** "more jazz please" refined the genre to Jazz as a REFINE turn. The song played on, and the text was not stored.
+5. **Not understood:** "music for driving through Accra at 2am" was acknowledged as not understood, with nothing recorded and no failure note. Tune opened on the library's genres (Ambient, Jazz, Rock, Any genre).
+6. **Tune:** choosing Ambient was a structured REFINE. On 2026-10-21, High energy set `target_energy` 0.7. After the review corrections, the vocabulary reports genre support only, so Tune marks Energy and Mood as unavailable and explains why. High energy sent nothing (`target_energy` stayed 0.5), and a typed "a bit calmer" was refused: "Your library doesn't describe energy yet, so that can't change what plays. Try a genre."
+7. **Like and Unlike:** both recorded raw events (`like`, `unlike`), and the heart is off again.
+8. **Quick actions:** they are the D36 controls. "Try something different" was recorded as TRY_SOMETHING_DIFFERENT.
+9. **Next:** recorded the NEXT turn and a SKIP with the real played seconds (12.6 of 23 s). The new hero is the backend's playing track.
+10. **Save:** typed "save this" opened the picker and recorded nothing. Creating a playlist and saving added the song as PLAYLIST_ADD feedback.
+11. **Reload:** the drawer lists the backend's sessions.
+12. **A past session** (since the consistency correction): opening an older Focused session and pressing Next answers "Not available yet: This session asks for a mood and an energy level that your music doesn't describe, so it can't continue." No backend session was started or ended, and no failure note showed.
+13. **Console:** no errors in the page console.
+
+Against an empty library (readiness model): the vocabulary reports `library.ready: false` with every dimension `library_not_ready`; every starter, Discover included, is unavailable with "Your library has no playable music yet. Import music to start listening."; pressing Discover starts nothing; typed words are answered "Library not ready" with what to do, neither "Not understood" nor "Not available yet"; no session is started, no failure note shows, and the console stays clean.
+
+B9 tests per file:
+- **Backend:**
+  - `test_intent_interpreter.py` 85;
+  - `test_message_service.py` 37;
+  - `test_api_messages.py` 36;
+  - `test_listening_service.py` +18 and `test_api_sessions.py` +10 (the capability rule and the readiness model);
+  - `test_feedback_policy.py` gained 6, and `test_feedback_service.py`, `test_migrations.py`, and `test_api_sessions.py` 1 each (UNLIKE).
+- **Frontend:**
+  - `httpSessionService.test.ts` 22;
+  - `useAudioPlayback.dom.test.tsx` 6;
+  - `architecture.test.ts` 4;
+  - `chooseService.test.ts` 2;
+  - `components/unavailable.dom.test.tsx` 3;
+  - `sessionReducer.test.ts` +6, `mockSessionService.test.ts` +5, `serviceBoundary.test.ts` +2, `listeningFlow.test.ts` +7, `ServiceStates.dom.test.tsx` +1, `ListeningSessions.dom.test.tsx` +3, `BlockRenderer.test.tsx` +1.
+
+Changed tests:
+- **Backend:** the B8 turn-validation test still passes. A `next` turn with a context is refused by the schema now, instead of by `apply_turn`.
+- **Backend, at the consistency correction:** two B8 tests had relied on a silently accepted intent. `test_refine_replaces_the_context_and_re_ranks` refined with `target_energy` on a library without energy, and `test_a_session_over_an_empty_library_starts_with_an_empty_queue` started with a genre no track declares. They now send what the library can use; new tests cover the refusals.
+- **Backend, at the readiness model:** `test_a_session_over_an_empty_library_starts_with_an_empty_queue` became `test_no_session_starts_before_the_library_has_playable_music` (`LIBRARY_NOT_READY`), and `test_words_about_a_recommendation_need_one` now imports a library, since nothing starts without one.
+- **Frontend tests, updated to the new contract:**
+  - quick actions carry requests;
+  - replay arrives as a turn from the service;
+  - a Like the service cannot record is undone, where it used to stay as a hint.
+
+No dependency was added on either side. Vite moved to the patched 8.2.4 at the review.
+
 ## Current Files
 
 ### Backend
@@ -297,6 +351,31 @@ Changed in B7:
 - `application/feedback.py`: `record_playlist_add()`; `react()` refuses PLAYLIST_ADD.
 - `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: playlist records and repository.
 - `tests/test_migrations.py`, `tests/test_feedback_policy.py`.
+
+Added in B9 (2026-10-21):
+
+- `backend/alembic/versions/20261021_4b1e9c7d2a6f_accept_unlike_feedback.py`
+- `backend/src/intentune/domain/intent.py` (vocabulary, energy scale, `MessageMeaning`)
+- `backend/src/intentune/ports/intent.py` (`IntentInterpreter`)
+- `backend/src/intentune/adapters/deterministic_intent.py` (`DeterministicIntentInterpreter`)
+- `backend/src/intentune/application/messages.py` (`MessageService`)
+- `backend/src/intentune/api/routes/listening.py` (the vocabulary route)
+- `backend/tests/test_intent_interpreter.py`, `test_message_service.py`, `test_api_messages.py`
+- `frontend/src/services/http/` (`api.ts`, `client.ts`, `mapping.ts`, `httpSessionService.ts`, and its test)
+- `frontend/src/features/session/useAudioPlayback.ts` (and its DOM test), `frontend/src/mocks/quickActions.ts`, `frontend/src/vite-env.d.ts`, `frontend/src/architecture.test.ts`
+
+Changed in B9:
+- **Backend domain and application:**
+  - `domain/session.py`: `FeedbackEventType.UNLIKE`.
+  - `domain/policy.py`: an Unlike cancels earlier Likes and weighs 0.
+  - `application/feedback.py`: reactions include UNLIKE.
+  - `application/listening.py`: `next()` with the player's facts.
+  - `application/library.py`: `vocabulary()`.
+- **Backend API:** `schemas.py`, `views.py`, `errors.py` (`MESSAGE_NOT_UNDERSTOOD`), `routes/sessions.py`, `container.py`, `app.py`.
+- **Frontend:**
+  - **The session feature:** `sessionService.ts`, `types.ts`, `commands.ts`, `sessionReducer.ts`, `workspaceReducer.ts`, `useListeningSessions.ts`, `composeSession.ts`, `blocks.ts`.
+  - **Components and app:** `RecommendationCardHero.tsx`, `App.tsx`, `vite.config.ts`.
+  - **The mock and fixtures:** `mocks/mockSessionService.ts`, `mocks/sessions.ts`, `mocks/songs.ts`, `demo/stress.ts`, `test/dom.tsx`.
 
 Added in B8 (2026-10-21):
 
@@ -494,10 +573,10 @@ B3 added `soundfile==0.14.0` (with its dependencies `cffi` and `pycparser`, not 
 
 **Current (updated 2026-10-18, B1 prerequisites):**
 
-- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. **Updated in B1:** `backend/src/intentune/persistence/db.py` reads `DATABASE_URL` from the process environment. It resolves a relative path against `backend/`, whatever the working directory, and defaults to `backend/data/intentune.db` when the variable is unset, the Prototype 1 layout (spec §5). The other values are still unread. No code loads `backend/.env`. **Updated in B8:** `backend/src/intentune/api/settings.py` reads `API_HOST`, `API_PORT`, `CORS_ORIGINS`, and a new optional `MEDIA_ROOT` from the process environment. `APP_ENV` is still unread, and still no code loads `backend/.env`. A local `.env` written before B1's default moved (`DATABASE_URL=sqlite:///./intentune.db`) would point at `backend/intentune.db` if a tool such as `uvicorn --env-file` loaded it.
-- `.gitignore` ignores `backend/data/intentune.db*` (the database plus its SQLite journal, WAL, and SHM files) and `backend/data/media/`, as spec §5 requires. `backend/data/songs.csv` stays tracked.
-- A developer's existing, untracked `backend/.env` copied from the old template still points at `sqlite:///./intentune.db` (`backend/intentune.db`, which is not ignored) until it is updated by hand. B1 does not load `.env`, so this has no effect yet. It will matter once a settings loader reads `.env`.
-- There is no CI workflow (`.github/` does not exist).
+- `backend/.env.example` declares `APP_ENV`, `API_HOST=127.0.0.1`, `API_PORT=8000`, `CORS_ORIGINS=http://localhost:5173`, and `DATABASE_URL=sqlite:///./data/intentune.db`. **Updated in B1:** `backend/src/intentune/persistence/db.py` reads `DATABASE_URL` from the process environment. It resolves a relative path against `backend/`, whatever the working directory, and defaults to `backend/data/intentune.db` when the variable is unset, the Prototype 1 layout (spec §5). The other values are still unread. No code loads `backend/.env`. **Updated in B8:** `backend/src/intentune/api/settings.py` reads `API_HOST`, `API_PORT`, `CORS_ORIGINS`, and a new optional `MEDIA_ROOT` from the process environment. `APP_ENV` is still unread, and still no code loads `backend/.env`. A local `.env` written before B1's default moved (`DATABASE_URL=sqlite:///./intentune.db`) would point at `backend/intentune.db` if a tool such as `uvicorn --env-file` loaded it. *(Fixed after B8, 2026-10-21: the developer's local `.env` now says `sqlite:///./data/intentune.db`, the canonical database.)*
+- `.gitignore` ignores `backend/data/intentune.db*` (the database plus its SQLite journal, WAL, and SHM files) and `backend/data/media/`, as spec §5 requires. `backend/data/songs.csv` stays tracked. *(After B8, 2026-10-21:)* it also ignores `backend/intentune.db*`, the pre-Prototype 1 location, so an accidentally created old database cannot be committed.
+- A developer's existing, untracked `backend/.env` copied from the old template still points at `sqlite:///./intentune.db` (`backend/intentune.db`, which is not ignored) until it is updated by hand. B1 does not load `.env`, so this has no effect yet. It will matter once a settings loader reads `.env`. *(Fixed after B8, 2026-10-21: that local value is now `sqlite:///./data/intentune.db`, and `backend/intentune.db*` is ignored.)*
+- There is no CI workflow (`.github/` does not exist). *(Since 2026-10-21: `.github/workflows/ci.yml` runs the backend suite and the frontend checks on every push and pull request; see [Testing Strategy](../quality/testing-strategy.md#continuous-integration).)*
 
 *Found in B0 and since fixed:* `DATABASE_URL` pointed at `backend/intentune.db`, and `.gitignore` did not cover the database or managed media.
 
@@ -505,7 +584,7 @@ B3 added `soundfile==0.14.0` (with its dependencies `cffi` and `pycparser`, not 
 
 There is currently no:
 
-- HTTP API *(B8, 2026-10-21: built and tested; the frontend does not call it yet, B9)*
+- HTTP API *(B8, 2026-10-21: built and tested. B9: the frontend calls it by default; Vite's `mock` mode runs the mock instead.)*
 - Persistence beyond the listener profile and the managed library. B1 and B2 built those tables only, and no running entry point opens the database yet.
 - Running library features. The managed library (register sources, scan, import, dedupe, tags) exists as a tested application service. *(B8: reachable over HTTP, with the startup scan at every start.)*
 - Running background analysis. The worker and analyzer exist and are tested. *(B8: the API starts the worker at startup and wakes it after scans.)*
@@ -539,7 +618,7 @@ What Prototype 1 can build on, and what it must add. Phase names refer to the [d
 | Policy v1 staged ranking, rolling top three (D07–D09, D13–D17) | **Yes (B5, 2026-10-20):** `domain/policy.py` and `RecommendationService.refresh_queue()` | Feedback events as evidence in B6; long-term profile in B10; constants tuned in B11 |
 | Playlists (D34) | **Yes (B7, 2026-10-21):** CRUD, add, remove, reorder; one entry per track; a playlist add from a recommendation is PLAYLIST_ADD feedback | Routes since B8; frontend in B9 |
 | FastAPI routes, error envelope, audio serving | **Yes (B8, 2026-10-21):** every spec §24 route, the §26 envelope with request IDs, audio by track id with verified range support | Frontend use in B9 |
-| Frontend HTTP adapter | Service boundary only | B9 (frontend phase F9) |
+| Frontend HTTP adapter | **Yes (B9, 2026-10-21):** `frontend/src/services/http/` implements the session service over the API, with real audio playback; typed words interpreted in the backend | Library screen, artwork, explanations: not designed |
 | Conservative long-term adaptation (D06) | No | B10 |
 
 ## Recommendation

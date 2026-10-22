@@ -74,7 +74,8 @@ intentune/
 │   │       │   ├── feedback.py        (B6: FeedbackService)
 │   │       │   ├── playlists.py       (B7: PlaylistService)
 │   │       │   ├── listening.py       (B8: ListeningService, start/steer then re-rank)
-│   │       │   └── library_scans.py   (B8: LibraryScanCoordinator, one scan at a time)
+│   │       │   ├── library_scans.py   (B8: LibraryScanCoordinator, one scan at a time)
+│   │       │   └── messages.py        (B9: MessageService, typed words -> the controls' use cases)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
@@ -91,7 +92,8 @@ intentune/
 │   │       │   ├── local_folders.py   (B2)
 │   │       │   ├── managed_media.py   (B2)
 │   │       │   ├── mutagen_audio.py   (B2)
-│   │       │   └── signal_levels.py   (B3: SignalLevelAnalyzer)
+│   │       │   ├── signal_levels.py   (B3: SignalLevelAnalyzer)
+│   │       │   └── deterministic_intent.py  (B9: DeterministicIntentInterpreter)
 │   │       ├── api/                   (B8: the HTTP API)
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py        (python -m src.intentune.api)
@@ -160,7 +162,10 @@ intentune/
 │       ├── test_api_audio.py          (B8)
 │       ├── test_api_sessions.py       (B8)
 │       ├── test_api_playlists.py      (B8)
-│       └── test_api_startup.py        (B8)
+│       ├── test_api_startup.py        (B8)
+│       ├── test_intent_interpreter.py (B9)
+│       ├── test_message_service.py    (B9)
+│       └── test_api_messages.py       (B9)
 └── frontend/
     ├── package.json, vite.config.ts, tsconfig*.json, .oxlintrc.json, index.html
     ├── browser-checks/  headless-Chrome checks (npm run check:browser)
@@ -169,7 +174,9 @@ intentune/
         ├── components/  presentational component vocabulary (CSS Modules)
         ├── features/
         │   └── session/ types, reducers, commands, composition, service interface
-        ├── mocks/       mock SessionService, mock songs/sessions/artwork
+        ├── services/
+        │   └── http/    (B9) the HTTP SessionService: client, mappings, service
+        ├── mocks/       mock SessionService, mock songs/sessions/artwork, quick actions
         ├── demo/        component gallery and fixed design scenes
         ├── styles/      tokens and base CSS
         └── test/        DOM test helpers
@@ -223,6 +230,17 @@ B7 added playlists:
 - **Persistence:** playlist records and their repository joined `persistence/`, with a sixth migration.
 
 No new adapter or dependency.
+
+B9 added frontend integration:
+- **Domain:** `domain/intent.py` (vocabulary, energy scale, message meanings).
+- **Port:** `ports/intent.py` (`IntentInterpreter`).
+- **Adapter:** `adapters/deterministic_intent.py`.
+- **Application:** `application/messages.py`.
+- **API:** `api/routes/listening.py`.
+- **Migration:** `4b1e9c7d2a6f` (UNLIKE).
+- **Frontend:** `src/services/http/` and `features/session/useAudioPlayback.ts`.
+
+No new dependency.
 
 B8 added the HTTP API:
 - **API:** `api/`, with its routes in `api/routes/`. Only `container.py` and `settings.py` import persistence or adapters.

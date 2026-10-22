@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mockEnvironment, mockIntent } from '../../mocks/environment.ts'
+import { mockQuickAction } from '../../mocks/quickActions.ts'
 import { mockSessions } from '../../mocks/sessions.ts'
 import { composeSession } from './composeSession.ts'
 import { createSession, sessionReducer } from './sessionReducer.ts'
@@ -31,7 +32,7 @@ function turn(overrides: Partial<SessionTurn> = {}): SessionTurn {
     intent: emotionalLow,
     acknowledgement: 'intent',
     recommendation: song('first', 'First Song'),
-    quickActions: [{ id: 'more', label: 'More like this' }],
+    quickActions: [mockQuickAction('More like this', 'more')],
     upNext: null,
     ...overrides,
   }
@@ -229,12 +230,12 @@ describe('reactions', () => {
     const liked = apply(started, {
       type: 'liked_set',
       liked: true,
-      quickActions: [{ id: 'save', label: 'Save this' }],
+      quickActions: [mockQuickAction('Save this', 'save')],
     })
     const unliked = apply(liked, { type: 'liked_set', liked: false })
 
     expect(blocks(liked).at(-1)).toMatchObject({ variant: 'hero', liked: true })
-    expect(liked.quickActions).toEqual([{ id: 'save', label: 'Save this' }])
+    expect(liked.quickActions).toEqual([mockQuickAction('Save this', 'save')])
     expect(liked.events).toBe(started.events)
     expect(liked.intent).toBe(started.intent)
     expect(blocks(unliked).at(-1)).toMatchObject({ variant: 'hero', liked: false })
@@ -292,13 +293,13 @@ describe('playlist picker', () => {
       { type: 'playlist_toggled', playlistId: 'study' },
       {
         type: 'playlists_saved',
-        quickActions: [{ id: 'keep', label: 'Keep this energy' }],
+        quickActions: [mockQuickAction('Keep this energy', 'keep')],
       },
     )
 
     expect(saved.overlay).toBeNull()
     expect(blocks(saved).at(-1)).toMatchObject({ variant: 'hero', savedTo: ['Study'] })
-    expect(saved.quickActions).toEqual([{ id: 'keep', label: 'Keep this energy' }])
+    expect(saved.quickActions).toEqual([mockQuickAction('Keep this energy', 'keep')])
   })
 
   it('discards the selection when closed without saving', () => {
@@ -383,10 +384,26 @@ describe('tuning and playback controls', () => {
 })
 
 describe('replaying history', () => {
+  // A replay is a request: the service answers with the song it plays again.
   const state = mockSessions.change
+  const past = state.recommendations['calm-down']
   const replayed = apply(state, {
-    type: 'recommendation_replayed',
-    recommendationId: 'calm-down',
+    type: 'turn_applied',
+    turn: {
+      intent: state.intent!,
+      acknowledgement: 'none',
+      recommendation: {
+        songId: past.songId,
+        title: past.title,
+        artist: past.artist,
+        descriptors: past.descriptors,
+        artworkUrl: past.artworkUrl,
+        durationSeconds: past.durationSeconds,
+        why: past.why,
+      },
+      quickActions: [],
+      upNext: null,
+    },
   })
 
   it('plays a past song again as a fresh hero and keeps its history entry', () => {
@@ -405,13 +422,110 @@ describe('replaying history', () => {
     expect(recommendations[2]).toMatchObject({ liked: false, positionSeconds: 0 })
   })
 
-  it('ignores replaying the song that is already current', () => {
-    expect(
-      apply(state, {
-        type: 'recommendation_replayed',
-        recommendationId: 'last-last',
+})
+
+describe('answers from the service (B9)', () => {
+  it('shows words it could not act on, says so, and opens Tune without changing the intent', () => {
+    const refused = apply(started, {
+      type: 'turn_not_understood',
+      echo: 'music for a rainy Accra night',
+      message: "Intentune can't act on that yet. Try a mood, a genre, or more or less energy.",
+      refineTab: 'mood',
+    })
+
+    expect(refused.intent).toBe(started.intent)
+    expect(refused.currentRecommendationId).toBe(started.currentRecommendationId)
+    expect(refused.refine).toEqual({ tab: 'mood' })
+    expect(refused.events.slice(-2).map((event) => event.kind)).toEqual(['user_message', 'not_understood'])
+    const stream = blocks(refused)
+    expect(stream).toContainEqual(expect.objectContaining({ type: 'user_message', text: 'music for a rainy Accra night' }))
+    expect(stream).toContainEqual(
+      expect.objectContaining({ type: 'ack', label: 'Not understood', tone: 'neutral' }),
+    )
+  })
+
+  it('says what the library cannot act on, apart from not understanding, and changes nothing', () => {
+    const typed = apply(started, {
+      type: 'turn_unavailable',
+      echo: 'a bit calmer',
+      message: "Your library doesn't describe energy yet, so that can't change what plays. Try a genre.",
+      refineTab: 'genre',
+    })
+    const pressed = apply(started, {
+      type: 'turn_unavailable',
+      message: 'This session asks for a mood that your music doesn’t describe, so it can’t continue.',
+    })
+
+    expect(typed.intent).toBe(started.intent)
+    expect(typed.currentRecommendationId).toBe(started.currentRecommendationId)
+    expect(typed.refine).toEqual({ tab: 'genre' })
+    expect(typed.events.slice(-2).map((event) => event.kind)).toEqual(['user_message', 'unavailable'])
+    expect(pressed.events.slice(-1).map((event) => event.kind)).toEqual(['unavailable']) // nothing typed, nothing echoed
+    expect(pressed.refine).toBe(started.refine)
+    expect(blocks(typed)).toContainEqual(
+      expect.objectContaining({
+        type: 'ack',
+        label: 'Not available yet',
+        detail: "Your library doesn't describe energy yet, so that can't change what plays. Try a genre.",
+        tone: 'neutral',
       }),
-    ).toBe(state)
+    )
+  })
+
+  it('says the library is not ready, apart from what a library lacks, and opens nothing', () => {
+    const refused = apply(started, {
+      type: 'turn_library_not_ready',
+      echo: 'some jazz',
+      message: 'Your library has no playable music yet. Import some music to start listening.',
+    })
+
+    expect(refused.intent).toBe(started.intent)
+    expect(refused.refine).toBe(started.refine)
+    expect(refused.events.slice(-2).map((event) => event.kind)).toEqual(['user_message', 'library_not_ready'])
+    expect(blocks(refused)).toContainEqual(
+      expect.objectContaining({ type: 'ack', label: 'Library not ready', tone: 'neutral' }),
+    )
+  })
+
+  it('takes back a like or a save the service did not record', () => {
+    const id = started.currentRecommendationId!
+    const liked = apply(started, { type: 'liked_set', liked: true })
+
+    expect(apply(liked, { type: 'like_reverted', recommendationId: id, liked: false }).recommendations[id].liked).toBe(false)
+    expect(
+      apply(started, { type: 'playlists_save_reverted', recommendationId: id, savedToPlaylistIds: ['study'] })
+        .recommendations[id].savedToPlaylistIds,
+    ).toEqual(['study'])
+    expect(apply(started, { type: 'like_reverted', recommendationId: 'gone', liked: true })).toBe(started)
+  })
+
+  it('updates the peek at what follows, only for the song it was about', () => {
+    const id = started.currentRecommendationId!
+    const peeked = apply(started, { type: 'up_next_offered', recommendationId: id, upNext: song('next', 'Next Up') })
+    const cleared = apply(peeked, { type: 'up_next_offered', recommendationId: id, upNext: null })
+
+    expect(peeked.upNextRecommendationId).not.toBeNull()
+    expect(peeked.recommendations[peeked.upNextRecommendationId!].title).toBe('Next Up')
+    expect(cleared.upNextRecommendationId).toBeNull()
+    expect(apply(started, { type: 'up_next_offered', recommendationId: 'other', upNext: null })).toBe(started)
+  })
+
+  it('takes the position and duration the audio player reports', () => {
+    const progressed = apply(started, { type: 'playback_progressed', positionSeconds: 42.5, durationSeconds: 201 })
+    const later = apply(progressed, { type: 'playback_progressed', positionSeconds: 50 })
+
+    expect(progressed.playback).toMatchObject({ positionSeconds: 42.5, durationSeconds: 201 })
+    expect(later.playback).toMatchObject({ positionSeconds: 50, durationSeconds: 201 })
+  })
+
+  it('keeps the hero playing when a turn brings no new song, and restarts it when asked', () => {
+    const playedOn = apply(started, { type: 'playback_progressed', positionSeconds: 30 })
+    const refined = apply(playedOn, { type: 'turn_applied', turn: turn({ intent: emotionalMedium, recommendation: null }) })
+    const restarted = apply(playedOn, { type: 'turn_applied', turn: turn({ recommendation: null, restart: true }) })
+
+    expect(refined.currentRecommendationId).toBe(started.currentRecommendationId)
+    expect(refined.playback.positionSeconds).toBe(30)
+    expect(restarted.playback).toMatchObject({ playing: true, positionSeconds: 0, restarts: 1 })
   })
 })
 

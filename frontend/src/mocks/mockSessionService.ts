@@ -6,6 +6,7 @@ import type {
   RecommendedSong,
   SessionService,
   SessionTurn,
+  SteeringControl,
   TurnContext,
   TurnRequest,
   TurnResponse,
@@ -17,8 +18,9 @@ import type {
   SessionState,
 } from '../features/session/types.ts'
 import { mockEnvironment } from './environment.ts'
+import { mockQuickAction } from './quickActions.ts'
 import { seededSessions } from './sessions.ts'
-import { songs } from './songs.ts'
+import { isMockSongId, songs } from './songs.ts'
 import type { MockSongId } from './songs.ts'
 
 type QuickActions = SessionState['quickActions']
@@ -229,13 +231,11 @@ function recommend(
 }
 
 // --- Quick actions ---------------------------------------------------------
-// At most two, written as things the user could type.
+// At most two, written as things the user could type. Each carries its
+// request (quickActions.ts): a steering control, or a phrase only this mock reads.
 
 const actions = (...labels: string[]): QuickActions =>
-  labels.map((label) => ({
-    id: label.toLowerCase().replaceAll(' ', '-'),
-    label,
-  }))
+  labels.map((label) => mockQuickAction(label))
 
 const ACTION_SETS = {
   initial: actions('More like this', 'A bit calmer'),
@@ -497,6 +497,30 @@ function moveOn(
   }
 }
 
+/** The phrase this mock's reader takes a steering control as. */
+const CONTROL_PHRASE: Record<SteeringControl, string> = {
+  more_like_this: 'More like this',
+  surprise_me: 'Surprise me',
+  more_familiar: 'Keep this mood',
+  try_something_different: 'Something new',
+}
+
+function replayTurn(context: TurnContext, songId: string): TurnResponse {
+  const { intent } = context
+  if (!intent) throw new Error('Cannot replay in a session with no intent')
+  if (!isMockSongId(songId)) throw new Error(`Unknown mock song: ${songId}`)
+  return {
+    kind: 'turn',
+    turn: {
+      intent,
+      acknowledgement: 'none',
+      recommendation: recommend(intent, songId),
+      quickActions: ACTION_SETS.continuing,
+      upNext: null,
+    },
+  }
+}
+
 const REFINE_LABEL: Record<IntentDimension, string> = {
   energy: 'Energy adjusted',
   mood: 'Mood adjusted',
@@ -505,6 +529,19 @@ const REFINE_LABEL: Record<IntentDimension, string> = {
 
 function respond(context: TurnContext, request: TurnRequest): TurnResponse {
   switch (request.kind) {
+    case 'starter':
+      return respond(context, { kind: 'message', text: request.phrase })
+
+    case 'control': {
+      const answer = respond(context, {
+        kind: 'message',
+        text: CONTROL_PHRASE[request.control],
+      })
+      return answer.kind === 'turn'
+        ? { kind: 'turn', turn: { ...answer.turn, userText: request.label } }
+        : answer
+    }
+
     case 'message': {
       const text = request.text.trim()
       const said = mentions(text)
@@ -553,9 +590,15 @@ function respond(context: TurnContext, request: TurnRequest): TurnResponse {
       return moveOn(context, 'not_for_me')
 
     case 'next':
+    case 'track_ended':
       return moveOn(context, 'none')
+
+    case 'replay':
+      return replayTurn(context, request.songId)
   }
 }
+
+let playlistsCreated = 0
 
 /** Which playlists suit which genre. A hint only; nothing is selected by it. */
 const PLAYLISTS_FOR_GENRE: Record<string, string[]> = {
@@ -572,6 +615,13 @@ export const mockSessionService: SessionService = {
     refineOptions,
   }),
   respond: async (context, request) => respond(context, request),
+  react: async (_context, reaction) =>
+    reaction === 'like' ? { quickActions: ACTION_SETS.liked } : {},
+  savePlaylists: async () => ({ quickActions: ACTION_SETS.saved }),
+  createPlaylist: async (name) => {
+    playlistsCreated++
+    return { id: `created-playlist-${playlistsCreated}`, name }
+  },
   quickActionsAfter: async (reaction) => ACTION_SETS[reaction],
   suggestPlaylists: async (context, playlists) => {
     const suggested = PLAYLISTS_FOR_GENRE[context.intent?.genre.id ?? ''] ?? []

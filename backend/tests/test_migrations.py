@@ -389,6 +389,61 @@ def test_the_b7_migration_keeps_feedback_and_its_downgrade_removes_only_playlist
         engine.dispose()
 
 
+def test_the_b9_migration_accepts_unlike_and_its_downgrade_removes_only_unlike_events(migrated_database_url):
+    """B9 rebuilt feedback_events to accept UNLIKE. Downgrading removes UNLIKE events and keeps every other event
+    exactly; upgrading accepts UNLIKE again."""
+    engine = create_database_engine(migrated_database_url)
+    try:
+        unit_of_work = SqlAlchemyUnitOfWork(create_session_factory(engine))
+        listener_id = ensure_default_listener(unit_of_work).listener_profile_id
+        now = datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc)
+        with unit_of_work:
+            unit_of_work.tracks.add(Track(
+                track_id=_FIRST_ID, sha256="a" * 64, size_bytes=10, audio_format=AudioFormat.FLAC, status=TrackStatus.IMPORTED,
+                original_filename="song.flac", created_at=now, updated_at=now,
+            ))
+            unit_of_work.commit()
+        sessions = SessionService(unit_of_work)
+        session_id = sessions.start_session(listener_id, ListeningContext()).session.session_id
+        recommendation = Recommendation(
+            candidate=MusicCandidate(candidate_id=_FIRST_ID, title="Song", creator="Artist", source="local"),
+            score_breakdown=ScoreBreakdown(total_score=0.5, maximum_score=1.0, components=(ScoreComponent("intent", 0.5, 1.0, "intent fit 0.50"),)),
+            rank=1,
+        )
+        [occurrence] = sessions.queue_recommendations(session_id, [recommendation], "policy-v1").queue
+        sessions.record_feedback(session_id, occurrence.occurrence_id, FeedbackEventType.LIKE)
+        sessions.record_feedback(session_id, occurrence.occurrence_id, FeedbackEventType.UNLIKE)
+        with engine.connect() as connection:
+            like_before = connection.exec_driver_sql("SELECT * FROM feedback_events WHERE event_type = 'LIKE'").one()
+    finally:
+        engine.dispose()
+
+    command.downgrade(alembic_config(migrated_database_url), "ce0b59df2cd1")
+
+    engine = create_database_engine(migrated_database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT * FROM feedback_events").all() == [like_before]
+            with pytest.raises(IntegrityError):
+                connection.exec_driver_sql(
+                    "INSERT INTO feedback_events (id, session_id, occurrence_id, event_type, occurred_at) VALUES (?, ?, ?, 'UNLIKE', ?)",
+                    (_SECOND_ID, session_id, occurrence.occurrence_id, "2026-10-21 10:00:00"),
+                )
+    finally:
+        engine.dispose()
+
+    command.upgrade(alembic_config(migrated_database_url), "head")
+    engine = create_database_engine(migrated_database_url)
+    try:
+        SessionService(SqlAlchemyUnitOfWork(create_session_factory(engine))).record_feedback(
+            session_id, occurrence.occurrence_id, FeedbackEventType.UNLIKE
+        )
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT event_type FROM feedback_events ORDER BY occurred_at").scalars().all() == ["LIKE", "UNLIKE"]
+    finally:
+        engine.dispose()
+
+
 def test_migrated_database_uses_wal_and_leaves_no_foreign_key_violations(engine):
     with engine.connect() as connection:
         assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"

@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useReducer } from 'react'
 import { ask, planCommand } from './commands.ts'
+import { useAudioPlayback } from './useAudioPlayback.ts'
 import type { SessionCommand } from './commands.ts'
 import type { SessionService, WorkspaceSeed } from './sessionService.ts'
 import {
@@ -71,10 +72,18 @@ export function useListeningSessions(service: SessionService) {
     if (question) void ask(service, question).then(dispatch)
   }
 
-  // Simulated playback clock: there is no audio, only a position that advances.
+  // Real audio, when the recommendation has some, is the playback authority.
+  useAudioPlayback(session, run)
+
+  // Simulated playback clock, only for a recommendation with no audio behind
+  // it (the mock's): a position that advances.
+  const current = session?.currentRecommendationId
+    ? session.recommendations[session.currentRecommendationId]
+    : undefined
   const ticking =
     !!session?.playback.playing &&
-    session.currentRecommendationId !== null &&
+    !!current &&
+    !current.audioUrl &&
     session.overlay === null
   const onTick = useEffectEvent(() => run({ type: 'tick' }))
 

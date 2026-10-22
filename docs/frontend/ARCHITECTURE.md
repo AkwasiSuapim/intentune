@@ -137,7 +137,15 @@ A recommendation card may display a recommendation. It must not calculate why th
 
 ### Intent interpretation boundary
 
-React components, reducers, and UI composition must not perform natural-language phrase matching. Typed text, starters, and quick actions are passed to the session service unread. Any temporary phrase interpretation belongs only behind the session-service boundary (today, the mock implementation), so a real intent parser or API can replace it without rewriting UI components.
+React components, reducers, and UI composition must not perform natural-language phrase matching. Any temporary phrase interpretation belongs only behind the session-service boundary (the mock), so the backend can replace it without rewriting UI components.
+
+**Hybrid input (B9 / F9, 2026-10-21).** If the UI already knows what the listener did, it sends that meaning; if all it has is language, the backend interprets it:
+- **Starters:** a starter is sent as `{kind: 'starter', starterId, phrase}`. The service that offered the starter knows its structured intent, and the phrase is only shown as the listener's words.
+- **Quick actions:** a quick action carries its own request (`QuickAction.request`). The label is presentation only, so relabelling "More like this" changes nothing it does.
+- **Other controls:** Tune values, Next, Not for me, Like, Replay, and playlist choices are structured requests or service calls.
+- **Typed words:** only what the listener typed travels as text (`{kind: 'message', text}`), unread. The backend's deterministic interpreter answers what it meant, or that it cannot act on it.
+
+`src/architecture.test.ts` checks that no file in the session feature, the components, or the app shell imports a service implementation, calls the network, or matches words.
 
 ---
 
@@ -624,7 +632,21 @@ Do not scatter `fetch()` across visual components.
 
 ### Service interface (F8)
 
-`SessionService` (`src/features/session/sessionService.ts`) is the only way the session feature reaches whatever answers it. The mock in `src/mocks/` implements it today; an HTTP client will implement the same interface. `App.tsx` is the only place a concrete implementation is chosen.
+`SessionService` (`src/features/session/sessionService.ts`) is the only way the session feature reaches whatever answers it. Two implementations exist:
+- **The HTTP client** (`src/services/http/`, B9/F9): the backend, and the default runtime.
+- **The mock** (`src/mocks/`): the implementation the tests, the design demo, and the browser checks use.
+
+`App.tsx` is the only place one is chosen, through `chooseService()` (`src/chooseService.ts`): the HTTP client, unless Vite's `mock` mode (`npm run dev:mock`, `npm run build:mock`) or `VITE_SESSION_SERVICE=mock` asks for the mock. Until the B9 review (2026-10-22) the mock was the default.
+
+**Extended in B9 (F9):**
+- **TurnContext and new requests:** `TurnContext` carries the frontend session id and the service's reference for the song in view (`currentRef`). The new requests are `starter`, `control`, `track_ended`, and `replay`, and `next` and `message` may carry the player's facts (`PlaybackFacts`).
+- **New answers:** `TurnResponse` can be `not_understood`, which the feature shows as such, not as a failure. A `SessionTurn` whose `recommendation` is null keeps the hero playing ("music leads"), and `restart` starts it again.
+- **Recorded, not local:** `react()` records a Like or an Unlike, `savePlaylists()` saves to and removes from playlists, and `createPlaylist()` creates one. A Like or save the service does not record is undone, so the card shows the truth.
+- **Recommendations:** a recommendation carries the service's `ref` and an `audioUrl`, and its `why` is optional; real recommendations carry none, so Why this fits is not shown for them.
+- **What the library can use** (B9 review, 2026-10-22): the environment's `unavailableDimensions` lists the Tune dimensions the library has no evidence for (from the backend vocabulary's `support`; the mock has none). Tune keeps all three tabs, as the approved design does, but marks an unavailable one: the tab is struck through and its accessible name adds "unavailable", the panel explains why, and its options are `aria-disabled` and do nothing. A single value can be unavailable too (`IntentValue.unavailable`: a mood no track declares, from the vocabulary's `usable_moods`), dimmed with a note. `planCommand` never sends either.
+- **Starters** (B9 consistency, 2026-10-22): a starter whose mood or energy the library lacks carries `unavailableReason`. `DiscoveryPrompt` shows it in the same language (struck through, dimmed, "unavailable" in its accessible name), with the reason visible and linked by `aria-describedby`; pressing it does nothing, and `planCommand` sends nothing for it. Discover is a control, so it stays usable. The mock reports full capability, so the design and the browser checks show every starter.
+- **A library that is not ready** (readiness model, 2026-10-22): `libraryReady` is false while nothing is playable. That is one reason, about the library, so no dimension is marked for it: every starter (Discover included) shows "Your library has no playable music yet", Tune locks every tab with a library note, and `LIBRARY_NOT_READY` is answered as `library_not_ready` ("Library not ready").
+- **The `unavailable` answer:** the backend refuses an intent it understood but the library cannot act on (`INTENT_UNAVAILABLE`), and the service answers `{kind: 'unavailable', echo?, message}`. It is shown as "Not available yet" with the reason, not as a failure, and changes nothing. A past session whose intent the library can no longer act on answers it too: it cannot continue, in part or at all, and says so.
 
 - **Asynchronous.** Every method returns a promise and rejects when it cannot answer. The mock answers at once through the same interface.
 - **Failure is opaque.** The feature never inspects a rejection: any failure means "the request did not go through". Mapping specific backend errors (validation, rate limits, provider failures) to different UI waits for approved error semantics.
@@ -642,13 +664,31 @@ Loading and error states:
 
 ### Backend contract status
 
-No HTTP API exists in the repository yet. Since backend phase B0 (2026-10-18), `docs/design/api-design.md` records the Prototype 1 route list, planned for backend phase B8: library, sessions and turns, playback events, reactions, playlists, and audio. Its earlier profile-based draft (`POST /api/v1/recommendations`, `POST /api/v1/feedback`) is marked superseded. The Prototype 1 routes define no request or response bodies yet, and they do not yet cover everything the session UI asks for, such as starters, tuning options, quick actions, and playlist suggestions. `api-design.md` lists the open differences under "Frontend Contract Alignment"; they are resolved in backend phases B8 and B9 (frontend phase F9).
+**Integrated (B9 / F9, 2026-10-21).** The contract is `docs/design/api-design.md` (backend B8, extended in B9). `src/services/http/httpSessionService.ts` implements `SessionService` over it:
 
-Because the contract is not approved, F8 stops at the frontend abstraction. There is no HTTP client, no request/response DTOs and no API base-URL configuration. Likes, saves and created playlists stay on the device; they become service calls once a contract defines them.
+- **Requests:**
+  - **Starters:** `POST /sessions` with the starter's structured context. Discover is `surprise_me`.
+  - **Controls, Tune, Not for me, and Next:** `POST …/turns`. Next carries the player's facts, recorded as the skip.
+  - **A song that ended:** a `complete` playback event.
+  - **Replay, Like, and Unlike:** reactions.
+  - **Saves:** playlist items, which are PLAYLIST_ADD feedback when the song is a recommendation of the playing session.
+  - **Typed words:** a `message` turn, or the start's `message`. `422 MESSAGE_NOT_UNDERSTOOD` becomes the `not_understood` answer.
+- **Play:** a new hero starts playing in the approved UI, so a session that has just started is told to play (a `next` turn while nothing plays).
+- **Tuning:** the options come from `GET /listening/vocabulary`: the library's genres, the five curated moods, and the energy scale. Energy is kept and shown but ranks nothing until it is measured.
+- **The drawer:** it opens with the 20 most recent backend sessions, rebuilt from their history.
+- **Past sessions:** the backend keeps one active session, so a past session continued from the drawer becomes a new backend session with its last context. Its old songs can still be saved to playlists, but not liked or replayed.
+- **Not provided by the backend:** artwork (the Intentune fallback shows), playlist suggestions, and explanations (Why this fits is hidden). Playlist tones are derived from the playlist id, as presentation.
+
+Vite proxies `/api` to the backend in development (`INTENTUNE_API_URL`, default `http://127.0.0.1:8000`), so the app calls its own origin.
 
 ### Playback authority boundary
 
-The current frontend playback clock is mock/prototype behavior: a timer that advances a position, with no audio behind it. When real media or provider playback is introduced, the real playback state becomes authoritative, and the mock tick mechanism must be replaced rather than run alongside it.
+**Current (B9 / F9).** A recommendation with an `audioUrl` plays through an audio element (`src/features/session/useAudioPlayback.ts`), and that element is the playback authority:
+- **Reported to the session:** its position and duration (`playback_progressed`) and its end (`track_ended`, sent as a `complete` with the player's facts).
+- **Applied to it:** the session's play and pause.
+- **Refused playback:** a browser that refuses to start playing leaves the session paused.
+
+The simulated clock (`tick`) runs only for a recommendation without audio, the mock's, so the two never run together. The element is created only once a recommendation with audio appears.
 
 ---
 

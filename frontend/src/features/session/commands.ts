@@ -3,13 +3,19 @@
 // changes to make at once, plus anything only the service can answer. `ask`
 // puts that question to the service and turns the answer into changes for the
 // session that asked.
+//
+// Requests carry meaning: a starter, a quick action, Next or Like is sent as
+// what it is, never as words for the service to read again. Only what the
+// listener typed travels as text, unread.
 import type {
+  PlaybackFacts,
+  ReactionAnswer,
   SessionService,
   TurnContext,
   TurnRequest,
 } from './sessionService.ts'
 import type { SessionAction } from './sessionReducer.ts'
-import { activeSession } from './workspaceReducer.ts'
+import { activeSession, newPlaylistName } from './workspaceReducer.ts'
 import type { WorkspaceAction, WorkspaceState } from './workspaceReducer.ts'
 import type {
   IntentDimension,
@@ -19,7 +25,7 @@ import type {
 } from './types.ts'
 
 export type SessionCommand =
-  // Conversation: all three reach the service as the same kind of message.
+  // Conversation: typed words, a starter, or a quick action.
   | { type: 'send_message'; text: string }
   | { type: 'select_starter'; starterId: string }
   | { type: 'select_quick_action'; actionId: string }
@@ -33,7 +39,14 @@ export type SessionCommand =
   | { type: 'refine'; dimension: IntentDimension; valueId: string }
   // The current song: playback and reactions.
   | { type: 'toggle_play' }
+  /** The simulated clock's beat, for a song with no audio behind it. */
   | { type: 'tick' }
+  /** The audio player's own position and duration. */
+  | { type: 'playback_progressed'; positionSeconds: number; durationSeconds?: number }
+  /** The audio player reached the end of the song. */
+  | { type: 'track_ended' }
+  /** The browser would not start playing the audio. */
+  | { type: 'playback_refused' }
   | { type: 'next' }
   | { type: 'toggle_why' }
   | { type: 'toggle_like' }
@@ -51,8 +64,6 @@ export type SessionCommand =
   | { type: 'new_session' }
   | { type: 'open_session'; sessionId: string }
 
-type QuickActions = SessionState['quickActions']
-
 /** Something only the service can answer, asked on behalf of one session. */
 export type ServiceQuestion = {
   /** The session asking. The answer goes to it, wherever the user is by then. */
@@ -63,13 +74,19 @@ export type ServiceQuestion = {
 } & (
   /** A request that moves the session forward. */
   | { kind: 'turn'; request: TurnRequest }
-  // Hints about the current song. Each names the recommendation it is about.
-  | {
-      kind: 'quick_actions_after'
-      recommendationId: string
-      reaction: 'liked' | 'saved'
-    }
+  // About the current song. Each names the recommendation it is about.
   | { kind: 'playlist_suggestions'; recommendationId: string }
+  | { kind: 'reaction'; recommendationId: string; reaction: 'like' | 'unlike' }
+  | {
+      kind: 'save_playlists'
+      recommendationId: string
+      added: string[]
+      removed: string[]
+      /** Where the song was saved before, to go back to if the save fails. */
+      before: string[]
+    }
+  // About the workspace.
+  | { kind: 'create_playlist'; name: string }
 )
 
 export type CommandPlan = {
@@ -79,11 +96,16 @@ export type CommandPlan = {
   question?: ServiceQuestion
 }
 
-export function turnContext(session: SessionState): TurnContext {
-  const current =
+function currentOf(session: SessionState) {
+  return (
     (session.currentRecommendationId &&
       session.recommendations[session.currentRecommendationId]) ||
     null
+  )
+}
+
+export function turnContext(session: SessionState): TurnContext {
+  const current = currentOf(session)
   const playedSongIds: string[] = []
   let recommendationsSinceIntentChange = 0
 
@@ -99,10 +121,24 @@ export function turnContext(session: SessionState): TurnContext {
   }
 
   return {
+    sessionId: session.id,
     intent: session.intent,
     currentSongId: current?.songId ?? null,
+    currentRef: current?.ref ?? null,
     playedSongIds,
     recommendationsSinceIntentChange,
+  }
+}
+
+/** How far the current song got, when there is one with a known length. */
+function playbackFacts(session: SessionState): PlaybackFacts | undefined {
+  const current = currentOf(session)
+  if (!current) return undefined
+  const duration = session.playback.durationSeconds ?? current.durationSeconds
+  if (!(duration > 0)) return undefined
+  return {
+    playedSeconds: Math.min(session.playback.positionSeconds, duration),
+    durationSeconds: duration,
   }
 }
 
@@ -115,10 +151,7 @@ export function planCommand(
   command: SessionCommand,
 ): CommandPlan {
   const session = activeSession(workspace)
-  const current =
-    (session.currentRecommendationId &&
-      session.recommendations[session.currentRecommendationId]) ||
-    null
+  const current = currentOf(session)
   const asking = {
     sessionId: session.id,
     context: turnContext(session),
@@ -135,7 +168,9 @@ export function planCommand(
           question: { ...asking, kind: 'turn', request },
         }
   const say = (text: string) =>
-    text.trim() ? send({ kind: 'message', text: text.trim() }) : NOTHING
+    text.trim()
+      ? send({ kind: 'message', text: text.trim(), playback: playbackFacts(session) })
+      : NOTHING
 
   switch (command.type) {
     case 'send_message':
@@ -145,14 +180,17 @@ export function planCommand(
       const starter = workspace.starters.find(
         (candidate) => candidate.id === command.starterId,
       )
-      return starter ? say(starter.phrase) : NOTHING
+      // A starter the library cannot act on is shown with its reason and sends nothing.
+      return starter && !starter.unavailableReason
+        ? send({ kind: 'starter', starterId: starter.id, phrase: starter.phrase })
+        : NOTHING
     }
 
     case 'select_quick_action': {
       const action = session.quickActions.find(
         (candidate) => candidate.id === command.actionId,
       )
-      return action ? say(action.label) : NOTHING
+      return action ? send(action.request) : NOTHING
     }
 
     case 'retry':
@@ -179,6 +217,13 @@ export function planCommand(
       if (!intent || intent[command.dimension].id === command.valueId) {
         return NOTHING
       }
+      // A dimension or value the library cannot use would change nothing: it is not sent.
+      const option = workspace.refineOptions[command.dimension].find(
+        (candidate) => candidate.id === command.valueId,
+      )
+      if (workspace.unavailableDimensions?.includes(command.dimension) || option?.unavailable) {
+        return NOTHING
+      }
       return send({
         kind: 'refine',
         dimension: command.dimension,
@@ -190,18 +235,47 @@ export function planCommand(
       return local({ type: 'play_toggled' })
 
     case 'tick': {
-      if (!current || !session.playback.playing || session.overlay) {
+      if (!current || current.audioUrl || !session.playback.playing || session.overlay) {
         return NOTHING
       }
-      // The song ran out: move on, exactly as pressing Next would.
+      // The simulated song ran out: it ended, as a real one would.
       if (session.playback.positionSeconds + 1 >= current.durationSeconds) {
-        return send({ kind: 'next' })
+        return send({
+          kind: 'track_ended',
+          playback: {
+            playedSeconds: current.durationSeconds,
+            durationSeconds: current.durationSeconds,
+          },
+        })
       }
       return local({ type: 'playback_ticked', seconds: 1 })
     }
 
+    case 'playback_progressed':
+      return current
+        ? local({
+            type: 'playback_progressed',
+            positionSeconds: command.positionSeconds,
+            durationSeconds: command.durationSeconds,
+          })
+        : NOTHING
+
+    case 'playback_refused':
+      return session.playback.playing ? local({ type: 'play_toggled' }) : NOTHING
+
+    case 'track_ended': {
+      const playback = playbackFacts(session)
+      if (!current || !playback) return NOTHING
+      return send({
+        kind: 'track_ended',
+        playback: { playedSeconds: playback.durationSeconds, durationSeconds: playback.durationSeconds },
+      })
+    }
+
     case 'next':
-      return current ? send({ kind: 'next' }) : NOTHING
+      return current
+        ? send({ kind: 'next', playback: playbackFacts(session) })
+        : NOTHING
 
     case 'toggle_why':
       return local({ type: 'why_toggled' })
@@ -211,25 +285,25 @@ export function planCommand(
       const liked = !current.liked
       return {
         actions: [{ type: 'liked_set', liked }],
-        question: liked
-          ? {
-              ...asking,
-              kind: 'quick_actions_after',
-              recommendationId: current.id,
-              reaction: 'liked',
-            }
-          : undefined,
+        question: {
+          ...asking,
+          kind: 'reaction',
+          recommendationId: current.id,
+          reaction: liked ? 'like' : 'unlike',
+        },
       }
     }
 
     case 'not_for_me':
       return current ? send({ kind: 'not_for_me' }) : NOTHING
 
-    case 'replay':
-      return local({
-        type: 'recommendation_replayed',
-        recommendationId: command.recommendationId,
-      })
+    case 'replay': {
+      const replayed = session.recommendations[command.recommendationId]
+      if (!replayed || replayed.id === session.currentRecommendationId) {
+        return NOTHING
+      }
+      return send({ kind: 'replay', songId: replayed.songId, ref: replayed.ref ?? null })
+    }
 
     case 'open_playlist_picker':
       if (!current) return NOTHING
@@ -247,7 +321,11 @@ export function planCommand(
       return local({ type: 'playlist_toggled', playlistId: command.playlistId })
 
     case 'create_playlist':
-      return local({ type: 'playlist_created' })
+      if (session.overlay?.type !== 'playlist_picker') return NOTHING
+      return {
+        actions: [],
+        question: { ...asking, kind: 'create_playlist', name: newPlaylistName(workspace) },
+      }
 
     case 'confirm_playlists': {
       const { overlay } = session
@@ -258,13 +336,17 @@ export function planCommand(
       ) {
         return NOTHING
       }
+      const before = current.savedToPlaylistIds
+      const selected = overlay.selectedPlaylistIds
       return {
         actions: [{ type: 'playlists_saved' }],
         question: {
           ...asking,
-          kind: 'quick_actions_after',
+          kind: 'save_playlists',
           recommendationId: current.id,
-          reaction: 'saved',
+          added: selected.filter((id) => !before.includes(id)),
+          removed: before.filter((id) => !selected.includes(id)),
+          before,
         },
       }
     }
@@ -289,6 +371,17 @@ export function planCommand(
 /** A hint is optional: when the service cannot give it, the session goes on without it. */
 function hint<T>(answer: Promise<T>, fallback: T): Promise<T> {
   return answer.catch(() => fallback)
+}
+
+function hintsFor(recommendationId: string, answer: ReactionAnswer): SessionAction[] {
+  const actions: SessionAction[] = []
+  if (answer.quickActions) {
+    actions.push({ type: 'quick_actions_offered', recommendationId, quickActions: answer.quickActions })
+  }
+  if (answer.upNext !== undefined) {
+    actions.push({ type: 'up_next_offered', recommendationId, upNext: answer.upNext })
+  }
+  return actions
 }
 
 async function answer(
@@ -324,24 +417,40 @@ async function answer(
             {
               type: 'liked_set',
               liked: true,
-              quickActions: await hint<QuickActions | undefined>(
+              quickActions: await hint<SessionState['quickActions'] | undefined>(
                 service.quickActionsAfter('liked'),
                 undefined,
               ),
               echo: response.echo,
             },
           ]
+        case 'not_understood':
+          return [
+            { type: 'request_answered' },
+            {
+              type: 'turn_not_understood',
+              echo: response.echo,
+              message: response.message,
+              refineTab: response.refineTab,
+            },
+          ]
+        case 'unavailable':
+          return [
+            { type: 'request_answered' },
+            {
+              type: 'turn_unavailable',
+              echo: response.echo,
+              message: response.message,
+              refineTab: response.refineTab,
+            },
+          ]
+        case 'library_not_ready':
+          return [
+            { type: 'request_answered' },
+            { type: 'turn_library_not_ready', echo: response.echo, message: response.message },
+          ]
       }
     }
-
-    case 'quick_actions_after':
-      return [
-        {
-          type: 'quick_actions_offered',
-          recommendationId: question.recommendationId,
-          quickActions: await service.quickActionsAfter(question.reaction),
-        },
-      ]
 
     case 'playlist_suggestions':
       return [
@@ -354,6 +463,33 @@ async function answer(
           ),
         },
       ]
+
+    // A reaction or a save that does not go through is undone, so the card shows the truth.
+    case 'reaction':
+      try {
+        return hintsFor(question.recommendationId, await service.react(context, question.reaction))
+      } catch {
+        return [{ type: 'like_reverted', recommendationId: question.recommendationId, liked: question.reaction === 'unlike' }]
+      }
+
+    case 'save_playlists':
+      try {
+        return hintsFor(
+          question.recommendationId,
+          await service.savePlaylists(context, { added: question.added, removed: question.removed }),
+        )
+      } catch {
+        return [
+          {
+            type: 'playlists_save_reverted',
+            recommendationId: question.recommendationId,
+            savedToPlaylistIds: question.before,
+          },
+        ]
+      }
+
+    case 'create_playlist':
+      return []
   }
 }
 
@@ -367,6 +503,14 @@ export async function ask(
   service: SessionService,
   question: ServiceQuestion,
 ): Promise<WorkspaceAction> {
+  if (question.kind === 'create_playlist') {
+    try {
+      const playlist = await service.createPlaylist(question.name)
+      return { type: 'playlist_created', sessionId: question.sessionId, playlist }
+    } catch {
+      return { type: 'answer_received', sessionId: question.sessionId, actions: [] }
+    }
+  }
   let actions: SessionAction[]
   try {
     actions = await answer(service, question)

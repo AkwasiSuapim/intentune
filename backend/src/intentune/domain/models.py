@@ -162,6 +162,12 @@ class ListeningContext:
     chatbot may construct this model later. This milestone only defines the
     shape and validation -- it does not interpret mood, infer intent, or
     apply any context presets.
+
+    Prototype 1 (B5, B9): Recommendation Policy v1 reads temporary_genres,
+    temporary_moods (or desired_mood when there are none), and the five
+    targets. current_mood, listening_goal, and activity are kept and stored,
+    but their mapping into Policy v1 is unfinished: they change no
+    recommendation yet (domain/intent.py, UNMAPPED_CONTEXT_FIELDS).
     """
 
     current_mood: Optional[str] = None

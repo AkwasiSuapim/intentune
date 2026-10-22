@@ -289,6 +289,49 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
               genreId="afrobeats"
             />
           </Variant>
+          <Variant label="Energy, unavailable in this library" layout="edge">
+            <RefineControl
+              activeTab="energy"
+              {...refineOptions}
+              energyId="medium"
+              moodId="emotional"
+              genreId="afrobeats"
+              unavailable={['mood', 'energy']}
+            />
+          </Variant>
+          <Variant label="Some moods unavailable in this library" layout="edge">
+            <RefineControl
+              activeTab="mood"
+              {...refineOptions}
+              moods={refineOptions.moods.map((mood) =>
+                mood.id === 'calm' ? mood : { ...mood, unavailable: true },
+              )}
+              energyId="medium"
+              moodId="calm"
+              genreId="afrobeats"
+            />
+          </Variant>
+          <Variant label="Library not ready (nothing playable), unavailable in this library" layout="edge">
+            <RefineControl
+              activeTab="energy"
+              {...refineOptions}
+              energyId="medium"
+              moodId="emotional"
+              genreId="afrobeats"
+              unavailable={['mood', 'genre', 'energy']}
+              libraryReady={false}
+            />
+          </Variant>
+          <Variant label="Mood, unavailable in this library" layout="edge">
+            <RefineControl
+              activeTab="mood"
+              {...refineOptions}
+              energyId="medium"
+              moodId="emotional"
+              genreId="afrobeats"
+              unavailable={['mood', 'energy']}
+            />
+          </Variant>
         </Section>
 
         <Section title="UpNext">
@@ -340,6 +383,23 @@ function ComponentGallery({ scenes }: ComponentGalleryProps) {
         <Section title="DiscoveryPrompt">
           <Variant label="Tune in" layout="frame">
             <DiscoveryPrompt starters={starters} />
+          </Variant>
+          <Variant label="Library not ready (nothing playable), unavailable in this library" layout="frame">
+            <DiscoveryPrompt
+              starters={starters.map((starter) => ({
+                ...starter,
+                unavailableReason: 'Your library has no playable music yet. Import music to start listening.',
+              }))}
+            />
+          </Variant>
+          <Variant label="Starters unavailable in this library" layout="frame">
+            <DiscoveryPrompt
+              starters={starters.map((starter) =>
+                starter.id === 'discover'
+                  ? starter
+                  : { ...starter, unavailableReason: 'Your music has no mood or energy information for this yet.' },
+              )}
+            />
           </Variant>
         </Section>
 

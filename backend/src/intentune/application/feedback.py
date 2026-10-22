@@ -3,7 +3,8 @@
 Execution guide §9: persist the raw event -> interpret -> update session
 evidence -> re-rank the queue.
 
-- react(): an explicit action about an occurrence: LIKE, SAVE, REPLAY, or NOT_FOR_ME.
+- react(): an explicit action about an occurrence: LIKE, SAVE, REPLAY, or NOT_FOR_ME,
+  or UNLIKE (B9), which takes a Like back.
 - report_playback(): how a track's playback ended: SKIP or COMPLETE, with the
   seconds played and the track's duration as the player reported them.
 - record_playlist_add() (B7): PLAYLIST_ADD, called by PlaylistService when the
@@ -36,7 +37,9 @@ from src.intentune.domain.policy import Interpretation, event_weight, interpret_
 from src.intentune.domain.session import FeedbackEvent, FeedbackEventType, SessionState
 from src.intentune.ports.unit_of_work import UnitOfWork
 
-REACTIONS = frozenset({FeedbackEventType.LIKE, FeedbackEventType.SAVE, FeedbackEventType.REPLAY, FeedbackEventType.NOT_FOR_ME})
+REACTIONS = frozenset(
+    {FeedbackEventType.LIKE, FeedbackEventType.UNLIKE, FeedbackEventType.SAVE, FeedbackEventType.REPLAY, FeedbackEventType.NOT_FOR_ME}
+)
 PLAYBACK_ENDINGS = frozenset({FeedbackEventType.SKIP, FeedbackEventType.COMPLETE})
 
 
@@ -71,7 +74,7 @@ class FeedbackService:
         self._recommendations = recommendations
 
     def react(self, session_id: str, occurrence_id: str, reaction: FeedbackEventType) -> FeedbackOutcome:
-        """Record Like, Save, Replay, or Not for me about an occurrence, then re-rank."""
+        """Record Like, Unlike, Save, Replay, or Not for me about an occurrence, then re-rank."""
         reaction = FeedbackEventType(reaction)
         if reaction is FeedbackEventType.PLAYLIST_ADD:
             raise ValueError("A playlist add is recorded by PlaylistService.add_track(), with the playlist item it stands for.")

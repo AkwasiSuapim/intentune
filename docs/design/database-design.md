@@ -304,6 +304,8 @@ How the tables are used:
 
 `event_type` also accepts `PLAYLIST_ADD`, a recommendation added to a playlist (+1.00). The CHECK change rebuilt the table in batch mode, keeping its rows, index, and composite foreign key. The downgrade deletes PLAYLIST_ADD events before restoring the earlier constraint, since their playlists are dropped too.
 
+*B9 (2026-10-21), migration `4b1e9c7d2a6f`:* `event_type` also accepts `UNLIKE`, the listener taking back a Like. It is a raw fact of its own; the LIKE it cancels stays stored. The table is rebuilt the same way, and the downgrade deletes only UNLIKE events.
+
 ## Prototype 1 Concepts
 
 **Planned**, except these, which exist:
@@ -507,7 +509,7 @@ Still open:
 
 ## Migration Strategy
 
-**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5); `ce0b59df2cd1` creates the playlist tables and rebuilds `feedback_events` to accept `PLAYLIST_ADD` (B7). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
+**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5); `ce0b59df2cd1` creates the playlist tables and rebuilds `feedback_events` to accept `PLAYLIST_ADD` (B7); `4b1e9c7d2a6f` rebuilds it again to accept `UNLIKE` (B9). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
 
 - From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
 - From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.

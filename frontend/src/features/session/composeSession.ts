@@ -145,6 +145,30 @@ function composeEvent(
         detail: 'Intent unchanged',
         tone: 'neutral',
       }
+    case 'not_understood':
+      return {
+        type: 'ack',
+        id: event.id,
+        label: 'Not understood',
+        detail: event.message,
+        tone: 'neutral',
+      }
+    case 'unavailable':
+      return {
+        type: 'ack',
+        id: event.id,
+        label: 'Not available yet',
+        detail: event.message,
+        tone: 'neutral',
+      }
+    case 'library_not_ready':
+      return {
+        type: 'ack',
+        id: event.id,
+        label: 'Library not ready',
+        detail: event.message,
+        tone: 'neutral',
+      }
     case 'session_resumed':
       return {
         type: 'session_summary',
@@ -186,8 +210,8 @@ function composeEvent(
         playing: state.playback.playing,
         positionSeconds: state.playback.positionSeconds,
         durationSeconds: recommendation.durationSeconds,
-        whySummary: recommendation.why.summary,
-        whyReasons: recommendation.why.reasons,
+        whySummary: recommendation.why?.summary,
+        whyReasons: recommendation.why?.reasons ?? [],
         whyExpanded: state.whyExpanded,
         liked: recommendation.liked,
         savedTo: playlistNames(recommendation.savedToPlaylistIds, environment),
@@ -236,12 +260,22 @@ function composeTimeline(
   // An open request reads last, where its answer will appear.
   const { openRequest } = state
   if (openRequest) {
-    if (openRequest.request.kind === 'message') {
+    // The listener's words: what they typed, or the phrase of the starter they chose.
+    const { request } = openRequest
+    const words =
+      request.kind === 'message'
+        ? request.text
+        : request.kind === 'starter'
+          ? request.phrase
+          : request.kind === 'control'
+            ? request.label
+            : null
+    if (words) {
       // Takes the id the message will have once answered, so it stays put.
       blocks.push({
         type: 'user_message',
         id: nextEventId(state),
-        text: openRequest.request.text,
+        text: words,
       })
     }
     blocks.push({
@@ -271,6 +305,8 @@ function composeContextualControl(
       moodId: intent.mood.id,
       genres: environment.refineOptions.genre,
       genreId: intent.genre.id,
+      unavailable: environment.unavailableDimensions ?? [],
+      libraryReady: environment.libraryReady ?? true,
     }
   }
   if (current && state.quickActions.length > 0) {

@@ -8,6 +8,8 @@ import { mockEnvironment, mockIntent } from './environment.ts'
 import { mockSessionService as service } from './mockSessionService.ts'
 
 const fresh: TurnContext = {
+  sessionId: 'session-1',
+  currentRef: null,
   intent: null,
   currentSongId: null,
   playedSongIds: [],
@@ -15,6 +17,8 @@ const fresh: TurnContext = {
 }
 
 const playing: TurnContext = {
+  sessionId: 'session-1',
+  currentRef: null,
   intent: mockIntent('emotional', 'afrobeats', 'low'),
   currentSongId: 'calmDown',
   playedSongIds: ['calmDown'],
@@ -155,13 +159,14 @@ describe('choosing what plays next', () => {
 
   it('says so when it has to leave the requested genre', async () => {
     const outOfAlte: TurnContext = {
+      ...playing,
       intent: mockIntent('focused', 'alte', 'low'),
       currentSongId: 'freeMind',
       playedSongIds: ['freeMind'],
       recommendationsSinceIntentChange: 1,
     }
 
-    expect((await turn(outOfAlte, { kind: 'next' })).recommendation?.why.summary).toBe(
+    expect((await turn(outOfAlte, { kind: 'next' })).recommendation?.why?.summary).toBe(
       'The closest match while Alté picks run thin.',
     )
   })
@@ -219,18 +224,18 @@ describe('quick actions', () => {
     expect(await service.quickActionsAfter('saved')).toHaveLength(2)
   })
 
-  it('offers only actions the mock itself understands', async () => {
-    const offered = new Set<string>()
+  it('offers only actions the mock itself understands, each carrying its own request', async () => {
+    const offered = new Map<string, TurnRequest>()
     for (const context of contexts) {
       for (const text of messages) {
         for (const action of (await say(context, text)).quickActions) {
-          offered.add(action.label)
+          offered.set(action.label, action.request)
         }
       }
     }
 
-    for (const label of offered) {
-      const response = await service.respond(playing, { kind: 'message', text: label })
+    for (const [label, request] of offered) {
+      const response = await service.respond(playing, request)
       // Understood means: a reaction, a changed intent, or a named acknowledgement.
       const understood =
         response.kind !== 'turn' ||
@@ -239,6 +244,46 @@ describe('quick actions', () => {
 
       expect(understood, label).toBe(true)
     }
+  })
+})
+
+describe('structured requests (B9)', () => {
+  it('answers a starter as its phrase, shown as the listener\'s words', async () => {
+    const started = await turn(fresh, { kind: 'starter', starterId: 'focus', phrase: 'Help me focus' })
+
+    expect(started.userText).toBe('Help me focus')
+    expect(started.intent.mood.id).toBe('focused')
+  })
+
+  it('answers a steering control with the tapped label as the listener\'s words', async () => {
+    const answered = await turn(playing, { kind: 'control', control: 'more_like_this', label: 'More like this' })
+
+    expect(answered.userText).toBe('More like this')
+    expect(answered.ackLabel).toBe('Keeping this direction')
+  })
+
+  it('moves on when a song ends, as Next does', async () => {
+    const ended = await turn(playing, { kind: 'track_ended', playback: { playedSeconds: 200, durationSeconds: 200 } })
+
+    expect(ended.acknowledgement).toBe('none')
+    expect(ended.recommendation?.songId).not.toBe('calmDown')
+  })
+
+  it('replays a past song as a fresh recommendation of it', async () => {
+    const replayed = await turn(playing, { kind: 'replay', songId: 'calmDown', ref: null })
+
+    expect(replayed.recommendation?.songId).toBe('calmDown')
+    expect(replayed.acknowledgement).toBe('none')
+  })
+
+  it('records reactions and saves, and creates playlists with fresh ids', async () => {
+    expect((await service.react(playing, 'like')).quickActions).toHaveLength(2)
+    expect(await service.react(playing, 'unlike')).toEqual({})
+    expect((await service.savePlaylists(playing, { added: ['study'], removed: [] })).quickActions).toHaveLength(2)
+    const first = await service.createPlaylist('Focus')
+    const second = await service.createPlaylist('Focus 2')
+    expect(first.name).toBe('Focus')
+    expect(first.id).not.toBe(second.id)
   })
 })
 

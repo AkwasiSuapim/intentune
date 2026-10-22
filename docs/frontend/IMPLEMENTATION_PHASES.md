@@ -519,6 +519,8 @@ Report API readiness and stop.
 
 # F9 — FastAPI Integration
 
+**Status: implemented with backend phase B9 (2026-10-21), awaiting review.** See [the frontend architecture](ARCHITECTURE.md) §23 and the [B9 record](../planning/development-phases.md#b9-record-2026-10-21).
+
 ## Goal
 
 Replace the appropriate mock service path with the approved FastAPI HTTP integration while preserving the frontend architecture and user experience.

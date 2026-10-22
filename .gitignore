@@ -22,6 +22,9 @@ frontend/dist/
 # files) and the managed media library. Never committed.
 backend/data/intentune.db*
 backend/data/media/
+# The database's location before Prototype 1 (backend/intentune.db). Nothing
+# uses it now; ignored so an accidentally created old database is never committed.
+backend/intentune.db*
 
 # macOS
 .DS_Store

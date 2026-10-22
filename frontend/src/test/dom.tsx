@@ -188,6 +188,9 @@ export function heldService() {
   const service: SessionService = {
     loadWorkspace: hold(mockSessionService.loadWorkspace),
     respond: hold(mockSessionService.respond),
+    react: hold(mockSessionService.react),
+    savePlaylists: hold(mockSessionService.savePlaylists),
+    createPlaylist: hold(mockSessionService.createPlaylist),
     quickActionsAfter: hold(mockSessionService.quickActionsAfter),
     suggestPlaylists: hold(mockSessionService.suggestPlaylists),
   }

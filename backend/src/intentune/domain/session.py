@@ -89,7 +89,8 @@ class OccurrenceStatus(str, Enum):
 
 
 class FeedbackEventType(str, Enum):
-    """The raw listening facts of execution guide §9, and PLAYLIST_ADD (B7): a recommendation added to a playlist."""
+    """The raw listening facts of execution guide §9, PLAYLIST_ADD (B7): a recommendation added to a playlist,
+    and UNLIKE (B9): the listener took back a Like. UNLIKE is a fact of its own; the LIKE it cancels stays stored."""
 
     LIKE = "LIKE"
     SAVE = "SAVE"
@@ -98,6 +99,7 @@ class FeedbackEventType(str, Enum):
     COMPLETE = "COMPLETE"
     NOT_FOR_ME = "NOT_FOR_ME"
     PLAYLIST_ADD = "PLAYLIST_ADD"
+    UNLIKE = "UNLIKE"
 
 
 _EVENTS_WITH_PLAYBACK_FACTS = frozenset({FeedbackEventType.SKIP, FeedbackEventType.COMPLETE})

@@ -8,6 +8,8 @@ export type RefineTab = 'energy' | 'mood' | 'genre'
 export type RefineOption = {
   id: string
   label: string
+  /** A value the music library cannot act on: shown, dimmed, and not chosen when pressed. */
+  unavailable?: boolean
 }
 
 const TABS: { id: RefineTab; label: string }[] = [
@@ -24,6 +26,23 @@ const TAB_KEYS: Record<string, (index: number) => number> = {
   End: () => TABS.length - 1,
 }
 
+/** Why some values of a dimension are dimmed, in the listener's terms. */
+const PARTIAL_NOTE: Record<RefineTab, string> = {
+  energy: 'Dimmed levels aren’t in your music yet, so they can’t change what plays.',
+  mood: 'Dimmed moods aren’t in your music yet, so they can’t change what plays.',
+  genre: 'Dimmed genres aren’t in your music yet, so they can’t change what plays.',
+}
+
+/** Why nothing can be tuned while the library has no playable music. */
+const LIBRARY_NOTE = 'Your library has no playable music yet, so tuning can’t change what plays. Import music to start.'
+
+/** Why a dimension cannot be tuned, in the listener's terms. */
+const UNAVAILABLE_NOTE: Record<RefineTab, string> = {
+  energy: 'Your music has no energy information yet, so this can’t change what plays.',
+  mood: 'None of your music is tagged with these moods yet, so this can’t change what plays.',
+  genre: 'Your music has no genre tags yet, so this can’t change what plays.',
+}
+
 type RefineControlProps = {
   activeTab: RefineTab
   /** Ordered from lowest to highest. */
@@ -33,6 +52,10 @@ type RefineControlProps = {
   moodId: string | null
   genres: RefineOption[]
   genreId: string | null
+  /** Tabs the music library has no evidence for: shown, marked, and not tunable. */
+  unavailable?: RefineTab[]
+  /** False while nothing in the library is playable: every tab is locked, for that one reason, and none is marked. */
+  libraryReady?: boolean
   onTabChange?: (tab: RefineTab) => void
   onEnergyChange?: (id: string) => void
   onMoodChange?: (id: string) => void
@@ -52,6 +75,8 @@ function RefineControl({
   moodId,
   genres,
   genreId,
+  unavailable = [],
+  libraryReady = true,
   onTabChange,
   onEnergyChange,
   onMoodChange,
@@ -64,8 +89,25 @@ function RefineControl({
   )
   const tabId = (tab: RefineTab) => `${baseId}-tab-${tab}`
   const panelId = `${baseId}-panel`
+  const noteId = `${baseId}-note`
+  // Not ready is about the library, not a dimension: no tab is marked for it.
+  const marked = (tab: RefineTab) => libraryReady && unavailable.includes(tab)
+  const locked = !libraryReady || unavailable.includes(activeTab)
+  // An option the library cannot use, or of a dimension it cannot use, stays visible but does nothing.
+  const choose = (onChange: ((id: string) => void) | undefined, option: RefineOption) => {
+    if (!locked && !option.unavailable) onChange?.(option.id)
+  }
 
   const energyIndex = energyLevels.findIndex((level) => level.id === energyId)
+  const activeOptions =
+    activeTab === 'energy' ? energyLevels : activeTab === 'mood' ? moods : genres
+  const note = !libraryReady
+    ? LIBRARY_NOTE
+    : locked
+    ? UNAVAILABLE_NOTE[activeTab]
+    : activeOptions.some((option) => option.unavailable)
+      ? PARTIAL_NOTE[activeTab]
+      : null
   const choices =
     activeTab === 'mood'
       ? { title: 'Mood', options: moods, selectedId: moodId, onChange: onMoodChange }
@@ -119,6 +161,8 @@ function RefineControl({
                 aria-controls={panelId}
                 tabIndex={selected ? 0 : -1}
                 data-focus-key={selected ? 'refine-tab' : undefined}
+                data-unavailable={marked(tab.id) ? '' : undefined}
+                aria-label={marked(tab.id) ? `${tab.label}, unavailable` : undefined}
                 onClick={() => onTabChange?.(tab.id)}
               >
                 {tab.label}
@@ -137,7 +181,17 @@ function RefineControl({
         </button>
       </div>
 
-      <div id={panelId} role="tabpanel" aria-labelledby={tabId(activeTab)}>
+      <div
+        id={panelId}
+        role="tabpanel"
+        aria-labelledby={tabId(activeTab)}
+        aria-describedby={note ? noteId : undefined}
+      >
+        {note && (
+          <p id={noteId} className={styles.unavailable}>
+            {note}
+          </p>
+        )}
         {activeTab === 'energy' ? (
           <div className={styles.energy}>
             <span className={styles.energyLabel} aria-hidden="true">
@@ -153,8 +207,9 @@ function RefineControl({
                   className={styles.barButton}
                   aria-pressed={index === energyIndex}
                   aria-label={`${level.label} energy`}
+                  aria-disabled={locked || level.unavailable || undefined}
                   data-filled={index <= energyIndex ? '' : undefined}
-                  onClick={() => onEnergyChange?.(level.id)}
+                  onClick={() => choose(onEnergyChange, level)}
                 >
                   <span
                     className={styles.bar}
@@ -172,7 +227,8 @@ function RefineControl({
                 type="button"
                 className={styles.choice}
                 aria-pressed={option.id === choices.selectedId}
-                onClick={() => choices.onChange?.(option.id)}
+                aria-disabled={locked || option.unavailable || undefined}
+                onClick={() => choose(choices.onChange, option)}
               >
                 {option.label}
               </button>

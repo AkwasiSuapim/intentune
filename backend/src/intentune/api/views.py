@@ -10,6 +10,12 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, TypeVar
 
 from src.intentune.api.schemas import (
     ContextOut,
+    EnergyLevelOut,
+    FeedbackFactOut,
+    MeaningOut,
+    DimensionsOut,
+    LibraryReadinessOut,
+    VocabularyOut,
     FeedbackEventOut,
     FeedbackOut,
     InterpretationOut,
@@ -28,6 +34,7 @@ from src.intentune.api.schemas import (
 )
 from src.intentune.application.feedback import FeedbackOutcome
 from src.intentune.domain.analysis import AnalysisJob
+from src.intentune.domain.intent import DIMENSIONS, ENERGY_LEVELS, UNMAPPED_CONTEXT_FIELDS, MeaningKind, MessageMeaning, Vocabulary
 from src.intentune.domain.library import LabelKind, LibrarySource, ScanReport, Track, TrackStatus
 from src.intentune.domain.models import ListeningContext
 from src.intentune.domain.playlist import PlaylistContents, PlaylistSummary
@@ -237,6 +244,38 @@ def feedback_out(outcome: FeedbackOutcome, tracks: Mapping[str, Track]) -> Feedb
         event_weight=outcome.event_weight,
         interpretation=interpretation_out(outcome.interpretation),
         state=session_state_out(outcome.state, tracks),
+    )
+
+
+def feedback_fact_out(outcome: FeedbackOutcome) -> FeedbackFactOut:
+    return FeedbackFactOut(
+        event=feedback_event_out(outcome.event),
+        event_weight=outcome.event_weight,
+        interpretation=interpretation_out(outcome.interpretation),
+    )
+
+
+# --- Typed messages and the vocabulary (B9) ---------------------------------------------
+
+
+def meaning_out(meaning: MessageMeaning) -> MeaningOut:
+    kind = meaning.kind
+    return MeaningOut(
+        kind=_wire(kind.value),
+        turn=_wire(meaning.turn.value) if kind is MeaningKind.TURN else None,
+        reaction=_wire(meaning.reaction.value) if kind is MeaningKind.REACTION else None,
+    )
+
+
+def vocabulary_out(vocabulary: Vocabulary) -> VocabularyOut:
+    return VocabularyOut(
+        genres=list(vocabulary.genres),
+        moods=list(vocabulary.tune_moods),
+        energy=[EnergyLevelOut(id=level.level_id, label=level.label, target_energy=level.target_energy) for level in ENERGY_LEVELS],
+        library=LibraryReadinessOut(ready=vocabulary.capability.ready, playable_tracks=vocabulary.capability.playable_tracks),
+        dimensions=DimensionsOut(**{dimension: vocabulary.capability.state(dimension).value.lower() for dimension in DIMENSIONS}),
+        usable_moods=list(vocabulary.usable_tune_moods),
+        unmapped_fields=list(UNMAPPED_CONTEXT_FIELDS),
     )
 
 

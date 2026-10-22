@@ -278,7 +278,10 @@ describe('answers that arrive after the user has moved on', () => {
 })
 
 describe('hints the service cannot give', () => {
+  // The reaction itself is recorded; only the hints that may come with it are missing.
   const noHints = serviceWith({
+    react: async () => ({}),
+    savePlaylists: async () => ({}),
     quickActionsAfter: offline,
     suggestPlaylists: offline,
   })
@@ -302,6 +305,26 @@ describe('hints the service cannot give', () => {
     )
 
     expect(view(picking).overlay?.playlists.some((p) => p.fitsSession)).toBe(false)
+  })
+
+  it('take back a like the service could not record, without failing anything else', async () => {
+    const before = await playing()
+    const liked = await act(before, { type: 'toggle_like' }, serviceWith({ react: offline }))
+
+    expect(view(liked).content.at(-1)).toMatchObject({ liked: false })
+    expect(activeSession(liked).quickActions).toEqual(activeSession(before).quickActions)
+    expect(activeSession(liked).openRequest).toBeNull()
+  })
+
+  it('take back a save the service could not record', async () => {
+    const before = await playing()
+    const picking = await act(before, { type: 'open_playlist_picker' })
+    const chosen = await act(picking, { type: 'toggle_playlist', playlistId: 'study' })
+    const saved = await act(chosen, { type: 'confirm_playlists' }, serviceWith({ savePlaylists: offline }))
+
+    const current = activeSession(saved)
+    expect(current.recommendations[current.currentRecommendationId!].savedToPlaylistIds).toEqual([])
+    expect(current.overlay).toBeNull()
   })
 
   it('do not fail a request that asked for them', async () => {

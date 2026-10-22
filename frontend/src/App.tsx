@@ -1,6 +1,8 @@
+import { chooseService } from './chooseService.ts'
 import Demo from './demo/Demo.tsx'
 import ListeningSessions from './features/session/ListeningSessions.tsx'
-import { mockSessionService } from './mocks/mockSessionService.ts'
+
+const service = chooseService(import.meta.env)
 
 function App() {
   // `?demo=…` opens the development demo instead of the app.
@@ -9,8 +11,8 @@ function App() {
   if (demo !== null) {
     return <Demo view={demo} />
   }
-  // The mock service is wired in here; the session feature never imports it.
-  return <ListeningSessions service={mockSessionService} />
+  // The service is chosen in chooseService.ts; the session feature never imports one.
+  return <ListeningSessions service={service} />
 }
 
 export default App
