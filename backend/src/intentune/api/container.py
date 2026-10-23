@@ -25,6 +25,7 @@ from src.intentune.adapters.deterministic_intent import DeterministicIntentInter
 from src.intentune.adapters.mutagen_audio import MutagenAudioInspector
 from src.intentune.adapters.signal_levels import SignalLevelAnalyzer
 from src.intentune.api.settings import ApiSettings
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.analysis import AnalysisService
 from src.intentune.application.analysis_worker import AnalysisWorker
 from src.intentune.application.capability import IntentCapability
@@ -101,7 +102,10 @@ class Container:
 
     def listening(self) -> ListeningService:
         unit_of_work = self._unit_of_work()
-        return ListeningService(SessionService(unit_of_work), self._recommendations(unit_of_work), IntentCapability(unit_of_work))
+        recommendations = self._recommendations(unit_of_work)
+        return ListeningService(
+            SessionService(unit_of_work), recommendations, IntentCapability(unit_of_work), self._adaptation(unit_of_work, recommendations)
+        )
 
     def capability(self) -> IntentCapability:
         return IntentCapability(self._unit_of_work())
@@ -114,18 +118,25 @@ class Container:
         return MessageService(
             self._interpreter,
             sessions,
-            ListeningService(sessions, recommendations, capability),
-            FeedbackService(unit_of_work, recommendations),
+            ListeningService(sessions, recommendations, capability, self._adaptation(unit_of_work, recommendations)),
+            FeedbackService(unit_of_work, recommendations, self._adaptation(unit_of_work, recommendations)),
             capability,
         )
 
     def feedback(self) -> FeedbackService:
         unit_of_work = self._unit_of_work()
-        return FeedbackService(unit_of_work, self._recommendations(unit_of_work))
+        recommendations = self._recommendations(unit_of_work)
+        return FeedbackService(unit_of_work, recommendations, self._adaptation(unit_of_work, recommendations))
 
     def playlists(self) -> PlaylistService:
         unit_of_work = self._unit_of_work()
-        return PlaylistService(unit_of_work, FeedbackService(unit_of_work, self._recommendations(unit_of_work)))
+        recommendations = self._recommendations(unit_of_work)
+        return PlaylistService(unit_of_work, FeedbackService(unit_of_work, recommendations, self._adaptation(unit_of_work, recommendations)))
+
+    @staticmethod
+    def _adaptation(unit_of_work: SqlAlchemyUnitOfWork, recommendations: RecommendationService) -> LongTermAdaptationService:
+        # Long-term evidence is read with the same Feedback Policy v1 the session's ranking uses.
+        return LongTermAdaptationService(unit_of_work, feedback_policy=recommendations.policy)
 
     def _recommendations(self, unit_of_work: SqlAlchemyUnitOfWork) -> RecommendationService:
         return RecommendationService(unit_of_work, rng=self._rng_factory())

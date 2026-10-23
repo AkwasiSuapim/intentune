@@ -718,7 +718,7 @@ B8 is also the first phase that runs everything at once: request threads, the an
 
 ## TD-020: B9 Frontend Integration and Hybrid Intent Input
 
-**Status:** Accepted, awaiting B9 review (review corrections, the capability consistency correction, and the readiness model applied 2026-10-22)
+**Status:** Accepted and reviewed; committed as `886cf66` (2026-10-22), with the review corrections, the capability consistency correction, and the readiness model
 
 **Date:** 2026-10-21
 
@@ -827,6 +827,96 @@ The user made the product decisions at the B9 review (2026-10-21), recorded belo
 - **Features and explanations:** energy or mood features are measured, or Policy v1's reasons are stored for explanation.
 - **Library:** an artwork or library screen is designed.
 - **Playback:** playing a specific track becomes a product need.
+
+## TD-021: B10 Conservative Long-Term Adaptation
+
+**Status:** Accepted, awaiting B10 review (the three review corrections applied 2026-10-23)
+
+**Date:** 2026-10-22
+
+**Context:** Spec §23, execution guide §13, and D04–D06, D08–D12, D20–D21. B5's Policy v1 already took an optional long-term `UserProfile` and scored it as a separate .15 stage, but nothing produced or stored one. B10 starts from `886cf66` (B9, committed and reviewed), with one carry-forward correction.
+
+**Decision:**
+
+0. **B9 carry-forward:** the mood dimension is usable when any playable track has any mood label. Tune's choices stay the approved five, and only those the library declares (`usable_tune_moods`). A library of "Dreamy" and "Melancholic" reports mood `usable` and no usable Tune moods, and a typed "something dreamy" is accepted.
+1. **Evidence comes from raw history only.** The listener's sessions, turns, occurrences, and feedback events are read through Feedback Policy v1, per track per session, by the same function session fit uses (`interpretations_by_track()`, extracted from `signals_from_session()`). That gives one effective item per track per session, under the existing precedence and cancellation rules. Raw history is never changed, deleted, or marked as used. There is no second feedback model.
+2. **What is strong:**
+   - **Positive:** the deciding signal is an effective Like, Save, or Playlist add (explicit retention), or a Replay (explicit repeated listening), each +1.00, or a 90–100% completion (+0.80, strong behavioural evidence).
+   - **Negative:** Not for me (−1.00), as an event or a turn.
+   - **Never strong:** skips, the weaker playback bands, and grace-period plays.
+   - **Unlike:** cancels the Likes before it and is never negative.
+   - **Duplicates collapse:** a Like, a Save, and three playlist adds of one track in one session are one item, and so is a run of Replays.
+   - **Not long-term evidence: More like this** (review correction). It is a current-session steering instruction: a listener may ask for more like this because it suits this session's activity, without wanting that direction added to their taste. It stays strong session evidence in Policy v1, with its weight unchanged. Long-term evidence is read by the same Feedback Policy v1 function, but without session-only turns (`session_only_turns`). So repeated More like this turns never reach the gate, and a Like followed by More like this is one long-term item, from the Like.
+3. **The gate and consistency:**
+   - **Genre and mood:** items are grouped by the track's value, compared as Policy v1 compares labels. A value is preferred when positive items outnumber negative ones by 4 or more, and the positive ones come from 2 or more sessions and 2 or more distinct tracks. Two Afrobeats and two Jazz items are not four of anything. At most 3 values are kept per dimension: the best net support, then the most recent evidence, then by name. The profile cannot express an aversion, so negative items only offset positive ones.
+   - **Energy, danceability, tempo, valence, acousticness:** items are read in time order. A batch is the latest run of one polarity whose values lie within the coherence span. Once it has 4 items from 2 sessions and 2 distinct tracks, it is consumed and never counted again. The first positive batch establishes the preference at its median. Each later batch moves it by at most one step: toward the median of a positive batch, or away from that of a negative one. A negative batch cannot establish a preference.
+   - **Missing features (D21):** a track without a feature contributes nothing to it. Liking a genre-only track is genre evidence only.
+   - **Distinct tracks** (review correction): one favourite song never establishes a generalized preference by itself. Four strong items about Song A across four sessions set no Afrobeats preference; Song A and Song B together can. This applies to every feature, categorical and numeric. The same track still gives one item per session, and its raw evidence stays stored for future work. No separate track-affinity profile is built.
+4. **One versioned policy** (`AdaptationPolicy`, `ADAPTATION_V1`, in `domain/adaptation.py`) holds every constant. These are Prototype 1 heuristics, to be evaluated in B11:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `version` | `adaptation-v1` | recorded on every adjustment and on the stored profile |
+| `min_strong_signals` | 4 | consistent strong items a change needs (D06) |
+| `min_sessions` | 2 | sessions they must come from (D06) |
+| `min_distinct_tracks` | 2 | distinct tracks they must be about, so one song never generalizes (review correction; B11 may make it stricter) |
+| `session_only_turns` | `{MORE_LIKE_THIS}` | turns that steer the session only, left out of long-term evidence (review correction) |
+| `min_strong_explicit_weight` | 1.00 | an explicit deciding signal at full Feedback Policy v1 strength (±1.00) is strong |
+| `min_strong_passive_weight` | 0.80 | the 90–100% completion band is strong; lower playback bands never are |
+| `max_preferred_values` | 3 | genres (and moods) the profile keeps, the best supported |
+| `unit_coherence_span` | 0.25 | energy, danceability, valence, acousticness: a batch's values must lie within this |
+| `tempo_coherence_span_bpm` | 20 | the same, for tempo |
+| `max_unit_step` | 0.05 | the most one later batch moves a unit preference |
+| `max_tempo_step_bpm` | 5 | the same, for tempo |
+| `value_decimals` | 4 | stored precision, so recomputations compare equal |
+
+5. **Recomputation and reversal:**
+   - `derive_profile()` builds the profile from nothing and the whole history, so the same history always gives the same profile.
+   - `plan_adjustments()` compares the stored profile with the derivation. It records one change per value added or removed (`GATE_MET`, `GATE_LOST`, `DISPLACED`) and one per numeric batch since the stored value (`GATE_MET`, `BOUNDED_STEP`). When withdrawn evidence puts the stored value off the new derivation's path, it records a single `RECOMPUTED` change.
+   - A reversal, for example after an Unlike, is a new adjustment; nothing is deleted.
+   - Consumed evidence never moves the profile again, so rereading the history cannot drift it.
+6. **Persistence** (migration `5d8e2b7a9c41`), additive:
+   - `long_term_profiles`: the current profile, one row per listener.
+   - `long_term_adjustments`: append-only. Each row has an id, the listener, a per-listener sequence, the dimension, the change and its cause, the value (for genre and mood), the state before and after (JSON), the reason, the policy version, and the time.
+   - `long_term_adjustment_evidence`: one row per item. Each row records the session, the track, the weight, and exactly one raw fact: a feedback event or a turn. All are foreign keys.
+   - No audio or text is stored.
+7. **When it runs:** `LongTermAdaptationService.adapt_after()` runs right after a raw fact that can change a track's effective evidence is persisted, and before the use case's single queue refresh. That means every `FeedbackService` event, and the Not for me turn and Next's SKIP in `ListeningService`. More like this, being session-only, does not trigger it. Adapting never refreshes, so B9's one refresh per action holds. React has no part in it.
+8. **Ranking:** `RecommendationService` passes the stored profile into Policy v1's existing `long_term` input, and Policy v1 scores it only in its own .15 stage, with the existing feature fit, missing-feature rule, and renormalization.
+   - **Intent stage:** it now reads the current intent only (`Targets.from_context()`). Spec §14's "otherwise long-term value" fill-in would have counted the profile in both the .55 and .15 stages, against D08 and spec §16.
+   - **No profile:** outputs are unchanged, because no profile existed before B10.
+   - **Positive affinity, not a penalty** (review correction): the long-term stage scores `0.5 + 0.5 × raw similarity` (`long_term_neutral_fit` 0.5 in `RecommendationPolicy`, `long_term_stage_value()`). A candidate that matches nothing in the profile is neutral (0.5), a full match is 1.0, and partial similarity falls in between.
+     - **Why:** a stored preference records what the listener has repeatedly liked. It is not a judgement against everything else. Scoring every non-matching track 0 would have made history a standing penalty on all other music, unlike session fit, which treats what it knows nothing about as neutral.
+     - **What stays the same:** intent fit keeps its 0–1 scale (an explicit request may rightly score a mismatch 0), and session fit stays signed (session evidence can be negative). The stage weights stay 0.55 / 0.30 / 0.15.
+     - **The result:** current intent > current-session evidence > long-term history, without a tie-break. With no intent, one Jazz Like this session (0.833) beats a stored Afrobeats preference (0.667), and a Not for me on an Afrobeats track this session (Jazz 0.5, Afrobeats 0.333) overcomes it. With nothing said this session, the preference still lifts Afrobeats (0.667 against 0.5). An explicit request for Jazz outranks both session evidence and history favouring Afrobeats (0.775 against 0.45).
+9. **No API or UI change.** The audit trail is internal; nothing about weights or scores is shown, and Why this fits stays hidden.
+
+**Resolved at the review (2026-10-23): session evidence against long-term history.** As first built, the long-term stage scored a non-matching candidate 0. Session fit's difference between two candidates is at most 0.5, which is .30 × .5 = .15, so session evidence could at best tie a conflicting long-term genre preference (.15 × 1.0) when there was no intent. The positive-affinity mapping (decision 8) resolves this semantically: the long-term difference is now at most .15 × .5 = .075.
+
+**Alternatives Considered:**
+- **Incremental updates to the stored profile:** not recomputable; old evidence drifts it.
+- **Marking raw events as used:** history becomes opaque and stops being authoritative.
+- **Counting raw rows:** duplicates inflate the gate.
+- **A separate long-term feedback reading:** two interpretations would disagree.
+- **Storing only conclusions, JSON evidence blobs, or comma-separated ids:** not traceable, and no foreign-key integrity.
+- **Learning state in the listener row:** opaque.
+- **Machine learning or embeddings:** guide §18; no evaluation dataset.
+- **Keeping the spec §14 fill-in:** counts history twice.
+- **A stage-priority tie-break** for the session-versus-history conflict: rejected at the review. It hides a semantic problem behind ordering, and loses as soon as session evidence is spread.
+- **Changing the locked stage weights:** not without B11 evaluation evidence.
+- **Counting More like this as permanent evidence:** rejected at the review; it is a session instruction.
+- **A separate track-affinity profile** to keep single-song evidence: not needed in B10; the raw evidence stays stored.
+
+**Consequences:**
+- Learning is slow and inspectable: every change says when, why, and from which raw facts.
+- **Real libraries today:** genres can be learned, and moods where labels exist. Numeric preferences cannot, because no feature pipeline fills them (Prototype 1 completion work), and nothing is invented.
+- **Cost:** each relevant event rereads the listener's whole history. B11 measures it.
+- **Withdrawn evidence:** a recomputation can move a numeric preference more than one step, to what the remaining evidence supports. It is recorded as `RECOMPUTED`.
+- **Repeated tracks:** the same track liked in several sessions counts once per session, but cannot establish a preference without a second distinct track.
+
+**Revisit When:**
+- B11 evaluates the thresholds (whether `min_distinct_tracks` should be stricter) and the 0.5 long-term neutral point.
+- A feature pipeline fills numeric features.
+- Histories grow large enough to need incremental derivation.
 
 ## New Decision Template
 

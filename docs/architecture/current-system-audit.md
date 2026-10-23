@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and committed as `ac23287`. Phase B9 (frontend integration, frontend phase F9) followed the same day on top of `ac23287` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), [B8](#b8-update-2026-10-21), and [B9](#b9-update-2026-10-21) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all nine.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and committed as `ac23287`. Phase B9 (frontend integration, frontend phase F9) followed the same day on top of `ac23287`; with its review corrections it was reviewed and committed as `886cf66` (2026-10-22), and GitHub Actions CI passed. Phase B10 (conservative long-term adaptation) followed on top of `886cf66` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), [B8](#b8-update-2026-10-21), [B9](#b9-update-2026-10-21), and [B10](#b10-update-2026-10-22) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all ten.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -275,6 +275,39 @@ Changed tests:
 
 No dependency was added on either side. Vite moved to the patched 8.2.4 at the review.
 
+## B10 Update (2026-10-22)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **1343 passed, 1 skipped**: 1271 collected at `886cf66`, plus 73 from B10, including the review corrections (2026-10-23). One warning (Starlette's test client and httpx), as before. |
+| Frontend | `npm test`, `npm run lint`, `npm run build`, `npm audit`, from `frontend/` | **276 passed**; lint and build clean; 0 vulnerabilities. No frontend file changed. |
+| Migration | upgrade to head, `alembic check`, downgrade to `4b1e9c7d2a6f` and back, with data | The three tables are created and dropped; the raw history is kept exactly, and the same profile is derived again. No drift. |
+| Mutations | 24 single-rule mutations of the policy, the wiring, the carry-forward, and the review corrections | **24/24** caught. |
+| Manual end to end | the real HTTP API on a scratch database with synthetic genre-only tracks, restarted once | **14/14** (below). |
+
+Manual run, in order:
+1. **Session 1:** two Likes (af1, af2). No adjustment, no profile.
+2. **Session 2:** a third Like (af3). Still nothing: three items are below the gate.
+3. **The gate:** a fourth Like (af1 again, a new session's item) made exactly one adjustment: GENRE ADDED 'Afrobeats', `GATE_MET`, `[]` → `["Afrobeats"]`, `adaptation-v1`. The reason: "meets the gate: 4 strong positive and 0 strong negative signals for genre 'Afrobeats': net 4 (needs 4), positive evidence from 2 session(s) (needs 2) about 3 track(s) (needs 2)". Its evidence rows are the four LIKE events, from both sessions, by id.
+4. **The profile:** prefers Afrobeats; mood and every numeric preference are empty.
+5. **Restart:** the profile and the one adjustment persist, and re-deriving changes nothing.
+6. **A new session with no intent:** Afrobeats first. Stage weights: session .667 (0.5), long-term .333 (1.0); combined 0.667. The queue served over HTTP is the same.
+7. **Asking for Jazz:** Jazz first. Intent .55 (1.0), session .30 (0.5), long-term .15 (0.5: neutral, since the review's positive-affinity correction); combined 0.775.
+8. **Numeric, on synthetic candidates:** three coherent values set nothing. The fourth, across two sessions, set energy at the median, 0.68. A new batch with median 0.935 moved it one step, to 0.73, and rereading the history moved nothing further.
+
+Changed tests:
+- **B5's** `test_history_fills_in_what_the_current_intent_leaves_open` became `test_history_never_fills_the_intent_stage_and_counts_only_in_its_own` (TD-021). No profile existed before B10, so no earlier output changed.
+- **B6's** exact `Interpretation` comparison now includes the deciding event's id.
+- **B9's** capability test: a library mood such as "Mellow" makes mood usable (carry-forward).
+- **Construction:** service tests pass the new `LongTermAdaptationService` dependency.
+- **Review corrections (2026-10-23):** B5's `test_current_intent_wins_over_long_term_history` expects the neutral 0.5 long-term stage for the mismatching track. The tie test was replaced by the positive-affinity tests. The audit reason names the distinct tracks.
+
+B10 tests per file:
+- `test_adaptation_policy.py` 39 (pure);
+- `test_long_term_adaptation_service.py` 23 (use cases and storage);
+- `test_policy.py` +7;
+- `test_feedback_policy.py`, `test_intent_interpreter.py`, `test_api_messages.py`, and `test_migrations.py` +1 each.
+
 ## Current Files
 
 ### Backend
@@ -429,6 +462,20 @@ Changed in B2:
 - `tests/conftest.py`: audio-file builders and a library fixture.
 - `tests/test_architecture_boundaries.py`: mutagen and filesystem rules.
 - `requirements.txt`: `mutagen`.
+
+Added in B10 (2026-10-22):
+
+- `backend/alembic/versions/20261022_5d8e2b7a9c41_create_long_term_adaptation.py`
+- `backend/src/intentune/domain/adaptation.py` (Long-Term Adaptation Policy v1)
+- `backend/src/intentune/application/adaptation.py` (`LongTermAdaptationService`)
+- `backend/src/intentune/ports/adaptation.py` (`LongTermProfileRepository`)
+- `backend/tests/test_adaptation_policy.py`, `backend/tests/test_long_term_adaptation_service.py`
+
+Changed in B10:
+- `domain/policy.py`: `interpretations_by_track()` extracted; `Interpretation` names its deciding event or turn; intent fit reads current intent only (`Targets.from_context()`).
+- `domain/intent.py`: mood is usable with any mood label (carry-forward). `domain/models.py`: documentation only.
+- `application/feedback.py`, `application/listening.py`: adapt before the single refresh. `application/recommendations.py`: loads the stored profile.
+- `persistence/models.py`, `persistence/repositories.py`, `persistence/unit_of_work.py`, `ports/unit_of_work.py`: the B10 records and repository. `api/container.py`: wiring.
 
 ### Frontend
 

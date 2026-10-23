@@ -101,6 +101,31 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
 - TD-015 records the B4 implementation decisions.
 
+### Added — Phase B10: Conservative long-term adaptation (2026-10-22)
+
+- **Long-Term Adaptation Policy v1** (`domain/adaptation.py`, `adaptation-v1`, TD-021):
+  - strong evidence: one effective item per track per session, read by Feedback Policy v1 (an effective Like, Save, Playlist add, Replay, or Not for me, or a 90–100% completion; never More like this);
+  - the gate: 4 consistent strong items from 2 sessions about 2 distinct tracks;
+  - genre and mood: net support per value, at most 3 kept;
+  - numeric features: coherent batches, the first setting the median, later ones moving at most 0.05 (tempo 5 BPM), each counted once;
+  - recomputation from raw history.
+- **Persistence** (migration `5d8e2b7a9c41`): `long_term_profiles`, the append-only `long_term_adjustments`, and `long_term_adjustment_evidence`, with foreign keys to the session, track, and deciding feedback event or turn.
+- **`LongTermAdaptationService`:** runs between persisting a relevant fact and the single refresh, from `FeedbackService` and `ListeningService`. `RecommendationService` passes the stored profile to Policy v1.
+- **Tests:** 73 backend tests (the suite is 1343 passed, 1 skipped); 24 mutations caught; a 14-check manual end-to-end run.
+- **TD-021** records the decisions; the decision register gains Long-Term Adaptation Policy v1.
+
+### Changed — Phase B10 (2026-10-22)
+
+- **Intent fit reads the current intent only** (`Targets.from_context()` replaces `Targets.effective()`); the long-term profile counts only in its own .15 stage. No earlier output changes, since no profile existed before.
+- **`interpret_feedback()`** names the raw fact that decided each interpretation, and `interpretations_by_track()` is the one per-track reading, shared by session fit and long-term adaptation.
+- **B9 carry-forward:** the mood dimension is usable with any real mood label; Tune still offers only the approved five, where present.
+
+### Changed — at the B10 review (2026-10-23)
+
+- **Long-term preference is positive affinity:** the long-term stage scores `0.5 + 0.5 × profile similarity` (`long_term_neutral_fit`, `long_term_stage_value()`), so a candidate outside the profile is neutral, not penalized. Session evidence now outweighs a conflicting long-term preference, and current intent outweighs both, with the locked weights and no tie-break. Intent fit and signed session fit are unchanged.
+- **More like this is session-only:** it keeps its session weight but never counts toward the long-term gate (`session_only_turns`), and it no longer triggers adaptation.
+- **Two distinct tracks:** every feature-level change needs evidence about at least 2 distinct tracks (`min_distinct_tracks`), so one song never generalizes. Adjustment reasons name the track count.
+
 ### Added — Phase B9: Frontend integration (2026-10-21)
 
 - **Typed words and the interpreter:**

@@ -18,8 +18,10 @@ uses it up. decide() does not, and a refinement made in between supersedes it.
 
 Inputs that do not exist yet stay absent rather than being invented:
 
-- No long-term profile is stored until B10, so long-term fit is unavailable
-  and its weight is renormalized away.
+- The listener's stored long-term profile (B10) is passed to Policy v1, which
+  scores it as the separate .15 long-term stage. Before the first adjustment
+  there is none: long-term fit is unavailable and its weight is renormalized
+  away, exactly as before B10.
 - Library tracks carry genre and mood labels only when their tags declare
   them, and no energy, danceability, valence, acousticness, or tempo (B3
   measures signal levels only). Features a track lacks are left out of its
@@ -95,7 +97,9 @@ class RecommendationService:
             turns = self._uow.session_turns.list_for_session(session_id)
             occurrences = self._uow.recommendation_occurrences.list_for_session(session_id)
             events = self._uow.feedback_events.list_for_session(session_id)
+            stored = self._uow.long_term_profiles.get(session.listener_profile_id)
 
-        signals = signals_from_session(session, turns, occurrences, tracks, self._policy, feedback_events=events)
+        long_term = stored.profile if stored is not None else None
+        signals = signals_from_session(session, turns, occurrences, tracks, self._policy, long_term=long_term, feedback_events=events)
         candidates = [candidate_from_track(track) for track in tracks.values()]
         return decide(candidates, signals, self._policy, self._rng)

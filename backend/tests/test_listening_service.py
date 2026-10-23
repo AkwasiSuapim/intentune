@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.capability import IntentCapability
 from src.intentune.application.listening import ListeningService
 from src.intentune.application.local_listener import ensure_default_listener
@@ -58,7 +59,9 @@ def sessions(unit_of_work):
 
 @pytest.fixture
 def listening(unit_of_work, sessions):
-    return ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), IntentCapability(unit_of_work))
+    return ListeningService(
+        sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), IntentCapability(unit_of_work), LongTermAdaptationService(unit_of_work)
+    )
 
 
 def _titles(occurrences, ids):
@@ -121,7 +124,7 @@ def test_a_failed_refresh_leaves_the_turn_recorded(unit_of_work, sessions, liste
             raise RuntimeError("policy failed")
 
     started = sessions.start_session(listener, ListeningContext(temporary_genres=("ambient",)))
-    listening = ListeningService(sessions, FailingRecommendations(), IntentCapability(unit_of_work))
+    listening = ListeningService(sessions, FailingRecommendations(), IntentCapability(unit_of_work), LongTermAdaptationService(unit_of_work))
 
     with pytest.raises(RuntimeError):
         listening.steer(started.session.session_id, TurnKind.SURPRISE_ME)

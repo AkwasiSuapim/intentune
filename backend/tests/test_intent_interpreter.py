@@ -97,15 +97,28 @@ def test_the_vocabulary_is_what_the_policy_can_use_of_the_librarys_labels_ignori
 
 
 def test_capability_is_what_the_policy_can_use_of_the_playable_library_now():
-    genres_only = vocabulary_from_tracks([_track(("Jazz",)), _track(("Ambient",), ("Mellow",))])
+    genres_only = vocabulary_from_tracks([_track(("Jazz",)), _track(("Ambient",))])
     tune_mood = vocabulary_from_tracks([_track(("Jazz",), ("calm",))])
 
-    assert genres_only.capability == LibraryCapability(playable_tracks=2, usable=("genre",))  # Mellow is not one of Tune's moods
+    assert genres_only.capability == LibraryCapability(playable_tracks=2, usable=("genre",))
     assert tune_mood.capability == LibraryCapability(playable_tracks=1, usable=("mood", "genre"))
     # Nothing fills the five measured features yet: they are unavailable for now, not removed.
     assert [genres_only.capability.state(dimension) for dimension in DIMENSIONS] == [
         DimensionState.NO_DATA, DimensionState.USABLE, *[DimensionState.NO_DATA] * 5
     ]
+
+
+def test_any_real_mood_label_makes_mood_usable_while_tune_offers_only_the_curated_ones_present():
+    """B10 carry-forward: the mood dimension is the library's. Tune's choices stay the approved five, where present."""
+    library_moods_only = vocabulary_from_tracks([_track(("Jazz",), ("Dreamy",)), _track(("Ambient",), ("Melancholic",))])
+    mixed = vocabulary_from_tracks([_track(("Jazz",), ("Dreamy",)), _track(("Ambient",), ("calm",))])
+
+    assert library_moods_only.capability.state("mood") is DimensionState.USABLE
+    assert library_moods_only.usable_tune_moods == ()  # no arbitrary library mood joins Tune
+    assert library_moods_only.mood_is_usable("dreamy")  # a typed "something dreamy" may use it
+    assert mixed.usable_tune_moods == ("Calm",)
+    assert unavailable_dimensions(ListeningContext(), ListeningContext(temporary_moods=("Dreamy",)), library_moods_only) == ()
+    assert unavailable_dimensions(ListeningContext(), ListeningContext(temporary_moods=("Calm",)), library_moods_only) == ("mood",)
 
 
 def test_a_library_with_nothing_playable_is_not_ready_rather_than_unsupported_dimension_by_dimension():
@@ -155,7 +168,7 @@ def test_the_unmapped_context_fields_change_nothing_policy_v1_targets():
     stated = ListeningContext(current_mood="tired", listening_goal="get through emails", activity="working", temporary_genres=("Jazz",))
 
     assert UNMAPPED_CONTEXT_FIELDS == ("current_mood", "listening_goal", "activity")
-    assert Targets.effective(stated, None) == Targets.effective(ListeningContext(temporary_genres=("Jazz",)), None)
+    assert Targets.from_context(stated) == Targets.from_context(ListeningContext(temporary_genres=("Jazz",)))
 
 
 def test_a_mood_is_usable_only_when_a_playable_track_declares_it():

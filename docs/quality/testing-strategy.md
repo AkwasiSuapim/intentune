@@ -167,6 +167,39 @@ Per-file counts are in the [B9 audit](../architecture/current-system-audit.md#b9
 
 87 single-rule mutations (45 backend, 42 frontend) each make a test fail. Two first-run survivors were test gaps, now covered: a typed reaction about the card in view, and a starter's phrase while pending.
 
+## After B10 (2026-10-22)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **1343 passed, 1 skipped**: 1271 collected at `886cf66` plus 73 from B10 (including the review corrections). |
+| Frontend `npm test`, lint, build, `npm audit` | **276 passed**, clean, 0 vulnerabilities (no frontend change). |
+| Manual end to end | 14/14 over the real HTTP API, with a restart. |
+
+What B10's tests cover:
+- **The gate:** 1, 2, or 3 strong signals change nothing; 4 in one session change nothing; 4 consistent across 2 sessions make exactly one adjustment; different values are never pooled; contrary evidence offsets; rejections alone set nothing.
+- **Distinct tracks (review):** four strong items about one track across sessions set nothing, for genre and for a numeric feature; a second distinct track lets the gate pass; duplicates within a session stay collapsed.
+- **More like this (review):** repeated More like this turns stay strong session evidence but never reach the long-term gate; a Like followed by More like this is one long-term item, from the Like.
+- **Feedback semantics, through the real use cases:**
+  - Like counts, and Unlike cancels it without counting against;
+  - Not for me is strong negative, as an event and as a turn;
+  - skips and partial plays never count, while 90–100% completions do;
+  - a Like, a Save, three playlist adds, and a run of Replays about one track in one session are one item.
+- **Missing data:** genre-only tracks change genre and nothing numeric; a feature a track lacks is never inferred.
+- **Numeric features, on synthetic candidates:** establishment at the batch median; incoherent or concentrated values change nothing; one bounded step per later batch; rejections move away but cannot set; tempo's own span and step; a change of direction breaks a run.
+- **The audit trail:** policy version, before and after, cause, reason, and the exact LIKE event ids. The database refuses an unknown event or adjustment, an item with no raw fact, a zero weight, a duplicate item, a taken sequence, and a genre change without its value.
+- **Persistence:** the migration round trip keeps the raw history and rebuilds the same profile; a restart keeps the profile and its trail.
+- **Recomputation:** identical history in any order gives an identical profile; a withdrawal is recorded as `GATE_LOST`; displacement from the bounded list is `DISPLACED`; an off-path value is `RECOMPUTED`; adapting again records nothing.
+- **Ranking:**
+  - without history, the outputs are as before;
+  - a new session ranks with the separate long-term stage;
+  - explicit intent outranks a conflicting preference;
+  - history never fills the intent stage;
+  - missing long-term features are omitted and the stage renormalized;
+  - long-term preference as positive affinity (review): a mismatch is neutral and a full match 1.0; with no intent, strong session evidence for genre B beats a stored preference for A, at the policy and through the real use cases; with the session silent, the preference still lifts A; explicit intent beats both; negative session evidence overcomes a conflicting preference; no profile leaves the pre-B10 scores.
+- **Carry-forward:** a library mood makes mood usable; Tune offers only curated moods present; a typed library mood is accepted.
+
+24 single-rule mutations each make a test fail (5 of them for the review corrections). The first draft of two hierarchy tests passed trivially: a tie decided by the tie-break, and a Not for me that had also removed the preference. They were rewritten to state what the formulas do.
+
 ## Current Test Coverage
 
 ### Backend
@@ -501,7 +534,7 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | Playlist CRUD and ordering; one occurrence per playlist | B7 — **Current** (2026-10-21) |
 | API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 — **Current** (2026-10-21) |
 | Frontend service boundary against the HTTP adapter | B9 — **Current** (2026-10-21) |
-| Long-term evidence threshold; bounded, reversible adjustments | B10 |
+| Long-term evidence threshold; bounded, reversible adjustments | B10 — **Current** (2026-10-22) |
 | Restart behavior; migrations on existing data; performance with hundreds to thousands of tracks | B11 |
 
 ### Deterministic evaluation scenarios

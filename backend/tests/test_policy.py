@@ -11,6 +11,7 @@ Randomness only decides whether to explore; tests fix it with _FixedRandom.
 """
 
 import random
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -364,19 +365,125 @@ def test_current_intent_wins_over_long_term_history():
     decision = decide([loud, calm], signals, rng=_never_explore())
 
     assert _ids(decision) == ["calm", "loud"]
-    assert _pick(decision, "calm").score.combined == pytest.approx(0.55 * 1.0 + 0.30 * 0.5 + 0.15 * 0.0)
+    # B10: a profile that does not match is neutral (0.5) in the long-term stage, not 0: history is positive affinity.
+    assert _pick(decision, "calm").score.combined == pytest.approx(0.55 * 1.0 + 0.30 * 0.5 + 0.15 * 0.5)
     assert _pick(decision, "loud").score.combined == pytest.approx(0.55 * 0.0 + 0.30 * 0.5 + 0.15 * 1.0)
 
 
-def test_history_fills_in_what_the_current_intent_leaves_open():
+def test_history_never_fills_the_intent_stage_and_counts_only_in_its_own():
+    """B10: what the listener left open stays open in intent fit; the profile is the .15 long-term stage alone.
+
+    (B5 filled open intent targets from history, which would have counted a profile twice. Nothing supplied a
+    profile before B10, so no earlier output changes.)
+    """
     history = UserProfile(preferred_genres=("rock",), preferred_moods=("happy",), preferred_energy=0.9, preferred_danceability=0.7)
     context = ListeningContext(temporary_genres=("ambient",), desired_mood="calm", target_energy=0.2)
 
-    targets = Targets.effective(context, history)
+    targets = Targets.from_context(context)
 
-    assert (targets.genres, targets.moods, targets.energy, targets.danceability) == (("ambient",), ("calm",), 0.2, 0.7)
-    assert Targets.effective(ListeningContext(temporary_moods=("dark",), desired_mood="calm"), history).moods == ("dark",)
-    assert Targets.effective(ListeningContext(), history).moods == ("happy",)
+    assert (targets.genres, targets.moods, targets.energy, targets.danceability) == (("ambient",), ("calm",), 0.2, None)
+    assert Targets.from_context(ListeningContext(temporary_moods=("dark",), desired_mood="calm")).moods == ("dark",)
+    assert Targets.from_context(ListeningContext()) == Targets()
+    open_intent = score(_candidate("r", genre="rock", mood="happy"), SessionSignals(long_term=history))
+    assert open_intent.intent is None  # nothing asked for: no intent stage
+    assert [(name, pytest.approx(weight)) for name, weight, _ in open_intent.stage_weights] == [
+        ("session", pytest.approx(0.30 / 0.45)), ("long_term", pytest.approx(0.15 / 0.45))
+    ]
+
+
+# --- B10: the long-term stage with a stored profile --------------------------------------------------------
+
+
+def test_missing_long_term_features_are_omitted_and_the_stage_renormalized():
+    """A profile feature a candidate lacks is left out; with nothing left to compare, the whole stage is (D21, spec §14)."""
+    genre_only = _candidate("a", genre="afrobeats")
+
+    energy_profile = score(genre_only, SessionSignals(long_term=UserProfile(preferred_energy=0.6)))
+    mixed_profile = score(genre_only, SessionSignals(long_term=UserProfile(preferred_genres=("afrobeats",), preferred_energy=0.6)))
+
+    assert energy_profile.long_term is None and [name for name, _, _ in energy_profile.stage_weights] == ["session"]
+    assert [feature.feature for feature in mixed_profile.long_term.features] == ["genre"]  # energy omitted, genre kept
+    assert mixed_profile.long_term.value == 1.0
+    assert [(name, pytest.approx(weight)) for name, weight, _ in mixed_profile.stage_weights] == [
+        ("session", pytest.approx(0.30 / 0.45)), ("long_term", pytest.approx(0.15 / 0.45))
+    ]
+
+
+_HISTORY_A = UserProfile(preferred_genres=("afrobeats",))  # a stored long-term preference for genre A
+
+
+def test_a_long_term_preference_is_positive_affinity_never_a_penalty():
+    """B10: no match with the profile is neutral (0.5), a full match 1.0, in between in proportion (TD-021)."""
+    signals = SessionSignals(long_term=UserProfile(preferred_genres=("afrobeats",), preferred_energy=0.6))
+
+    mismatch = score(_candidate("j", genre="jazz", energy=0.1), signals)  # genre 0, energy 0.5 apart: raw 0
+    full = score(_candidate("a", genre="afrobeats", energy=0.6), signals)
+    partial = score(_candidate("p", genre="jazz", energy=0.6), signals)  # energy matches, genre does not
+
+    assert (mismatch.long_term.value, mismatch.stage_weights[-1]) == (0.0, ("long_term", pytest.approx(1 / 3), 0.5))
+    assert full.stage_weights[-1][2] == 1.0
+    assert partial.stage_weights[-1][2] == pytest.approx(0.5 + 0.5 * partial.long_term.value)
+    assert 0.5 < partial.stage_weights[-1][2] < 1.0
+
+
+def test_with_no_intent_strong_session_evidence_for_b_beats_a_long_term_preference_for_a():
+    signals = SessionSignals(long_term=_HISTORY_A, evidence=(SessionEvidence(_music("liked", genre="jazz"), 1.0),))
+
+    jazz, afrobeats = score(_candidate("j", genre="jazz"), signals), score(_candidate("a", genre="afrobeats"), signals)
+
+    assert jazz.combined == pytest.approx((0.30 * 1.0 + 0.15 * 0.5) / 0.45)  # 0.833
+    assert afrobeats.combined == pytest.approx((0.30 * 0.5 + 0.15 * 1.0) / 0.45)  # 0.667
+    assert _ids(decide([_candidate("a", genre="afrobeats"), _candidate("j", genre="jazz")], signals, rng=_never_explore()))[0] == "j"
+
+
+def test_a_long_term_preference_still_lifts_its_genre_when_the_session_says_nothing():
+    signals = SessionSignals(long_term=_HISTORY_A)
+
+    assert score(_candidate("a", genre="afrobeats"), signals).combined == pytest.approx((0.30 * 0.5 + 0.15 * 1.0) / 0.45)
+    assert score(_candidate("j", genre="jazz"), signals).combined == pytest.approx(0.5)  # neutral on both stages
+    assert _ids(decide([_candidate("j", genre="jazz"), _candidate("a", genre="afrobeats")], signals, rng=_never_explore()))[0] == "a"
+
+
+def test_explicit_intent_outranks_both_session_evidence_and_long_term_history():
+    """Session evidence and history both favour A; the listener asks for B. Intent fit is not softened: A scores 0."""
+    signals = SessionSignals(
+        context=ListeningContext(temporary_genres=("jazz",)), long_term=_HISTORY_A,
+        evidence=(SessionEvidence(_music("liked", genre="afrobeats"), 1.0),),
+    )
+
+    jazz, afrobeats = score(_candidate("j", genre="jazz"), signals), score(_candidate("a", genre="afrobeats"), signals)
+
+    assert afrobeats.intent.value == 0.0  # an explicit request may rightly give a mismatch nothing
+    assert jazz.combined == pytest.approx(0.55 * 1.0 + 0.30 * 0.5 + 0.15 * 0.5)  # 0.775
+    assert afrobeats.combined == pytest.approx(0.55 * 0.0 + 0.30 * 1.0 + 0.15 * 1.0)  # 0.45
+    assert jazz.combined > afrobeats.combined
+
+
+def test_negative_session_evidence_overcomes_a_conflicting_long_term_preference():
+    """Session fit stays signed: a refusal of an A track this session outweighs the stored preference for A."""
+    signals = SessionSignals(long_term=_HISTORY_A, evidence=(SessionEvidence(_music("refused", genre="afrobeats"), -1.0),))
+
+    afrobeats, jazz = score(_candidate("a", genre="afrobeats"), signals), score(_candidate("j", genre="jazz"), signals)
+
+    assert afrobeats.session.value == 0.0  # still negative evidence, not lifted to neutral
+    assert afrobeats.combined == pytest.approx((0.30 * 0.0 + 0.15 * 1.0) / 0.45)  # 0.333
+    assert jazz.combined == pytest.approx((0.30 * 0.5 + 0.15 * 0.5) / 0.45)  # 0.5
+    assert jazz.combined > afrobeats.combined
+
+
+def test_without_a_long_term_profile_scores_are_exactly_as_before_b10():
+    """No profile, or an empty one, leaves no long-term stage: the pre-B10 renormalized intent and session scores."""
+    context = ListeningContext(temporary_genres=("ambient",), target_energy=0.2)
+    evidence = (SessionEvidence(_music("liked", genre="ambient", energy=0.3), 1.0),)
+    candidate = _candidate("a", genre="ambient", energy=0.25)
+
+    without, empty = score(candidate, SessionSignals(context=context, evidence=evidence)), score(
+        candidate, SessionSignals(context=context, evidence=evidence, long_term=UserProfile())
+    )
+
+    assert without == empty
+    assert without.long_term is None and [name for name, _, _ in without.stage_weights] == ["intent", "session"]
+    assert without.combined == pytest.approx((0.55 * without.intent.value + 0.30 * without.session.value) / 0.85)
 
 
 # --- Acceptance: a finite library ----------------------------------------------------------------------

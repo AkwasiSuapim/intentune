@@ -21,7 +21,7 @@ This project uses a simple content-based recommender. Each song is described by 
 7. Store the score and human-readable reasons.
 8. Sort all songs from highest score to lowest score.
 9. Return the top `k` recommendations.
-10. In a future version, use likes, skips, saves, replays, and listening history to update each user's profile.
+10. In a future version, use likes, skips, saves, replays, and listening history to update each user's profile. *(The CLI still does not. The Prototype 1 backend API does, conservatively, since B10: a long-term profile change needs four consistent strong signals from two listening sessions about at least two different tracks, and every change is recorded with the evidence behind it. See [TD-021](docs/decisions/technical-decisions.md#td-021-b10-conservative-long-term-adaptation).)*
 
 ### Algorithm Recipe
 

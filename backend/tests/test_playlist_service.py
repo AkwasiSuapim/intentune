@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.feedback import FeedbackService
 from src.intentune.application.local_listener import ensure_default_listener
 from src.intentune.application.playlists import PlaylistService
@@ -70,7 +71,7 @@ def recommender(unit_of_work, clock):
 
 @pytest.fixture
 def feedback(unit_of_work, recommender, clock):
-    return FeedbackService(unit_of_work, recommender, clock=clock)
+    return FeedbackService(unit_of_work, recommender, LongTermAdaptationService(unit_of_work, clock=clock), clock=clock)
 
 
 @pytest.fixture

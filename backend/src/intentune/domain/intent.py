@@ -27,9 +27,11 @@ projection Policy v1 ranks. Three situations are told apart:
   structured controls, typed words, and Policy v1 alike.
 
 Each dimension becomes usable on its own as soon as some playable track
-carries usable data for it: genre with a genre label, mood with one of Tune's
-moods, and energy, danceability, tempo, valence, and acousticness with a
-value from an approved feature pipeline. Today the importer reads genre tags
+carries usable data for it: genre with a genre label, mood with any mood
+label (B10 carry-forward: the dimension is the library's, so a library mood
+such as "Dreamy" counts; Tune's curated choices are only the five the library
+also declares, usable_tune_moods), and energy, danceability, tempo, valence,
+and acousticness with a value from an approved feature pipeline. Today the importer reads genre tags
 only and nothing measures the five features, so only genre can be usable.
 current_mood, listening_goal, and activity are kept and stored, but their
 mapping into Policy v1 is unfinished (UNMAPPED_CONTEXT_FIELDS): they change
@@ -210,9 +212,8 @@ def vocabulary_from_candidates(playable: Sequence[MusicCandidate]) -> Vocabulary
     """
     genres = _distinct(music.genre for music in playable if music.genre)
     moods = _distinct(music.mood for music in playable if music.mood)
-    curated = {_key(mood) for mood in CURATED_MOODS}
     usable = []
-    if any(_key(mood) in curated for mood in moods):
+    if moods:  # any real mood label: the dimension is the library's, not Tune's five (usable_tune_moods)
         usable.append("mood")
     if genres:
         usable.append("genre")

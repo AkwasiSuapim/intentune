@@ -292,6 +292,7 @@ report_playback(session, occurrence, SKIP | COMPLETE, played_seconds, duration_s
                   REPLAY of a finished track -> the playing one is PLAYED; a fresh "listener-replay"
                   occurrence of the replayed track starts now, past the cooldown
                   REPLAY of the playing track -> nothing (the player restarts it)
+   -> (B10) LongTermAdaptationService.adapt_after(): the long-term profile follows the history
    -> RecommendationService.refresh_queue(): Policy v1 reads every turn and raw event through
         Feedback Policy v1, per track in the session, and re-ranks and refills the queue
    -> the event, its own weight, the track's interpretation, and the new session state
@@ -408,7 +409,21 @@ The text is interpreted, then dropped; only the structured turn or event is stor
 
 ### Long-term adaptation (B10)
 
-Permanent profile change requires at least four consistent strong signals across at least two sessions, and then only a small, bounded, traceable, reversible adjustment (D06).
+**Current (B10, 2026-10-22).** Permanent profile change requires at least four consistent strong signals across at least two sessions, and then only a small, bounded, traceable, reversible adjustment (D06, TD-021):
+
+```text
+a feedback event, or a Not for me turn, or Next's SKIP is persisted   (More like this steers the session only)
+   -> LongTermAdaptationService.adapt_after(session)          (one transaction; refreshes nothing)
+        read the listener's whole history: sessions, turns, occurrences, raw events, track features
+        Feedback Policy v1, per track per session (session-only turns left out) -> effective items; keep the strong ones
+        derive the profile from nothing (Long-Term Adaptation Policy v1)
+        compare with the stored profile -> append an adjustment per difference,
+          each with its cause, reason, policy version, and evidence references; store the profile
+   -> RecommendationService.refresh_queue(), once: Policy v1 scores the stored profile in its own .15 stage,
+        as positive affinity (0.5 + 0.5 x similarity: a mismatch is neutral)
+```
+
+Nothing is learned anywhere else. Raw history is never changed; an Unlike that withdraws evidence is answered by a new adjustment.
 
 ## Superseded Workflows
 

@@ -294,6 +294,26 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 - **Gain:** one session or one skip never rewrites long-term taste.
 - **Cost:** the profile adapts slowly. The 4-signal, 2-session threshold itself must later be evaluated.
 
+### Recompute from raw history instead of updating the profile (TD-021, B10)
+
+- **Gain:** the same history always gives the same profile. A withdrawn Like takes its change back, as a new adjustment, and old evidence can never drift the profile.
+- **Cost:** each relevant event rereads the listener's history (B11 measures it). After withdrawn evidence, a numeric preference can move more than one step, to what the remaining evidence supports.
+
+### Long-term history in its own stage only (TD-021, B10)
+
+- **Gain:** history counts once, at .15, and never fills what the listener left open in the intent stage.
+- **Cost:** none found so far beyond the .15 cap itself.
+
+### Long-term preference as positive affinity (TD-021, B10 review)
+
+- **Gain:** a stored preference lifts what the listener has repeatedly liked without penalizing everything else. Session evidence outweighs it, and current intent outweighs both, under the locked weights and without a tie-break.
+- **Cost:** a full match moves the long-term stage only from 0.5 to 1.0, so history's lift is gentler. The 0.5 neutral point is a heuristic for B11 to evaluate.
+
+### Two distinct tracks before a feature preference (TD-021, B10 review)
+
+- **Gain:** one favourite song never becomes a genre, mood, or feature preference by itself.
+- **Cost:** a listener who loves only one song in a genre builds no preference for it. Its raw evidence is kept for future work.
+
 ### No raw conversational text by default (D33)
 
 - **Gain:** data minimization.

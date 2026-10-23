@@ -314,3 +314,17 @@ def test_playable_music_without_genre_tags_is_ready_with_genre_unavailable(clien
     assert (refused.status_code, _error(refused)["code"], _error(refused)["details"]) == (422, "INTENT_UNAVAILABLE", {"unavailable": ["genre"], "dimensions": []})
     assert _error(_start(client, message="the weather"))["message"] == 'Intentune can\'t act on that yet. Try "surprise me".'
     assert _start(client, message="surprise me").status_code == 201  # exploration needs no data
+
+
+def test_a_library_mood_outside_tunes_five_makes_mood_usable_and_typed_words_can_use_it(client, api_settings):
+    """B10 carry-forward: any real mood label makes the dimension usable; Tune still offers only its five, where present."""
+    _store_track(api_settings, (LabelKind.GENRE, "Ambient"), (LabelKind.MOOD, "Dreamy"))
+    _store_track(api_settings, (LabelKind.GENRE, "Jazz"), (LabelKind.MOOD, "Melancholic"))
+
+    vocabulary = client.get("/api/v1/listening/vocabulary").json()
+    assert (vocabulary["dimensions"]["mood"], vocabulary["usable_moods"]) == ("usable", [])
+    started = _start(client, message="something dreamy")
+    assert started.status_code == 201
+    assert started.json()["session"]["context"]["temporary_moods"] == ["Dreamy"]
+    refused = _start(client, context={"temporary_moods": ["Calm"]})  # a curated mood the library does not have
+    assert (_error(refused)["code"], _error(refused)["details"]["unavailable"]) == ("INTENT_UNAVAILABLE", ["mood"])

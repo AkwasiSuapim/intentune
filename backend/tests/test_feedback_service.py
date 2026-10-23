@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.feedback import FeedbackService
 from src.intentune.application.local_listener import ensure_default_listener
 from src.intentune.application.recommendations import RecommendationService
@@ -76,7 +77,7 @@ def recommender(unit_of_work, clock):
 
 @pytest.fixture
 def feedback(unit_of_work, recommender, clock):
-    return FeedbackService(unit_of_work, recommender, clock=clock)
+    return FeedbackService(unit_of_work, recommender, LongTermAdaptationService(unit_of_work, clock=clock), clock=clock)
 
 
 @pytest.fixture
@@ -388,7 +389,7 @@ def test_feedback_needs_an_active_session_and_one_of_its_occurrences(feedback, s
 def test_an_early_skip_of_an_exploration_pick_lowers_the_automatic_rate(unit_of_work, sessions, listener, clock):
     """One skip halves the rate; it never stops exploration (spec §18)."""
     explorer = RecommendationService(unit_of_work, rng=_FixedRandom(0.0), clock=clock)
-    feedback = FeedbackService(unit_of_work, explorer, clock=clock)
+    feedback = FeedbackService(unit_of_work, explorer, LongTermAdaptationService(unit_of_work, clock=clock), clock=clock)
     with unit_of_work:
         for title, mood in (("c1", "calm"), ("c2", "calm"), ("c3", "calm"), ("d1", "dark")):
             unit_of_work.tracks.add(Track(

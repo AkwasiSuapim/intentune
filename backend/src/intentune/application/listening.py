@@ -17,6 +17,12 @@ change, then RecommendationService.refresh_queue() surfaces Policy v1's
 choice. If the refresh fails, the change stays recorded, and the next command
 refreshes the queue again.
 
+A Not for me turn, and the SKIP a Next records, can change a track's
+long-term evidence, so the long-term profile is brought in line
+(LongTermAdaptationService, B10) after they are recorded and before the one
+refresh. A More like this turn steers the session only and is not long-term
+evidence.
+
 Before a start or a REFINE records anything, IntentCapability checks it
 against the library as it is now (B9). With no playable tracks, nothing can be
 recommended: LibraryNotReady. An intent that sets a dimension the library has
@@ -28,6 +34,7 @@ input meet the same rule.
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.capability import IntentCapability
 from src.intentune.application.recommendations import RecommendationService
 from src.intentune.application.sessions import SessionService
@@ -45,11 +52,16 @@ class PlaybackFacts:
 
 class ListeningService:
     def __init__(
-        self, sessions: SessionService, recommendations: RecommendationService, capability: IntentCapability
+        self,
+        sessions: SessionService,
+        recommendations: RecommendationService,
+        capability: IntentCapability,
+        adaptation: LongTermAdaptationService,
     ) -> None:
         self._sessions = sessions
         self._recommendations = recommendations
         self._capability = capability
+        self._adaptation = adaptation
 
     def start(self, listener_profile_id: str, context: ListeningContext) -> SessionState:
         """Start a session (the listener's previous one ends) and surface its first queue. Nothing plays yet.
@@ -75,6 +87,8 @@ class ListeningService:
         if kind is TurnKind.REFINE and context is not None:
             self._capability.require(self._sessions.get_session(session_id).session.current_context, context)
         turn = self._sessions.apply_turn(session_id, kind, context=context, occurrence_id=occurrence_id)
+        if turn.kind is TurnKind.NOT_FOR_ME:  # More like this steers the session only: no long-term evidence
+            self._adaptation.adapt_after(session_id)
         return turn, self._recommendations.refresh_queue(session_id)
 
     def next(
@@ -94,4 +108,5 @@ class ListeningService:
             self._sessions.record_feedback(
                 session_id, turn.occurrence_id, FeedbackEventType.SKIP, playback.played_seconds, playback.duration_seconds
             )
+            self._adaptation.adapt_after(session_id)
         return turn, self._recommendations.refresh_queue(session_id)

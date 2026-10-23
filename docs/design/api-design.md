@@ -189,7 +189,7 @@ Which events travel where (decided in B8):
 - **Playlist adds** are recorded by `POST /playlists/{id}/items` with the recommendation's `session_id` and `occurrence_id` (below), never as a reaction.
 - **Not for me and Next** may each be sent as a turn or as feedback. Both forms are read together and both move on. A late skip about a finished track moves nothing, so sending a `next` turn and a SKIP event for the same track is safe. Since B9 the frontend sends Next as one `next` turn with the player's facts, and the backend records the SKIP itself.
 
-Each answers `201` with the stored raw event, its `event_weight` under Feedback Policy v1, the track's `interpretation` in this session (`weight`, `basis`: `explicit`, `passive`, `grace`, or `none`, `excluded`, `at`, `occurrence_id`), and the session `state` after re-ranking.
+Since B10, the event may also adjust the listener's long-term profile, by Long-Term Adaptation Policy v1's gate (TD-021). That happens before the single re-rank, has no route, and shows nothing beyond the ranking. Each answers `201` with the stored raw event, its `event_weight` under Feedback Policy v1, the track's `interpretation` in this session (`weight`, `basis`: `explicit`, `passive`, `grace`, or `none`, `excluded`, `at`, `occurrence_id`), and the session `state` after re-ranking.
 
 ### Typed messages (B9)
 
@@ -248,7 +248,7 @@ The answer is the usual `{turn, state}` plus:
 - **Energy:** a fixed scale, always offered (D21).
 - **Library:** whether anything can be recommended. With no playable tracks the library is `ready: false`: a setup state, in which music must be imported. It is not reported as unsupported dimensions.
 - **Dimensions:** for each dimension Policy v1 ranks by, computed from the same projection of each playable track that Policy v1 ranks:
-  - `usable`: some playable track has usable data for it (a genre label; one of Tune's moods; a value for energy, danceability, tempo, valence, or acousticness from an approved feature pipeline);
+  - `usable`: some playable track has usable data for it (a genre label; any mood label, since the B10 carry-forward, while Tune offers only its five, where present, as `usable_moods`; a value for energy, danceability, tempo, valence, or acousticness from an approved feature pipeline);
   - `no_data`: tracks are playable, but none has usable data for it yet. This is unfinished feature coverage: Policy v1 keeps the target, and nothing is invented;
   - `library_not_ready`: nothing is playable, so no dimension is judged.
 

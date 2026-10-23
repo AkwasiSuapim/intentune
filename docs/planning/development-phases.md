@@ -23,8 +23,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B6** Feedback/playback events | Like, Save, Replay, Skip, Complete, Not-for-me; raw event persistence; immediate re-ranking | **Complete and committed** (2026-10-20; review fixes 2026-10-21; committed with B7 as `116276b`). 830 backend tests pass and 1 is skipped (831 collected; B6 adds 78). |
 | **B7** Playlists | CRUD, add/remove/reorder, persistence | **Complete and committed** (2026-10-21, `116276b`, together with B6). 905 backend tests pass and 1 is skipped (906 collected; B7 adds 75). |
 | **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | **Complete and committed** (2026-10-21, `ac23287`), on top of `116276b`. 1075 backend tests pass and 1 is skipped (1076 collected; B8 adds 170). |
-| **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | **Complete, awaiting review** (2026-10-21), on top of `ac23287`. Corresponds to frontend phase F9. 1198 backend tests pass and 1 is skipped (B9 adds 123); 251 frontend tests pass (B9 adds 37). |
-| **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | Not started |
+| **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | **Complete, reviewed, and committed** (2026-10-22, `886cf66`), on top of `ac23287`, with its review corrections. Corresponds to frontend phase F9. 1270 backend tests pass and 1 is skipped; 276 frontend tests pass. GitHub Actions CI passed. |
+| **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | **Complete, awaiting review** (2026-10-22; review corrections 2026-10-23), on top of `886cf66`. 1343 backend tests pass and 1 is skipped (B10 adds 73); 276 frontend tests pass (no frontend change). |
 | **B11** Evaluation/hardening | Performance with hundreds to thousands of tracks, restart behavior, migrations, algorithm evaluation | Not started |
 
 Acceptance criteria for each phase are in the execution guide §4–§14. Prototype 1 is done when every item in spec §30 holds.
@@ -403,6 +403,48 @@ Not done in B9, by scope:
 - **Explanations:** none (Policy v1's reasons are not stored).
 - **Past sessions:** a past session's songs cannot be replayed (no route plays a specific track).
 - **Features:** energy and most moods do not affect ranking until such features are measured.
+
+### B10 record (2026-10-22)
+
+On branch `prototype-1`, on top of `886cf66` (B9, committed, reviewed, and CI-green). Decisions: [TD-021](../decisions/technical-decisions.md#td-021-b10-conservative-long-term-adaptation).
+
+B9 carry-forward, done first:
+- The mood dimension is usable with any real mood label.
+- Tune still offers only the approved five, and only those present.
+
+What was built:
+- **Long-Term Adaptation Policy v1** (`domain/adaptation.py`), pure and versioned (`adaptation-v1`):
+  - strong evidence: one effective item per track per session, read by Feedback Policy v1;
+  - the gate: 4 consistent strong items from 2 sessions about 2 distinct tracks;
+  - genre and mood: net support per value, at most 3 kept;
+  - numeric features: coherent single-polarity batches, the first setting the median, later ones moving at most 0.05 (tempo 5 BPM), each batch consumed once;
+  - recomputation from raw history, with a planned adjustment per change.
+- **Persistence** (migration `5d8e2b7a9c41`): the current profile, and append-only adjustments with relational evidence references to sessions, tracks, feedback events, and turns.
+- **`LongTermAdaptationService`:** runs between persisting a relevant fact and the single refresh, from `FeedbackService` and from `ListeningService` (the Not for me turn, Next's SKIP).
+- **`RecommendationService`:** passes the stored profile to Policy v1, which scores it in its own .15 stage only, as positive affinity. The intent stage reads current intent only. No profile means unchanged outputs.
+
+What was verified:
+- **Suites:** 1343 backend tests pass and 1 is skipped (B10 adds 73); 276 frontend tests pass, and lint, build, and `npm audit` (0) are clean, with no frontend change.
+- **Mutations:** 24 single-rule mutations of the policy, wiring, carry-forward, and review corrections, each caught.
+- **Manual end-to-end run:** over the real HTTP API, on a scratch database with synthetic genre-only test tracks, 14 of 14 checks passed:
+  - two Likes in session 1 and a third in session 2 left the profile unchanged;
+  - the fourth made exactly one adjustment, citing the four LIKE events;
+  - the profile and audit trail survived a restart, with no drift;
+  - a new session with no intent ranked with the long-term stage;
+  - asking for Jazz outranked the Afrobeats preference;
+  - numeric adaptation, shown on synthetic candidates, set and then moved energy by one bounded step.
+
+Review corrections (2026-10-23), before the commit:
+- **Long-term preference is positive affinity:** the long-term stage scores `0.5 + 0.5 × similarity`, so a mismatch is neutral, not penalized. With no intent, session evidence now beats a conflicting long-term preference, and current intent still beats both. No tie-break, and no weight change.
+- **More like this is session-only:** it stays strong session evidence, but never counts toward the long-term gate.
+- **Two distinct tracks:** no feature preference, categorical or numeric, is established from one song alone (`min_distinct_tracks`).
+
+**Still required before Prototype 1 is finished** (not B10, and not faked):
+- a trusted mood-label source;
+- a validated feature pipeline for energy, danceability, tempo, valence, and acousticness (D21), so numeric preferences can be learned;
+- a mapping for `current_mood`, `listening_goal`, and `activity`;
+- a library and import screen;
+- B11 evaluation of the thresholds and the long-term neutral point.
 
 ## Frontend Phases
 

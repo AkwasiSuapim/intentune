@@ -1,6 +1,7 @@
 """Alembic migrations: a clean database upgrades, downgrades, matches the ORM records, and fails atomically."""
 
 import os
+import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -12,10 +13,11 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.local_listener import ensure_default_listener
 from src.intentune.application.playlists import PlaylistService
 from src.intentune.application.sessions import SessionService
-from src.intentune.domain.library import AudioFormat, Track, TrackStatus
+from src.intentune.domain.library import AudioFormat, LabelKind, Track, TrackLabel, TrackStatus
 from src.intentune.domain.models import ListeningContext, MusicCandidate, Recommendation, ScoreBreakdown, ScoreComponent
 from src.intentune.domain.session import FeedbackEventType, TurnKind
 from src.intentune.persistence.db import create_database_engine, create_session_factory
@@ -440,6 +442,68 @@ def test_the_b9_migration_accepts_unlike_and_its_downgrade_removes_only_unlike_e
         )
         with engine.connect() as connection:
             assert connection.exec_driver_sql("SELECT event_type FROM feedback_events ORDER BY occurred_at").scalars().all() == ["LIKE", "UNLIKE"]
+    finally:
+        engine.dispose()
+
+
+def test_the_b10_migration_adds_long_term_adaptation_and_its_downgrade_keeps_the_raw_history(migrated_database_url):
+    """B10 adds the profile and its audit trail. Downgrading drops only those three tables; the raw history they were
+    derived from stays exactly, so after upgrading again the same profile is derived and recorded anew."""
+    engine = create_database_engine(migrated_database_url)
+    try:
+        unit_of_work = SqlAlchemyUnitOfWork(create_session_factory(engine))
+        listener_id = ensure_default_listener(unit_of_work).listener_profile_id
+        now = datetime(2026, 10, 22, 9, 0, tzinfo=timezone.utc)
+        track_ids = [str(uuid.UUID(int=n)) for n in range(1, 5)]
+        with unit_of_work:
+            for n, track_id in enumerate(track_ids):
+                unit_of_work.tracks.add(Track(
+                    track_id=track_id, sha256=f"{n}" * 64, size_bytes=10, audio_format=AudioFormat.FLAC, status=TrackStatus.READY,
+                    original_filename=f"song{n}.flac", created_at=now, updated_at=now, labels=(TrackLabel(LabelKind.GENRE, "Jazz", "tag", True),),
+                ))
+            unit_of_work.commit()
+        sessions = SessionService(unit_of_work)
+        for pair in (track_ids[:2], track_ids[2:]):
+            session_id = sessions.start_session(listener_id, ListeningContext()).session.session_id
+            recommendations = [
+                Recommendation(
+                    candidate=MusicCandidate(candidate_id=track_id, title="Song", creator="Artist", source="local"),
+                    score_breakdown=ScoreBreakdown(total_score=0.5, maximum_score=1.0, components=(ScoreComponent("intent", 0.5, 1.0, "intent fit 0.50"),)),
+                    rank=rank,
+                )
+                for rank, track_id in enumerate(pair, 1)
+            ]
+            for occurrence in sessions.queue_recommendations(session_id, recommendations, "policy-v1").queue:
+                sessions.record_feedback(session_id, occurrence.occurrence_id, FeedbackEventType.LIKE)
+        adaptation = LongTermAdaptationService(unit_of_work)
+        [added] = adaptation.adapt(listener_id)
+        profile = adaptation.profile(listener_id)
+        with engine.connect() as connection:
+            events_before = connection.exec_driver_sql("SELECT * FROM feedback_events ORDER BY id").all()
+    finally:
+        engine.dispose()
+    assert (added.subject, len(added.evidence), profile.preferred_genres) == ("Jazz", 4, ("Jazz",))
+
+    command.downgrade(alembic_config(migrated_database_url), "4b1e9c7d2a6f")
+
+    tables = _table_names(migrated_database_url)
+    assert not {"long_term_profiles", "long_term_adjustments", "long_term_adjustment_evidence"} & tables
+    engine = create_database_engine(migrated_database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT * FROM feedback_events ORDER BY id").all() == events_before
+    finally:
+        engine.dispose()
+
+    command.upgrade(alembic_config(migrated_database_url), "head")
+    engine = create_database_engine(migrated_database_url)
+    try:
+        rebuilt = LongTermAdaptationService(SqlAlchemyUnitOfWork(create_session_factory(engine)))
+        [again] = rebuilt.adapt(listener_id)
+        assert rebuilt.profile(listener_id) == profile
+        assert (again.subject, [reference.feedback_event_id for reference in again.evidence]) == (
+            "Jazz", [reference.feedback_event_id for reference in added.evidence]
+        )
     finally:
         engine.dispose()
 

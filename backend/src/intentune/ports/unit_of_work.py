@@ -9,7 +9,8 @@ Each ``with`` block is a fresh transaction. A unit of work is not re-entrant.
 
 Prototype 1 phases add repositories here as they create them: listener
 profiles in B1; library sources, source files, and tracks in B2; analysis
-jobs and track features in B3; sessions in B4; playlists in B7.
+jobs and track features in B3; sessions in B4; playlists in B7; long-term
+profiles and their adjustments in B10.
 
 A unit of work is not thread-safe. Each thread (for example the background
 analysis worker) uses its own instance.
@@ -18,6 +19,7 @@ analysis worker) uses its own instance.
 from types import TracebackType
 from typing import Optional, Protocol, Type
 
+from src.intentune.ports.adaptation import LongTermProfileRepository
 from src.intentune.ports.analysis import AnalysisJobRepository, TrackFeatureRepository
 from src.intentune.ports.library import LibrarySourceRepository, SourceFileRepository, TrackRepository
 from src.intentune.ports.listener_profiles import ListenerProfileRepository
@@ -76,6 +78,10 @@ class UnitOfWork(Protocol):
 
     @property
     def playlists(self) -> PlaylistRepository:
+        ...
+
+    @property
+    def long_term_profiles(self) -> LongTermProfileRepository:
         ...
 
     def __enter__(self) -> "UnitOfWork":

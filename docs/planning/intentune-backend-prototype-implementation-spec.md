@@ -452,6 +452,8 @@ For a feature:
 - otherwise long-term value
 - otherwise unknown
 
+*Clarified in B10 (TD-021):* the long-term value is scored in its own long-term stage (§16), not filled into the intent stage. Filling it in too would count history twice and let it outweigh current-session evidence, against §16 and D08.
+
 Missing-feature rule:
 
 ```text
@@ -528,6 +530,8 @@ combined =
 ```
 
 If a component is unavailable, renormalize active weights.
+
+*Clarified in B10 (TD-021):* `long_term_fit` is the profile similarity read as positive affinity, `0.5 + 0.5 × similarity`. A candidate outside the profile is neutral, never penalized. `intent_fit` stays 0–1 and `session_fit` stays signed around its neutral 0.5.
 
 Current intent and recent session behavior must outweigh stale history when signals conflict.
 
@@ -658,6 +662,11 @@ Examples:
 - repeated strong negative evidence around very high energy -> slight downward energy adjustment
 
 Do not implement opaque irreversible learning.
+
+*Implemented in B10 (TD-021, Long-Term Adaptation Policy v1):*
+- **Strong signals:** an effective Like, Save, Playlist add, or Replay (+1.00), a Not for me (−1.00), or a 90–100% completion, one per track per session. More like this steers the session only and is never long-term evidence.
+- **Distinct tracks:** at least 2 distinct tracks behind any feature-level change, so one song never generalizes.
+- **Gate and bounds:** "consistent" is net support per value for genre and mood, and a coherent single-polarity batch for numeric features. Numeric changes are capped at 0.05 (tempo 5 BPM) after the first, and the profile is recomputed from raw history with every change recorded.
 
 ## 24. API direction
 

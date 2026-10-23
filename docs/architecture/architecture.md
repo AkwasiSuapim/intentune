@@ -184,7 +184,7 @@ Each enforces its invariants and transitions. *(B5: an occurrence also records `
 `src/intentune/domain/policy.py` (B5) is Recommendation Policy v1, pure and deterministic apart from an injected random generator:
 - `RecommendationPolicy`: every constant, validated and versioned as a whole (`POLICY_V1`, `policy-v1`);
 - inputs: `PolicyCandidate` (a library track as the policy sees it, from `candidate_from_track()`), `SessionEvidence`, and `SessionSignals`, built from a session's turns and plays by `signals_from_session()`;
-- the stages: `Targets.effective()` (current intent first), `feature_fit()`, `candidate_similarity()`, `session_fit()`, `score()` (renormalized stage weights), and `decide()` (eligibility, diversity, exploration, top three, #2 first), returning a `PolicyDecision` that converts to canonical `Recommendation`s.
+- the stages: `Targets.from_context()` (current intent only; B10, the profile has its own stage, scored as positive affinity by `long_term_stage_value()`), `feature_fit()`, `candidate_similarity()`, `session_fit()`, `score()` (renormalized stage weights), and `decide()` (eligibility, diversity, exploration, top three, #2 first), returning a `PolicyDecision` that converts to canonical `Recommendation`s.
 
 A pending listener control in the signals is a one-refresh directive, part of current intent (TD-016 item 11):
 - it decides exploration deterministically, without the random draw;
@@ -210,13 +210,19 @@ Feature comparison reuses `scoring.category_match()` and `scoring.closeness()`, 
 
 `FeedbackEventType` gained `PLAYLIST_ADD`, weighted +1.00 in Feedback Policy v1.
 
+`src/intentune/domain/adaptation.py` (B10) is Long-Term Adaptation Policy v1, pure and versioned (`adaptation-v1`, TD-021):
+- `strong_evidence()`: one effective item per track per session, read through Feedback Policy v1 by `policy.interpretations_by_track()`, the function session fit uses too, without session-only turns (More like this);
+- `derive_profile()`: the profile the evidence supports, recomputed from nothing (genre and mood by net support, at most 3; numeric features by coherent, consumed batches with bounded steps);
+- `plan_adjustments()`: the changes from the stored profile to the derived one, each with its cause, reason, and evidence;
+- the stored shapes `LongTermProfile`, `ProfileAdjustment`, and `EvidenceReference`.
+
 `backend/tests/test_architecture_boundaries.py` checks every domain, port, and application module, including subpackages, with relative imports resolved. It fails if any of them imports SQLAlchemy, Alembic, `sqlite3`, FastAPI, Starlette, Pydantic, mutagen, soundfile, numpy, a filesystem module (`os`, `shutil`, `pathlib`, ...), or the persistence or adapter packages.
 
 **Planned (Prototype 1):**
 
 - A listening-session domain: `ListeningSession`, `SessionTurn`, `RecommendationOccurrence`, `FeedbackEvent` (B4). The session owns current state; turns, occurrences, and feedback own history (D31). *(Current since B4; see above.)*
 - Recommendation Policy v1 (B5): eligibility, intent fit, session fit, long-term fit, combined rank, diversity/repetition re-rank, controlled exploration, and the rolling top three. Each stage is computed separately (D07, D08). All constants live in one versioned policy module. *(Current since B5; see above.)*
-- Feedback interpretation (B6) and conservative long-term adaptation (B10). *(Feedback interpretation is current since B6; see above.)*
+- Feedback interpretation (B6) and conservative long-term adaptation (B10). *(Both current: B6 and B10; see above.)*
 - Existing `score_candidate()`/`rank_candidates()` are preserved. New scoring extends or refactors shared primitives so the scoring math is never duplicated, and complete-input legacy outputs stay identical (D38).
 
 `Recommendation` (an algorithm result) stays distinct from `RecommendationOccurrence` (that result surfaced in a specific session at a specific moment).
@@ -282,6 +288,8 @@ Nothing else writes playlist items. See [System Workflow](system-workflow.md#pla
 domain, and adapters may construct domain models. The domain does not import
 the application layer, adapters, legacy compatibility code, or external
 frameworks.
+
+**B10 (2026-10-22):** `src/intentune/application/adaptation.py` implements `LongTermAdaptationService`. It derives the listener's profile from their whole history, appends an adjustment for every difference from the stored profile, and stores the new one, in one transaction. `FeedbackService` and `ListeningService` call it after persisting a fact that can change a track's evidence, and before their single refresh. `RecommendationService` loads the stored profile into Policy v1. The port is `ports/adaptation.py` (`LongTermProfileRepository`).
 
 ### API Layer
 

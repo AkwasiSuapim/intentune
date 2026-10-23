@@ -10,18 +10,21 @@ evidence -> re-rank the queue.
 - record_playlist_add() (B7): PLAYLIST_ADD, called by PlaylistService when the
   listener adds a recommendation to a playlist.
 
-Each call has two steps:
+Each call has three steps:
 1. SessionService.record_feedback() stores the raw fact and moves playback on,
    if the event ends or replays a track (one transaction).
-2. RecommendationService.refresh_queue() re-ranks and refills the queue, so the
-   next tracks reflect the feedback at once (D05, D16).
+2. LongTermAdaptationService.adapt_after() (B10) brings the long-term profile in
+   line with the history, recording any bounded adjustment. It refreshes
+   nothing.
+3. RecommendationService.refresh_queue() re-ranks and refills the queue, once,
+   so the next tracks reflect the feedback at once (D05, D16).
 
 Session evidence is not stored. Policy v1 reads every raw event through
 Feedback Policy v1 at each refresh (domain/policy.py, interpret_feedback()),
 per track in the session, so the thresholds can change later without losing
-evidence. Nothing here
-touches the long-term profile: Not for me excludes a track for this session
-only (D18), and long-term adaptation is B10.
+evidence. The long-term profile changes only through step 2, by Long-Term
+Adaptation Policy v1's gate (D06); Not for me still excludes a track for this
+session only (D18).
 
 Only discrete events are accepted; there are no progress ticks (spec §22). The
 frontend owns playback position and reports how a track ended.
@@ -31,6 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.recommendations import RecommendationService
 from src.intentune.application.sessions import SessionService
 from src.intentune.domain.policy import Interpretation, event_weight, interpret_feedback
@@ -68,10 +72,12 @@ class FeedbackService:
         self,
         unit_of_work: UnitOfWork,
         recommendations: RecommendationService,
+        adaptation: LongTermAdaptationService,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._sessions = SessionService(unit_of_work, clock=clock)
         self._recommendations = recommendations
+        self._adaptation = adaptation
 
     def react(self, session_id: str, occurrence_id: str, reaction: FeedbackEventType) -> FeedbackOutcome:
         """Record Like, Unlike, Save, Replay, or Not for me about an occurrence, then re-rank."""
@@ -113,6 +119,7 @@ class FeedbackService:
         duration_seconds: Optional[float],
     ) -> FeedbackOutcome:
         event, _ = self._sessions.record_feedback(session_id, occurrence_id, event_type, played_seconds, duration_seconds)
+        self._adaptation.adapt_after(session_id)
         state = self._recommendations.refresh_queue(session_id)
         history = self._sessions.history(session_id)
         track_id = next(occurrence.track_id for occurrence in history.occurrences if occurrence.occurrence_id == occurrence_id)

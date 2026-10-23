@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21; B8 `BEGIN IMMEDIATE`, 2026-10-21, with no schema change), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21; B8 `BEGIN IMMEDIATE`, 2026-10-21, with no schema change; B10 long-term adaptation, 2026-10-22), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
@@ -12,6 +12,7 @@
 - **B5** added two columns to `recommendation_occurrences` (see [Current Schema (B5)](#current-schema-b5)): `surfaced_position`, which never changes, and `is_exploration`, which marks Recommendation Policy v1's exploration picks. Policy v1 ranks library tracks; it adds no other table, and its constants live in code, not in the database.
 - **B6** records feedback into the B4 `feedback_events` table, with no schema change (see [Feedback events (B6)](#feedback-events-b6)).
 - **B7** added `playlists` and `playlist_items`, and `feedback_events` accepts `PLAYLIST_ADD` (see [Current Schema (B7)](#current-schema-b7)).
+- **B10** added `long_term_profiles`, `long_term_adjustments`, and `long_term_adjustment_evidence` (see [Current Schema (B10)](#current-schema-b10)).
 - The recommendation catalog used by the CLI is still `backend/data/songs.csv`.
 - Nothing in the running CLI opens the database yet. The FastAPI startup (B8) will apply migrations, create the default listener, and run the startup scan.
 
@@ -306,6 +307,60 @@ How the tables are used:
 
 *B9 (2026-10-21), migration `4b1e9c7d2a6f`:* `event_type` also accepts `UNLIKE`, the listener taking back a Like. It is a raw fact of its own; the LIKE it cancels stays stored. The table is rebuilt the same way, and the downgrade deletes only UNLIKE events.
 
+## Current Schema (B10)
+
+**Current.** Migration `5d8e2b7a9c41` (`backend/alembic/versions/20261022_5d8e2b7a9c41_create_long_term_adaptation.py`), which revises `4b1e9c7d2a6f`. Additive: nothing existing changes.
+
+### `long_term_profiles`
+
+The listener's current long-term profile, as the adjustments left it. Absent until the first adjustment; recomputable from the raw history at any time.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `listener_profile_id` | `VARCHAR(36)` | not null | Primary key; foreign key to `listener_profiles`. |
+| `preferred_genres_json`, `preferred_moods_json` | `TEXT` | not null | JSON lists, read and written whole. |
+| `preferred_energy`, `preferred_danceability`, `preferred_valence`, `preferred_acousticness` | `FLOAT` | null | 0–1 (CHECK). |
+| `preferred_tempo_bpm` | `FLOAT` | null | `> 0` (CHECK). |
+| `policy_version` | `VARCHAR(64)` | not null | The adaptation policy that produced it (`adaptation-v1`). |
+| `updated_at` | `DATETIME` | not null | |
+
+### `long_term_adjustments`
+
+Append-only: every change to a listener's profile.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `VARCHAR(36)` | not null | Primary key. |
+| `listener_profile_id` | `VARCHAR(36)` | not null | Foreign key to `listener_profiles`. |
+| `sequence` | `INTEGER` | not null | 1, 2, … per listener (CHECK `>= 1`; unique per listener). |
+| `dimension` | `VARCHAR(16)` | not null | `GENRE`, `MOOD`, `ENERGY`, `DANCEABILITY`, `TEMPO`, `VALENCE`, `ACOUSTICNESS`. |
+| `change` | `VARCHAR(16)` | not null | `ADDED`/`REMOVED` for genre and mood; `SET`, `RAISED`, `LOWERED`, `CLEARED` for the others (CHECK). |
+| `cause` | `VARCHAR(16)` | not null | `GATE_MET`, `BOUNDED_STEP`, `GATE_LOST`, `DISPLACED`, `RECOMPUTED`. |
+| `subject` | `VARCHAR(100)` | null | The genre or mood added or removed; required exactly for those dimensions (CHECK). |
+| `previous_json`, `resulting_json` | `TEXT` | not null | The dimension's state before and after: a list for genre and mood, a number or `null` otherwise. |
+| `reason` | `TEXT` | not null | The engineering explanation (counts, sessions, medians, spans, steps). |
+| `policy_version` | `VARCHAR(64)` | not null | |
+| `created_at` | `DATETIME` | not null | |
+
+### `long_term_adjustment_evidence`
+
+The effective items behind an adjustment. Primary key (`adjustment_id`, `position`).
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `adjustment_id` | `VARCHAR(36)` | not null | Foreign key to `long_term_adjustments`. |
+| `position` | `INTEGER` | not null | `>= 0`: the items in time order. |
+| `session_id` | `VARCHAR(36)` | not null | Foreign key to `listening_sessions`. |
+| `track_id` | `VARCHAR(36)` | not null | Foreign key to `tracks`. Unique with the adjustment and session: one item per track per session. |
+| `feedback_event_id` | `VARCHAR(36)` | null | Foreign key to `feedback_events`; indexed. |
+| `session_turn_id` | `VARCHAR(36)` | null | Foreign key to `session_turns`; indexed. Exactly one of the two is set (CHECK): the raw fact that decided the item. |
+| `weight` | `FLOAT` | not null | The item's effective weight, non-zero, −1 to 1 (CHECK). |
+
+How the tables are used:
+- **Writes:** one transaction appends the adjustments and their evidence and replaces the profile row. Nothing is updated or deleted afterwards.
+- **Downgrade:** drops the three tables. The raw history stays, so the profile can be derived again; a test checks it.
+- **Not stored:** audio, typed text, or any copy of the raw history.
+
 ## Prototype 1 Concepts
 
 **Planned**, except these, which exist:
@@ -471,6 +526,8 @@ Create, rename, delete, add, remove, and reorder, persisted in `playlists` and `
 ### Long-term adaptation records (B10)
 
 Every profile adjustment persists its evidence IDs, algorithm version, before and after values, and reason, so it is traceable and reversible or recomputable (D06).
+
+**Current (B10)**; see [Current Schema (B10)](#current-schema-b10) and TD-021.
 
 ## Data Retention
 

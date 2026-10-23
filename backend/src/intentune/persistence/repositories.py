@@ -15,8 +15,15 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from src.intentune.domain.adaptation import (
+    CATEGORICAL_DIMENSIONS,
+    EvidenceReference,
+    LongTermProfile,
+    ProfileAdjustment,
+    ProfileDimension,
+)
 from src.intentune.domain.analysis import AnalysisJob, AnalysisJobKind, AnalysisJobStatus, TrackFeature
-from src.intentune.domain.models import ListeningContext
+from src.intentune.domain.models import ListeningContext, UserProfile
 from src.intentune.domain.session import (
     FeedbackEvent,
     ListeningSession,
@@ -40,6 +47,9 @@ from src.intentune.persistence.models import (
     FeedbackEventRecord,
     LibrarySourceRecord,
     ListenerProfileRecord,
+    LongTermAdjustmentEvidenceRecord,
+    LongTermAdjustmentRecord,
+    LongTermProfileRecord,
     ListeningSessionRecord,
     PlaylistItemRecord,
     PlaylistRecord,
@@ -801,3 +811,134 @@ class SqlAlchemyPlaylistRepository:
                 PlaylistItemRecord(playlist_id=item.playlist_id, track_id=item.track_id, position=item.position, added_at=item.added_at)
             )
         self._session.flush()
+
+
+
+def _labels_json(labels: Sequence[str]) -> str:
+    return json.dumps(list(labels), separators=(",", ":"))
+
+
+def _value_json(dimension: ProfileDimension, value) -> str:
+    return json.dumps(list(value) if dimension in CATEGORICAL_DIMENSIONS else value, separators=(",", ":"))
+
+
+def _value_from_json(dimension: ProfileDimension, text: str):
+    value = json.loads(text)
+    return tuple(value) if dimension in CATEGORICAL_DIMENSIONS else value
+
+
+class SqlAlchemyLongTermProfileRepository:
+    """LongTermProfileRepository port implementation (see ports/adaptation.py), over the B10 tables.
+
+    Adjustments and their evidence are appended, never updated or deleted.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get(self, listener_profile_id: str) -> Optional[LongTermProfile]:
+        record = self._session.get(LongTermProfileRecord, listener_profile_id)
+        if record is None:
+            return None
+        profile = UserProfile(
+            preferred_genres=tuple(json.loads(record.preferred_genres_json)),
+            preferred_moods=tuple(json.loads(record.preferred_moods_json)),
+            preferred_energy=record.preferred_energy,
+            preferred_danceability=record.preferred_danceability,
+            preferred_tempo_bpm=record.preferred_tempo_bpm,
+            preferred_valence=record.preferred_valence,
+            preferred_acousticness=record.preferred_acousticness,
+        )
+        return LongTermProfile(record.listener_profile_id, profile, record.policy_version, record.updated_at)
+
+    def save(self, profile: LongTermProfile) -> None:
+        values = profile.profile
+        record = self._session.get(LongTermProfileRecord, profile.listener_profile_id)
+        if record is None:
+            record = LongTermProfileRecord(listener_profile_id=profile.listener_profile_id)
+            self._session.add(record)
+        record.preferred_genres_json = _labels_json(values.preferred_genres)
+        record.preferred_moods_json = _labels_json(values.preferred_moods)
+        record.preferred_energy = values.preferred_energy
+        record.preferred_danceability = values.preferred_danceability
+        record.preferred_tempo_bpm = values.preferred_tempo_bpm
+        record.preferred_valence = values.preferred_valence
+        record.preferred_acousticness = values.preferred_acousticness
+        record.policy_version = profile.policy_version
+        record.updated_at = profile.updated_at
+        self._session.flush()
+
+    def add_adjustment(self, adjustment: ProfileAdjustment) -> None:
+        self._session.add(
+            LongTermAdjustmentRecord(
+                id=adjustment.adjustment_id,
+                listener_profile_id=adjustment.listener_profile_id,
+                sequence=adjustment.sequence,
+                dimension=adjustment.dimension.value,
+                change=adjustment.change.value,
+                cause=adjustment.cause.value,
+                subject=adjustment.subject,
+                previous_json=_value_json(adjustment.dimension, adjustment.previous),
+                resulting_json=_value_json(adjustment.dimension, adjustment.resulting),
+                reason=adjustment.reason,
+                policy_version=adjustment.policy_version,
+                created_at=adjustment.created_at,
+            )
+        )
+        self._session.flush()
+        for position, reference in enumerate(adjustment.evidence):
+            self._session.add(
+                LongTermAdjustmentEvidenceRecord(
+                    adjustment_id=adjustment.adjustment_id,
+                    position=position,
+                    session_id=reference.session_id,
+                    track_id=reference.track_id,
+                    feedback_event_id=reference.feedback_event_id,
+                    session_turn_id=reference.session_turn_id,
+                    weight=reference.weight,
+                )
+            )
+        self._session.flush()
+
+    def list_adjustments(self, listener_profile_id: str) -> List[ProfileAdjustment]:
+        records = list(self._session.scalars(
+            select(LongTermAdjustmentRecord)
+            .where(LongTermAdjustmentRecord.listener_profile_id == listener_profile_id)
+            .order_by(LongTermAdjustmentRecord.sequence)
+        ))
+        evidence: Dict[str, List[EvidenceReference]] = defaultdict(list)
+        if records:
+            statement = (
+                select(LongTermAdjustmentEvidenceRecord)
+                .where(LongTermAdjustmentEvidenceRecord.adjustment_id.in_([record.id for record in records]))
+                .order_by(LongTermAdjustmentEvidenceRecord.adjustment_id, LongTermAdjustmentEvidenceRecord.position)
+            )
+            for row in self._session.scalars(statement):
+                evidence[row.adjustment_id].append(
+                    EvidenceReference(row.session_id, row.track_id, row.weight, row.feedback_event_id, row.session_turn_id)
+                )
+        adjustments = []
+        for record in records:
+            dimension = ProfileDimension(record.dimension)
+            adjustments.append(ProfileAdjustment(
+                adjustment_id=record.id,
+                listener_profile_id=record.listener_profile_id,
+                sequence=record.sequence,
+                dimension=dimension,
+                change=record.change,
+                cause=record.cause,
+                subject=record.subject,
+                previous=_value_from_json(dimension, record.previous_json),
+                resulting=_value_from_json(dimension, record.resulting_json),
+                reason=record.reason,
+                policy_version=record.policy_version,
+                created_at=record.created_at,
+                evidence=tuple(evidence[record.id]),
+            ))
+        return adjustments
+
+    def last_sequence(self, listener_profile_id: str) -> int:
+        statement = select(func.max(LongTermAdjustmentRecord.sequence)).where(
+            LongTermAdjustmentRecord.listener_profile_id == listener_profile_id
+        )
+        return self._session.scalar(statement) or 0

@@ -39,6 +39,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
+from src.intentune.domain.adaptation import AdjustmentCause, AdjustmentChange, ProfileDimension
 from src.intentune.domain.analysis import AnalysisFailureReason, AnalysisJobKind, AnalysisJobStatus, FeatureName
 from src.intentune.domain.library import AudioFormat, FailureReason, LabelKind, SourceFileStatus, SourceStatus, TrackStatus
 from src.intentune.domain.playlist import MAX_PLAYLIST_NAME_LENGTH
@@ -435,3 +436,82 @@ class PlaylistItemRecord(Base):
     track_id: Mapped[str] = mapped_column(String(36), ForeignKey("tracks.id"), primary_key=True, index=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     added_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+# --- Long-term adaptation (B10) -------------------------------------------------------
+#
+# long_term_profiles is the current state: one row per listener with a
+# profile, absent until the first adjustment. long_term_adjustments and
+# long_term_adjustment_evidence are the append-only history behind it: every
+# change, its before and after, why, under which policy, and the effective
+# items that justified it. An evidence row points at the raw fact that decided
+# its item (a feedback event or a turn), so the history is referenced, never
+# copied. Preferred genres and moods are a JSON list (read and written whole).
+
+
+class LongTermProfileRecord(Base):
+    __tablename__ = "long_term_profiles"
+    __table_args__ = (
+        CheckConstraint("preferred_energy IS NULL OR preferred_energy BETWEEN 0 AND 1", name="preferred_energy"),
+        CheckConstraint("preferred_danceability IS NULL OR preferred_danceability BETWEEN 0 AND 1", name="preferred_danceability"),
+        CheckConstraint("preferred_valence IS NULL OR preferred_valence BETWEEN 0 AND 1", name="preferred_valence"),
+        CheckConstraint("preferred_acousticness IS NULL OR preferred_acousticness BETWEEN 0 AND 1", name="preferred_acousticness"),
+        CheckConstraint("preferred_tempo_bpm IS NULL OR preferred_tempo_bpm > 0", name="preferred_tempo_bpm"),
+    )
+
+    listener_profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("listener_profiles.id"), primary_key=True)
+    preferred_genres_json: Mapped[str] = mapped_column(Text, nullable=False)
+    preferred_moods_json: Mapped[str] = mapped_column(Text, nullable=False)
+    preferred_energy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    preferred_danceability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    preferred_tempo_bpm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    preferred_valence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    preferred_acousticness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class LongTermAdjustmentRecord(Base):
+    __tablename__ = "long_term_adjustments"
+    __table_args__ = (
+        CheckConstraint(_one_of("dimension", ProfileDimension), name="dimension"),
+        CheckConstraint(_one_of("change", AdjustmentChange), name="change"),
+        CheckConstraint(_one_of("cause", AdjustmentCause), name="cause"),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint("(dimension IN ('GENRE', 'MOOD')) = (subject IS NOT NULL)", name="subject_when_categorical"),
+        CheckConstraint("(dimension IN ('GENRE', 'MOOD')) = (change IN ('ADDED', 'REMOVED'))", name="change_fits_dimension"),
+        UniqueConstraint("listener_profile_id", "sequence", name="uq_long_term_adjustments_listener_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    listener_profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("listener_profiles.id"), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    dimension: Mapped[str] = mapped_column(String(16), nullable=False)
+    change: Mapped[str] = mapped_column(String(16), nullable=False)
+    cause: Mapped[str] = mapped_column(String(16), nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    previous_json: Mapped[str] = mapped_column(Text, nullable=False)
+    resulting_json: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class LongTermAdjustmentEvidenceRecord(Base):
+    """One effective item behind an adjustment: its session, track, weight, and the raw fact that decided it."""
+
+    __tablename__ = "long_term_adjustment_evidence"
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="position"),
+        CheckConstraint("weight BETWEEN -1 AND 1 AND weight <> 0", name="weight"),
+        CheckConstraint("(feedback_event_id IS NULL) <> (session_turn_id IS NULL)", name="one_raw_fact"),
+        UniqueConstraint("adjustment_id", "session_id", "track_id", name="uq_long_term_adjustment_evidence_item"),
+    )
+
+    adjustment_id: Mapped[str] = mapped_column(String(36), ForeignKey("long_term_adjustments.id"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("listening_sessions.id"), nullable=False)
+    track_id: Mapped[str] = mapped_column(String(36), ForeignKey("tracks.id"), nullable=False)
+    feedback_event_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("feedback_events.id"), nullable=True, index=True)
+    session_turn_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("session_turns.id"), nullable=True, index=True)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)

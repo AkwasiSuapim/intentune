@@ -61,7 +61,9 @@ intentune/
 │   │       │   ├── analysis.py        (B3: jobs, features, analyzer identity)
 │   │       │   ├── session.py         (B4: sessions, turns, occurrences, feedback events)
 │   │       │   ├── policy.py          (B5: Recommendation Policy v1 and its constants; B6: Feedback Policy v1)
-│   │       │   └── playlist.py        (B7: playlists and their ordered items)
+│   │       │   ├── playlist.py        (B7: playlists and their ordered items)
+│   │       │   ├── intent.py          (B9: vocabulary, capability, message meanings)
+│   │       │   └── adaptation.py      (B10: Long-Term Adaptation Policy v1)
 │   │       ├── application/
 │   │       │   ├── __init__.py
 │   │       │   ├── recommendation_service.py
@@ -75,7 +77,9 @@ intentune/
 │   │       │   ├── playlists.py       (B7: PlaylistService)
 │   │       │   ├── listening.py       (B8: ListeningService, start/steer then re-rank)
 │   │       │   ├── library_scans.py   (B8: LibraryScanCoordinator, one scan at a time)
-│   │       │   └── messages.py        (B9: MessageService, typed words -> the controls' use cases)
+│   │       │   ├── messages.py        (B9: MessageService, typed words -> the controls' use cases)
+│   │       │   ├── capability.py      (B9: IntentCapability, what the library can act on now)
+│   │       │   └── adaptation.py      (B10: LongTermAdaptationService)
 │   │       ├── ports/
 │   │       │   ├── __init__.py
 │   │       │   ├── catalog.py
@@ -85,7 +89,9 @@ intentune/
 │   │       │   ├── library_files.py   (B2: folders, inspector, media)
 │   │       │   ├── analysis.py        (B3: analyzer, job and feature repositories)
 │   │       │   ├── sessions.py        (B4: session, turn, occurrence, feedback repositories)
-│   │       │   └── playlists.py       (B7: playlist repository)
+│   │       │   ├── playlists.py       (B7: playlist repository)
+│   │       │   ├── intent.py          (B9: IntentInterpreter)
+│   │       │   └── adaptation.py      (B10: long-term profile repository)
 │   │       ├── adapters/
 │   │       │   ├── __init__.py
 │   │       │   ├── csv_catalog.py
@@ -228,6 +234,14 @@ B7 added playlists:
 - **Ports:** `ports/playlists.py`.
 - **Application:** `application/playlists.py` (`PlaylistService`).
 - **Persistence:** playlist records and their repository joined `persistence/`, with a sixth migration.
+
+No new adapter or dependency.
+
+B10 added conservative long-term adaptation:
+- **Domain:** `domain/adaptation.py` (Long-Term Adaptation Policy v1: evidence, derivation, adjustment planning, stored shapes).
+- **Port:** `ports/adaptation.py` (`LongTermProfileRepository`).
+- **Application:** `application/adaptation.py` (`LongTermAdaptationService`).
+- **Persistence:** three records and `SqlAlchemyLongTermProfileRepository`; migration `5d8e2b7a9c41`.
 
 No new adapter or dependency.
 

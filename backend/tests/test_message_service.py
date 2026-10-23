@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import pytest
 
 from src.intentune.adapters.deterministic_intent import DeterministicIntentInterpreter
+from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.capability import IntentCapability
 from src.intentune.application.feedback import FeedbackService
 from src.intentune.application.listening import ListeningService, PlaybackFacts
@@ -75,12 +76,12 @@ def capability(unit_of_work):
 
 @pytest.fixture
 def listening(unit_of_work, sessions, capability):
-    return ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability)
+    return ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability, LongTermAdaptationService(unit_of_work))
 
 
 @pytest.fixture
 def feedback(unit_of_work):
-    return FeedbackService(unit_of_work, RecommendationService(unit_of_work, rng=_NeverExplore(0)))
+    return FeedbackService(unit_of_work, RecommendationService(unit_of_work, rng=_NeverExplore(0)), LongTermAdaptationService(unit_of_work))
 
 
 @pytest.fixture
@@ -199,7 +200,7 @@ def energetic(unit_of_work, sessions, feedback):
     capability = _FixedCapability(
         Vocabulary(genres=("Ambient", "Jazz"), library_moods=("Calm",), capability=LibraryCapability(6, ("mood", "genre", "energy")))
     )
-    listening = ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability)
+    listening = ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability, LongTermAdaptationService(unit_of_work))
     return listening, MessageService(DeterministicIntentInterpreter(), sessions, listening, feedback, capability)
 
 
@@ -240,7 +241,7 @@ def test_a_mood_no_track_declares_is_refused_and_clearing_one_is_always_allowed(
 def test_typed_and_structured_intent_meet_the_same_capability_rule(unit_of_work, sessions, feedback, listener, ids):
     """One capability answers both paths: what it refuses, both refuse alike, and what it allows, both apply."""
     capability = _FixedCapability(Vocabulary(genres=("Ambient", "Jazz"), capability=LibraryCapability(6, ("genre",))))
-    listening = ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability)
+    listening = ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability, LongTermAdaptationService(unit_of_work))
     messages = MessageService(DeterministicIntentInterpreter(), sessions, listening, feedback, capability)
     session_id = listening.start(listener, ListeningContext(temporary_genres=("Ambient",))).session.session_id
     capability.checks = 0
@@ -399,8 +400,8 @@ def test_one_next_with_the_players_facts_re_ranks_exactly_once(unit_of_work, ses
     """
     recommendations = _CountingRecommendations(RecommendationService(unit_of_work, rng=_NeverExplore(0)))
     capability = IntentCapability(unit_of_work)
-    listening = ListeningService(sessions, recommendations, capability)
-    feedback = FeedbackService(unit_of_work, recommendations)
+    listening = ListeningService(sessions, recommendations, capability, LongTermAdaptationService(unit_of_work))
+    feedback = FeedbackService(unit_of_work, recommendations, LongTermAdaptationService(unit_of_work))
     messages = MessageService(DeterministicIntentInterpreter(), sessions, listening, feedback, capability)
     session_id = listening.start(listener, ListeningContext(temporary_genres=("Ambient",))).session.session_id
     _, state = listening.next(session_id)

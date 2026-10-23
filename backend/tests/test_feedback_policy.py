@@ -147,9 +147,25 @@ def test_explicit_actions_keep_their_weight_whatever_was_played(event_type, weig
 
 
 def test_with_only_playback_the_latest_playback_event_decides():
-    interpretation = interpret_feedback((), (_played(95.0, at=1), _played(20.0, at=2)))
+    latest = _played(20.0, at=2)
+    interpretation = interpret_feedback((), (_played(95.0, at=1), latest))
 
-    assert interpretation == Interpretation(weight=-0.20, basis=EvidenceBasis.PASSIVE, at=_at(2), occurrence_id=_OCCURRENCE)
+    assert interpretation == Interpretation(
+        weight=-0.20, basis=EvidenceBasis.PASSIVE, at=_at(2), occurrence_id=_OCCURRENCE, event_id=latest.event_id
+    )
+
+
+def test_the_interpretation_names_the_raw_fact_that_decided_it():
+    """B10 audit: long-term evidence references the exact event or turn behind each piece of evidence."""
+    like, save = _event(FeedbackEventType.LIKE, at=1), _event(FeedbackEventType.SAVE, at=2)
+    refusal = _turn(TurnKind.NOT_FOR_ME, at=3)
+
+    by_event = interpret_feedback((), (like, save))
+    by_turn = interpret_feedback((refusal,), (like, save))
+
+    assert (by_event.event_id, by_event.turn_id) == (save.event_id, None)
+    assert (by_turn.event_id, by_turn.turn_id, by_turn.weight) == (None, refusal.turn_id, -1.0)
+    assert interpret_feedback((), ()).event_id is None
 
 
 def test_playback_within_the_grace_period_is_no_preference_evidence():

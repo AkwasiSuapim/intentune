@@ -64,6 +64,26 @@ UNLIKE               0.00   cancels the earlier Like (B9)
 
 Raw playback facts are stored separately so these thresholds can change later.
 
+## Long-Term Adaptation Policy v1
+
+*Added in B10 (2026-10-22, TD-021).* Implements D06 in `domain/adaptation.py`. The profile is recomputed from raw history; every change is an append-only adjustment with its evidence references.
+
+```text
+evidence    one effective item per track per session (Feedback Policy v1 precedence;
+            Unlike cancels Likes; duplicates collapse)
+strong      effective Like, Save, Playlist add, Replay (+1.00), Not for me (-1.00),
+            or 90-100% completion (+0.80); skips and partial plays never;
+            More like this never (a session-only steering instruction)
+gate        >= 4 consistent strong items from >= 2 sessions about >= 2 distinct tracks
+genre/mood  net (positive - negative) >= 4, positives from >= 2 sessions and >= 2 tracks;
+            at most 3 kept
+numeric     a batch of one polarity within 0.25 (tempo 20 BPM); first sets the median,
+            later batches move <= 0.05 (tempo 5 BPM); each batch counted once
+missing     a missing feature contributes nothing (D21)
+ranking     long-term stage = 0.5 + 0.5 x profile similarity: positive affinity,
+            neutral for a mismatch (intent fit and signed session fit unchanged)
+```
+
 ## Queue Policy v1
 
 ```text

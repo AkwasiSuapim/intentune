@@ -21,9 +21,21 @@ Rules that follow from the spec:
   target exists and the candidate has a value; the active feature weights
   are renormalized. A stage with nothing to compare is unavailable, and the
   stage weights (.55 intent, .30 session, .15 long-term) are renormalized.
-- Current intent wins over long-term history (spec §14): the effective target
-  for each feature is the current ListeningContext value, else the long-term
-  profile's.
+- Current intent wins over long-term history (spec §14, §16). Intent fit
+  scores the current ListeningContext only; the long-term profile is scored
+  in its own stage, at .15. (B10: history never fills an intent target the
+  listener left open. With B5's fill-in, a profile would have counted in both
+  the .55 and the .15 stage and could outweigh this session's evidence,
+  against D08, spec §16, and the B10 hierarchy. No profile existed before B10,
+  so no earlier output changes.)
+- A stored long-term preference is positive affinity, never a judgement of
+  everything else (B10): the long-term stage scores
+  long_term_neutral_fit + (1 - long_term_neutral_fit) * similarity, so a
+  candidate that matches nothing in the profile is neutral (0.5), like a
+  candidate session evidence says nothing about, and a full match is 1.0.
+  Intent fit keeps its 0-1 scale (an explicit request may rightly score a
+  mismatch 0), and session fit keeps its signed scale (evidence can be
+  negative).
 - Feature scoring reuses the legacy primitives (scoring.category_match and
   scoring.closeness), so there is one copy of the scoring math. With complete
   inputs and only the legacy four features targeted, intent fit equals
@@ -112,6 +124,8 @@ class RecommendationPolicy:
     intent_weight: float = 0.55
     session_weight: float = 0.30
     long_term_weight: float = 0.15
+    # A long-term preference is positive affinity (B10): no match is neutral, a full match is 1.0.
+    long_term_neutral_fit: float = 0.5
 
     # Feature importance within a fit, and the tempo distance that counts as fully different.
     feature_weights: FeatureWeights = field(default_factory=_legacy_feature_weights)
@@ -167,7 +181,7 @@ class RecommendationPolicy:
         if any(weight < 0 for weight in stage_weights) or abs(sum(stage_weights) - 1.0) > 1e-9:
             raise ValueError("stage weights must be non-negative and sum to 1")
         fractions = (
-            self.neutral_session_fit, self.recency_decay, self.near_duplicate_similarity, self.exploration_rate,
+            self.neutral_session_fit, self.long_term_neutral_fit, self.recency_decay, self.near_duplicate_similarity, self.exploration_rate,
             self.recent_play_penalty, self.artist_repeat_penalty, self.near_duplicate_penalty,
             self.max_exploration_rate, self.exploration_floor, self.novelty_similarity, self.swap_margin,
         )
@@ -298,25 +312,19 @@ class Targets:
         )
 
     @classmethod
-    def effective(cls, context: ListeningContext, profile: Optional[UserProfile]) -> "Targets":
-        """Current intent first, long-term profile second, otherwise no target (spec §14).
+    def from_context(cls, context: ListeningContext) -> "Targets":
+        """What the current intent asks for, and nothing else: history is scored in its own stage (B10).
 
         current_mood, listening_goal, and activity are not read: their mapping into Policy v1 is unfinished (B9).
         """
-        history = cls.from_profile(profile)
-        current_moods = requested_moods(context)
-
-        def first(current, fallback):
-            return current if current is not None else fallback
-
         return cls(
-            genres=context.temporary_genres or history.genres,
-            moods=current_moods or history.moods,
-            energy=first(context.target_energy, history.energy),
-            danceability=first(context.target_danceability, history.danceability),
-            tempo_bpm=first(context.target_tempo_bpm, history.tempo_bpm),
-            valence=first(context.target_valence, history.valence),
-            acousticness=first(context.target_acousticness, history.acousticness),
+            genres=context.temporary_genres,
+            moods=requested_moods(context),
+            energy=context.target_energy,
+            danceability=context.target_danceability,
+            tempo_bpm=context.target_tempo_bpm,
+            valence=context.target_valence,
+            acousticness=context.target_acousticness,
         )
 
 
@@ -415,7 +423,11 @@ def session_fit(
 
 @dataclass(frozen=True)
 class PolicyScore:
-    """The three stage scores and how they were combined. stage_weights are renormalized over available stages."""
+    """The three stage scores and how they were combined. stage_weights are renormalized over available stages.
+
+    long_term is the raw similarity to the stored profile; its stage value, in stage_weights, is that similarity read
+    as positive affinity (long_term_stage_value()).
+    """
 
     combined: float
     intent: Optional[Fit]
@@ -429,11 +441,20 @@ class PolicyScore:
         return self.intent is not None or self.long_term is not None or self.session.has_evidence
 
 
+def long_term_stage_value(similarity: float, policy: RecommendationPolicy = POLICY_V1) -> float:
+    """A stored preference as positive affinity (B10): no match is neutral, a full match is 1.0, in between in proportion.
+
+    The profile says what the listener has repeatedly liked, not that everything else is unwanted, so a candidate
+    outside it is neutral in this stage, as a candidate session evidence says nothing about is neutral in that one.
+    """
+    return policy.long_term_neutral_fit + (1.0 - policy.long_term_neutral_fit) * similarity
+
+
 def score(
     candidate: PolicyCandidate, signals: SessionSignals, policy: RecommendationPolicy = POLICY_V1, set_aside_genre: bool = False
 ) -> PolicyScore:
     """The staged score. set_aside_genre drops the genre target from intent fit, for a control that steps outside it."""
-    targets = Targets.effective(signals.context, signals.long_term)
+    targets = Targets.from_context(signals.context)
     if set_aside_genre:
         targets = replace(targets, genres=())
     intent = feature_fit(candidate.music, targets, policy)
@@ -443,7 +464,7 @@ def score(
     if intent is not None:
         stages.insert(0, ("intent", policy.intent_weight, intent.value))
     if long_term is not None:
-        stages.append(("long_term", policy.long_term_weight, long_term.value))
+        stages.append(("long_term", policy.long_term_weight, long_term_stage_value(long_term.value, policy)))
     total_weight = sum(weight for _, weight, _ in stages)
     normalized = tuple((name, weight / total_weight, value) for name, weight, value in stages)
     return PolicyScore(
@@ -809,6 +830,9 @@ class Interpretation:
     excluded: bool = False
     at: Optional[datetime] = None
     occurrence_id: Optional[str] = None
+    # The raw fact that decided the weight: a feedback event, or a NOT_FOR_ME / MORE_LIKE_THIS turn (B10 audit).
+    event_id: Optional[str] = None
+    turn_id: Optional[str] = None
 
 
 def passive_weight(played_seconds: float, played_fraction: float, policy: RecommendationPolicy = POLICY_V1) -> float:
@@ -886,29 +910,67 @@ def interpret_feedback(
     )
     events = _uncancelled(events)
     explicit = [
-        (turn.created_at, policy.not_for_me_weight if turn.kind is TurnKind.NOT_FOR_ME else policy.more_like_this_weight, turn.occurrence_id)
+        (
+            turn.created_at,
+            policy.not_for_me_weight if turn.kind is TurnKind.NOT_FOR_ME else policy.more_like_this_weight,
+            turn.occurrence_id,
+            None,
+            turn.turn_id,
+        )
         for turn in turns
         if turn.kind in (TurnKind.NOT_FOR_ME, TurnKind.MORE_LIKE_THIS)
     ]
     explicit += [
-        (event.occurred_at, _explicit_event_weight(event.event_type, policy), event.occurrence_id)
+        (event.occurred_at, _explicit_event_weight(event.event_type, policy), event.occurrence_id, event.event_id, None)
         for event in events
         if _explicit_event_weight(event.event_type, policy) is not None
     ]
     if explicit:
-        at, weight, occurrence_id = max(explicit, key=lambda signal: signal[0])
-        return Interpretation(weight=weight, basis=EvidenceBasis.EXPLICIT, excluded=excluded, at=at, occurrence_id=occurrence_id)
+        at, weight, occurrence_id, event_id, turn_id = max(explicit, key=lambda signal: signal[0])
+        return Interpretation(
+            weight=weight, basis=EvidenceBasis.EXPLICIT, excluded=excluded, at=at, occurrence_id=occurrence_id,
+            event_id=event_id, turn_id=turn_id,
+        )
     passive = [event for event in events if event.event_type in _PASSIVE_EVENTS]
     if passive:
         latest = max(passive, key=lambda event: event.occurred_at)
         basis = EvidenceBasis.GRACE if latest.played_seconds <= policy.grace_seconds else EvidenceBasis.PASSIVE
         return Interpretation(
-            weight=event_weight(latest, policy), basis=basis, at=latest.occurred_at, occurrence_id=latest.occurrence_id
+            weight=event_weight(latest, policy), basis=basis, at=latest.occurred_at, occurrence_id=latest.occurrence_id,
+            event_id=latest.event_id,
         )
     return Interpretation(weight=0.0, basis=EvidenceBasis.NONE)
 
 
 # --- From a session's history to signals ------------------------------------------------------
+
+
+def interpretations_by_track(
+    turns: Sequence[SessionTurn],
+    occurrences: Sequence[RecommendationOccurrence],
+    feedback_events: Sequence[FeedbackEvent],
+    policy: RecommendationPolicy = POLICY_V1,
+) -> Dict[str, Interpretation]:
+    """Feedback Policy v1's reading of one session, per track: everything said or played about it, combined.
+
+    The one place a session's raw history becomes per-track evidence. Session fit
+    (signals_from_session) and long-term adaptation (domain/adaptation.py) both read
+    it, so they cannot disagree about what the listener meant. Tracks nothing was
+    said or played about are absent.
+    """
+    track_of = {occurrence.occurrence_id: occurrence.track_id for occurrence in occurrences}
+    turns_about: Dict[str, List[SessionTurn]] = {}
+    for turn in turns:
+        if turn.occurrence_id in track_of:
+            turns_about.setdefault(track_of[turn.occurrence_id], []).append(turn)
+    events_about: Dict[str, List[FeedbackEvent]] = {}
+    for event in feedback_events:
+        if event.occurrence_id in track_of:
+            events_about.setdefault(track_of[event.occurrence_id], []).append(event)
+    return {
+        track_id: interpret_feedback(turns_about.get(track_id, ()), events_about.get(track_id, ()), policy)
+        for track_id in sorted(set(turns_about) | set(events_about))
+    }
 
 
 def signals_from_session(
@@ -942,19 +1004,9 @@ def signals_from_session(
     by_id: Dict[str, RecommendationOccurrence] = {occurrence.occurrence_id: occurrence for occurrence in occurrences}
     newest_first = sorted(turns, key=lambda turn: turn.sequence, reverse=True)
 
-    turns_about: Dict[str, List[SessionTurn]] = {}  # by track id
-    for turn in turns:
-        if turn.occurrence_id in by_id:
-            turns_about.setdefault(by_id[turn.occurrence_id].track_id, []).append(turn)
-    events_about: Dict[str, List[FeedbackEvent]] = {}
-    for event in feedback_events:
-        if event.occurrence_id in by_id:
-            events_about.setdefault(by_id[event.occurrence_id].track_id, []).append(event)
-
     dated_evidence = []
     excluded = set()
-    for track_id in sorted(set(turns_about) | set(events_about)):
-        interpretation = interpret_feedback(turns_about.get(track_id, ()), events_about.get(track_id, ()), policy)
+    for track_id, interpretation in interpretations_by_track(turns, occurrences, feedback_events, policy).items():
         if interpretation.excluded:
             excluded.add(track_id)
         track = tracks.get(track_id)

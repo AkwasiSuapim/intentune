@@ -110,6 +110,10 @@ It has no text field, and no progress ticks are collected, only how a track ende
 
 **Current (B7, 2026-10-21):** a playlist stores a name the listener chose, trimmed and limited to 100 characters (in the domain and by a CHECK), plus its tracks' ids, positions, and when each was added. Presentation such as the frontend's colour tone is not stored (D32). Playlists stay in the local database, like the rest of the listener's data. Feedback is validated before storage: a known event type, non-negative seconds, a positive duration, and an occurrence of the same session. Feedback changes only the current session's ranking, and a Not for me is not carried into later sessions (D18).
 
+## Long-Term Adaptation Data (B10)
+
+The long-term profile and its audit trail hold labels, numbers, reasons, policy versions, and references (ids) to sessions, tracks, feedback events, and turns. They store no audio, no typed text, and no copy of the raw history. Deleting them loses nothing that cannot be derived again from the raw history.
+
 ## External Providers
 
 *Future: Prototype 1 uses no external providers (D39).* Before enabling AI or YouTube in production, review:
