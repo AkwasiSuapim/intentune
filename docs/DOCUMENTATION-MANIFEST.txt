@@ -28,6 +28,7 @@ planning/risks-and-open-questions.md
 product/features.md
 product/product-requirements.md
 product/project-description.md
+quality/evaluation-report.md
 quality/security-and-privacy.md
 quality/testing-strategy.md
 templates/decision-log-template.md

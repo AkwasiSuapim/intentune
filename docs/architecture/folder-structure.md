@@ -6,7 +6,7 @@
 
 ## Current Repository Structure
 
-**Current (verified in B0; backend updated through B5, 2026-10-20).** Generated and ignored content (`.venv/`, `__pycache__/`, `node_modules/`, `dist/`, `.env`, `backend/data/intentune.db*`) is omitted.
+**Current (verified in B0; backend updated through B5, 2026-10-20; migrations and `backend/evaluation/` through B11, 2026-10-23).** Generated and ignored content (`.venv/`, `__pycache__/`, `node_modules/`, `dist/`, `.env`, `backend/data/intentune.db*`) is omitted.
 
 ```text
 intentune/
@@ -41,9 +41,18 @@ intentune/
 │   │       ├── 20261020_7a42f0b9c8bf_create_background_analysis.py  (B3)
 │   │       ├── 20261020_dd7360f46b8b_create_listening_sessions.py  (B4)
 │   │       ├── 20261020_de244c476f3a_record_surfaced_position_and_exploration.py  (B5)
-│   │       └── 20261021_ce0b59df2cd1_create_playlists.py  (B7)
+│   │       ├── 20261021_ce0b59df2cd1_create_playlists.py  (B7)
+│   │       ├── 20261021_4b1e9c7d2a6f_accept_unlike_feedback.py  (B9)
+│   │       ├── 20261022_5d8e2b7a9c41_create_long_term_adaptation.py  (B10)
+│   │       └── 20261023_5ed16a5d9ff5_add_library_revision.py  (B11)
 │   ├── data/
 │   │   └── songs.csv                  (intentune.db and media/ appear here when used; gitignored)
+│   ├── evaluation/                    (B11: measurement tooling, not part of the app)
+│   │   ├── performance.py
+│   │   ├── scenarios.py
+│   │   ├── synthetic.py
+│   │   └── baselines/
+│   │       └── scenarios.json
 │   ├── src/
 │   │   ├── __init__.py
 │   │   ├── main.py
@@ -372,6 +381,10 @@ Outside the tests, only `persistence/` and `backend/alembic/` import SQLAlchemy 
 ### `backend/alembic/`
 
 Alembic environment and versioned migrations (B1). Run `alembic upgrade head` from `backend/`.
+
+### `backend/evaluation/`
+
+B11's measurement tooling, outside the app and its layers: `python -m evaluation.performance` and `python -m evaluation.scenarios`, run from `backend/`. It builds scratch databases with synthetic libraries (`synthetic.py`) and never opens `backend/data`. `baselines/scenarios.json` is the stored algorithm evaluation, which a test checks. See the [evaluation report](../quality/evaluation-report.md).
 
 ### `backend/src/intentune/api/`
 

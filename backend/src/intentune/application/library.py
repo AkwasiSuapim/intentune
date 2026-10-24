@@ -238,8 +238,7 @@ class LibraryService:
     def get_tracks(self, track_ids: Iterable[str]) -> Dict[str, Track]:
         """The tracks with these ids, by id, read in one transaction. Ids of no track are left out (B8)."""
         with self._uow:
-            tracks = (self._uow.tracks.get(track_id) for track_id in set(track_ids))
-            return {track.track_id: track for track in tracks if track is not None}
+            return {track.track_id: track for track in self._uow.tracks.get_many(track_ids)}
 
     def mark_track_unavailable(self, track_id: str) -> Track:
         """Record that a track's managed copy is missing. A later scan restores it if the content is found again."""

@@ -55,6 +55,12 @@ Interpretation choices (TD-016):
   track is never queued. A track that is eligible again only because the
   library is small is penalized, more the more recently it played, so a small
   library rotates through its tracks instead of alternating two of them.
+- An explicitly requested genre is a finite library of its own (B11): its
+  plays are held back by a cooldown bounded by its own available tracks, which
+  leaves a queue's worth of them eligible. So a session keeps rotating through
+  the genre instead of leaving it once a large library's cooldown covers every
+  track in it. This only ever releases requested tracks earlier; it never holds
+  any track back longer, and without a genre request nothing changes.
 - "Near-duplicate" needs at least three features in common, so a library
   described by genre alone is not penalized as all-duplicates.
 - Exploration happens two ways. Automatic exploration is random, at a rate
@@ -375,21 +381,28 @@ class Similarity:
     feature_count: int
 
 
+def _similarity_targets(candidate: MusicCandidate) -> Targets:
+    """A candidate's own values as targets: what candidate_similarity() compares another candidate with."""
+    return Targets(
+        genres=(candidate.genre,) if candidate.genre is not None else (),
+        moods=(candidate.mood,) if candidate.mood is not None else (),
+        energy=candidate.energy,
+        danceability=candidate.danceability,
+        tempo_bpm=candidate.tempo_bpm,
+        valence=candidate.valence,
+        acousticness=candidate.acousticness,
+    )
+
+
+def _similarity(fit: Optional[Fit]) -> Optional[Similarity]:
+    return Similarity(value=fit.value, feature_count=len(fit.features)) if fit is not None else None
+
+
 def candidate_similarity(
     first: MusicCandidate, second: MusicCandidate, policy: RecommendationPolicy = POLICY_V1
 ) -> Optional[Similarity]:
     """How alike two candidates are, over only the features both have (spec §15). None if they share none."""
-    targets = Targets(
-        genres=(second.genre,) if second.genre is not None else (),
-        moods=(second.mood,) if second.mood is not None else (),
-        energy=second.energy,
-        danceability=second.danceability,
-        tempo_bpm=second.tempo_bpm,
-        valence=second.valence,
-        acousticness=second.acousticness,
-    )
-    fit = feature_fit(first, targets, policy)
-    return Similarity(value=fit.value, feature_count=len(fit.features)) if fit is not None else None
+    return _similarity(feature_fit(first, _similarity_targets(second), policy))
 
 
 # --- Session fit and combined score ---------------------------------------------------------
@@ -404,17 +417,28 @@ class SessionFit:
 def session_fit(
     candidate: MusicCandidate, evidence: Sequence[SessionEvidence], policy: RecommendationPolicy = POLICY_V1
 ) -> SessionFit:
+    return _session_fit(candidate, _evidence_targets(evidence), policy)
+
+
+def _evidence_targets(evidence: Sequence[SessionEvidence]) -> Tuple[Tuple[float, Targets], ...]:
+    """Each piece of evidence as its weight and its track's _similarity_targets(), most recent first."""
+    return tuple((item.weight, _similarity_targets(item.track)) for item in evidence)
+
+
+def _session_fit(
+    candidate: MusicCandidate, evidence: Sequence[Tuple[float, Targets]], policy: RecommendationPolicy
+) -> SessionFit:
     numerator = 0.0
     denominator = 0.0
-    for age, item in enumerate(evidence):
-        if item.weight == 0:
+    for age, (weight, targets) in enumerate(evidence):
+        if weight == 0:
             continue
-        similarity = candidate_similarity(candidate, item.track, policy)
-        if similarity is None:
+        fit = feature_fit(candidate, targets, policy)  # candidate_similarity() to the evidence track
+        if fit is None:
             continue
         recency = policy.recency_decay ** age
-        numerator += item.weight * similarity.value * recency
-        denominator += abs(item.weight) * recency
+        numerator += weight * fit.value * recency
+        denominator += abs(weight) * recency
     if denominator == 0:
         return SessionFit(value=policy.neutral_session_fit, has_evidence=False)
     net = max(-1.0, min(1.0, numerator / denominator))
@@ -454,26 +478,56 @@ def score(
     candidate: PolicyCandidate, signals: SessionSignals, policy: RecommendationPolicy = POLICY_V1, set_aside_genre: bool = False
 ) -> PolicyScore:
     """The staged score. set_aside_genre drops the genre target from intent fit, for a control that steps outside it."""
-    targets = Targets.from_context(signals.context)
-    if set_aside_genre:
-        targets = replace(targets, genres=())
-    intent = feature_fit(candidate.music, targets, policy)
-    session = session_fit(candidate.music, signals.evidence, policy)
-    long_term = feature_fit(candidate.music, Targets.from_profile(signals.long_term), policy)
-    stages = [("session", policy.session_weight, session.value)]
-    if intent is not None:
-        stages.insert(0, ("intent", policy.intent_weight, intent.value))
-    if long_term is not None:
-        stages.append(("long_term", policy.long_term_weight, long_term_stage_value(long_term.value, policy)))
-    total_weight = sum(weight for _, weight, _ in stages)
-    normalized = tuple((name, weight / total_weight, value) for name, weight, value in stages)
-    return PolicyScore(
-        combined=sum(weight * value for _, weight, value in normalized),
-        intent=intent,
-        session=session,
-        long_term=long_term,
-        stage_weights=normalized,
-    )
+    return _Scorer(signals, policy, set_aside_genre).score(candidate)
+
+
+def _features(music: MusicCandidate) -> Tuple[object, ...]:
+    """Everything feature_fit() reads of a candidate. Candidates alike in all of it fit any targets alike."""
+    return (music.genre, music.mood, music.energy, music.danceability, music.tempo_bpm, music.valence, music.acousticness)
+
+
+class _Scorer:
+    """score() for every candidate of one refresh (B11, same scores).
+
+    The targets are read from the signals once, not once per candidate. A score depends only on the candidate's
+    features (_features()), so candidates alike in all of them share one score, computed once: a library described
+    by genre and mood labels has only a few dozen distinct ones, however many tracks it holds.
+    """
+
+    def __init__(self, signals: SessionSignals, policy: RecommendationPolicy, set_aside_genre: bool = False):
+        intent = Targets.from_context(signals.context)
+        self._intent = replace(intent, genres=()) if set_aside_genre else intent
+        self._long_term = Targets.from_profile(signals.long_term)
+        self._evidence = _evidence_targets(signals.evidence)
+        self._policy = policy
+        self._scores: Dict[Tuple[object, ...], PolicyScore] = {}
+
+    def score(self, candidate: PolicyCandidate) -> PolicyScore:
+        key = _features(candidate.music)
+        known = self._scores.get(key)
+        if known is None:
+            known = self._scores[key] = self._compute(candidate.music)
+        return known
+
+    def _compute(self, music: MusicCandidate) -> PolicyScore:
+        policy = self._policy
+        intent = feature_fit(music, self._intent, policy)
+        session = _session_fit(music, self._evidence, policy)
+        long_term = feature_fit(music, self._long_term, policy)
+        stages = [("session", policy.session_weight, session.value)]
+        if intent is not None:
+            stages.insert(0, ("intent", policy.intent_weight, intent.value))
+        if long_term is not None:
+            stages.append(("long_term", policy.long_term_weight, long_term_stage_value(long_term.value, policy)))
+        total_weight = sum(weight for _, weight, _ in stages)
+        normalized = tuple((name, weight / total_weight, value) for name, weight, value in stages)
+        return PolicyScore(
+            combined=sum(weight * value for _, weight, value in normalized),
+            intent=intent,
+            session=session,
+            long_term=long_term,
+            stage_weights=normalized,
+        )
 
 
 # --- Eligibility, diversity, exploration, top three ------------------------------------------
@@ -482,6 +536,27 @@ def score(
 def cooldown_window(pool_size: int, policy: RecommendationPolicy = POLICY_V1) -> int:
     """How many of the most recently played tracks are held back: fewer in small libraries, never fewer than one."""
     return min(policy.cooldown_plays, max(1, pool_size - policy.queue_size))
+
+
+def requested_cooldown_window(requested_count: int, policy: RecommendationPolicy = POLICY_V1) -> int:
+    """How many of an explicitly requested genre's most recent plays are held back: all but a queue's worth of its
+    available tracks, at most cooldown_plays. The track that just played is held back by cooldown_window() anyway."""
+    return min(policy.cooldown_plays, max(0, requested_count - policy.queue_size))
+
+
+def _released_from_cooldown(
+    pool: Sequence[PolicyCandidate], recent: Sequence[str], signals: SessionSignals, policy: RecommendationPolicy
+) -> FrozenSet[str]:
+    """The requested genre's plays that its own cooldown lets go, so the genre does not run out (B11).
+
+    recent is the pool's distinct plays, most recent first. The track playing (the session's latest play) is never
+    released.
+    """
+    if not signals.context.temporary_genres:
+        return frozenset()
+    requested = {candidate.track_id for candidate in pool if _in_requested_genre(candidate, signals)}
+    plays = [track_id for track_id in recent if track_id in requested]
+    return frozenset(plays[requested_cooldown_window(len(requested), policy) :]) - frozenset(signals.recent_track_ids[:1])
 
 
 def exploration_rate(signals: SessionSignals, policy: RecommendationPolicy = POLICY_V1) -> float:
@@ -562,6 +637,18 @@ class _Ranker:
     def __init__(self, recent_age: Mapping[str, int], policy: RecommendationPolicy):
         self.recent_age = recent_age  # plays ago, 0 for the latest, for tracks within cooldown_plays
         self.policy = policy
+        self._targets: Dict[str, Targets] = {}  # each reference's _similarity_targets(), built once
+        self._similarities: Dict[Tuple[str, Tuple[object, ...]], Optional[Similarity]] = {}  # as in _Scorer
+
+    def similarity(self, candidate: PolicyCandidate, reference: PolicyCandidate) -> Optional[Similarity]:
+        """candidate_similarity(candidate, reference), once per reference and distinct candidate features."""
+        key = (reference.track_id, _features(candidate.music))
+        if key not in self._similarities:
+            targets = self._targets.get(reference.track_id)
+            if targets is None:
+                targets = self._targets[reference.track_id] = _similarity_targets(reference.music)
+            self._similarities[key] = _similarity(feature_fit(candidate.music, targets, self.policy))
+        return self._similarities[key]
 
     def penalties(self, candidate: PolicyCandidate, references: Sequence[PolicyCandidate]) -> Tuple[float, Tuple[str, ...]]:
         total = 0.0
@@ -574,7 +661,7 @@ class _Ranker:
             total += self.policy.artist_repeat_penalty
             reasons.append("repeated artist")
         for reference in references:
-            similarity = candidate_similarity(candidate.music, reference.music, self.policy)
+            similarity = self.similarity(candidate, reference)
             if (
                 similarity is not None
                 and similarity.feature_count >= self.policy.near_duplicate_min_features
@@ -589,7 +676,7 @@ class _Ranker:
         for reference in references:
             if _same_artist(candidate.artist, reference.artist):
                 return False
-            similarity = candidate_similarity(candidate.music, reference.music, self.policy)
+            similarity = self.similarity(candidate, reference)
             if similarity is not None and similarity.value >= self.policy.novelty_similarity:
                 return False
         return True
@@ -606,21 +693,25 @@ def decide(
 
     # 1. Eligibility: available, not rejected in this session, not in the recent-play cooldown.
     #    Only plays of tracks still in the pool count, so a rejected track does not use up the cooldown.
+    #    A requested genre's own plays are held back only as long as its own tracks allow.
     pool = [candidate for candidate in candidates if candidate.available and candidate.track_id not in signals.excluded_track_ids]
     pool_ids = {candidate.track_id for candidate in pool}
     recent = [track_id for track_id in dict.fromkeys(signals.recent_track_ids) if track_id in pool_ids][: policy.cooldown_plays]
-    cooling = set(recent[: cooldown_window(len(pool), policy)])
+    cooling = set(recent[: cooldown_window(len(pool), policy)]) - _released_from_cooldown(pool, recent, signals, policy)
     eligible = [candidate for candidate in pool if candidate.track_id not in cooling]
     ranker = _Ranker({track_id: age for age, track_id in enumerate(recent)}, policy)
 
     # 2-5. Intent, session, long-term, combined.
-    scored = {candidate.track_id: score(candidate, signals, policy) for candidate in eligible}
+    scorer = _Scorer(signals, policy)
+    scored = {candidate.track_id: scorer.score(candidate) for candidate in eligible}
     by_combined = sorted(
         eligible, key=lambda candidate: (not scored[candidate.track_id].is_scorable, -scored[candidate.track_id].combined, _tie_break(candidate))
     )
     combined_rank = {candidate.track_id: position for position, candidate in enumerate(by_combined, start=1)}
 
     # 6. Diversity: greedy selection against what just played and what is already chosen.
+    #    remaining stays in combined order and a penalty only lowers a score, so once a candidate's unpenalized
+    #    key cannot beat the best so far, no later candidate can: the scan stops there, with the same choice (B11).
     last = [signals.last_played] if signals.last_played is not None else []
     picks: List[RankedPick] = []
     remaining = list(by_combined)
@@ -628,8 +719,10 @@ def decide(
         references = last + [pick.candidate for pick in picks]
         best = None
         for candidate in remaining:
-            penalty, reasons = ranker.penalties(candidate, references)
             candidate_score = scored[candidate.track_id]
+            if best is not None and (not candidate_score.is_scorable, -candidate_score.combined, _tie_break(candidate)) >= best[0]:
+                break
+            penalty, reasons = ranker.penalties(candidate, references)
             key = (not candidate_score.is_scorable, -(candidate_score.combined - penalty), _tie_break(candidate))
             if best is None or key < best[0]:
                 best = (key, candidate, penalty, reasons)
@@ -647,7 +740,7 @@ def decide(
     #    puts its track first, to play next.
     #    A queue that is not full already holds every eligible track, so there is nothing to explore.
     #    Nor can exploration pick a recent play: the cooldown holds those back, except in a small
-    #    library, where the cooldown leaves exactly a queue's worth of tracks.
+    #    library or a small requested genre, where the cooldown leaves exactly a queue's worth of tracks.
     rate = exploration_rate(signals, policy)
     control = signals.pending_control
     explored = False
@@ -765,7 +858,8 @@ def _outside_genre_choice(
     nothing can, it has no score and qualifies only under the fallback rule. Tracks
     with a score come first.
     """
-    set_aside = {candidate.track_id: score(candidate, signals, policy, set_aside_genre=True) for candidate in others}
+    scorer = _Scorer(signals, policy, set_aside_genre=True)
+    set_aside = {candidate.track_id: scorer.score(candidate) for candidate in others}
     novel = [candidate for candidate in others if ranker.is_novel(candidate, references)]
     with_score = sorted(
         (

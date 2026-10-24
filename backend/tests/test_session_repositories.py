@@ -377,6 +377,61 @@ def test_database_refuses_feedback_rows_the_domain_would_not_create(engine, unit
 # --- What is never stored -------------------------------------------------------------------
 
 
+# --- A listener's whole history in one read (B11) ----------------------------------------------------
+
+
+def test_a_listeners_history_reads_as_its_sessions_would_one_by_one_and_nothing_of_anyone_else(unit_of_work):
+    listener = _listener(unit_of_work)
+    older = _start(unit_of_work, listener)
+    track, other_track = _track(unit_of_work, "a"), _track(unit_of_work, "b")
+    first, second = _queued(older, track, position=0), _queued(older, other_track, position=1, rank=2)
+    _add_occurrences(unit_of_work, second, first)
+    with unit_of_work:
+        unit_of_work.session_turns.add(new_turn(older, 2, TurnKind.NOT_FOR_ME, _FULL_CONTEXT, _NOW, first.occurrence_id))
+        unit_of_work.feedback_events.add(
+            FeedbackEvent(str(uuid.uuid4()), older.session_id, second.occurrence_id, FeedbackEventType.LIKE, _NOW + timedelta(seconds=2))
+        )
+        unit_of_work.feedback_events.add(
+            FeedbackEvent(str(uuid.uuid4()), older.session_id, first.occurrence_id, FeedbackEventType.SKIP, _NOW + timedelta(seconds=1), 30, 120)
+        )
+        unit_of_work.listening_sessions.save(older.ended(SessionEndReason.ENDED_BY_LISTENER, _NOW + timedelta(hours=1)))
+        unit_of_work.commit()
+    newer = _start(unit_of_work, listener, started_at=_NOW + timedelta(days=1))
+    _add_occurrences(unit_of_work, _queued(newer, track))
+    _, elsewhere = _second_session_with_occurrence_of_another_listener(unit_of_work)
+
+    with unit_of_work:
+        sessions = [older.session_id, newer.session_id]
+        one_by_one = (
+            [turn for session_id in sessions for turn in unit_of_work.session_turns.list_for_session(session_id)],
+            [item for session_id in sessions for item in unit_of_work.recommendation_occurrences.list_for_session(session_id)],
+            [event for session_id in sessions for event in unit_of_work.feedback_events.list_for_session(session_id)],
+        )
+        at_once = (
+            unit_of_work.session_turns.list_for_listener(listener),
+            unit_of_work.recommendation_occurrences.list_for_listener(listener),
+            unit_of_work.feedback_events.list_for_listener(listener),
+        )
+
+    def by_session(items):
+        return {session_id: [item for item in items if item.session_id == session_id] for session_id in sessions}
+
+    assert [by_session(listed) for listed in at_once] == [by_session(expected) for expected in one_by_one]
+    assert [len(listed) for listed in at_once] == [len(expected) for expected in one_by_one] == [3, 3, 2]
+    assert elsewhere.occurrence_id not in {item.occurrence_id for item in at_once[1]}
+
+
+def _second_session_with_occurrence_of_another_listener(unit_of_work):
+    other_listener = str(uuid.uuid4())
+    with unit_of_work:
+        unit_of_work.listener_profiles.add(ListenerProfile(other_listener, False, _NOW))
+        unit_of_work.commit()
+    session = _start(unit_of_work, other_listener)
+    occurrence = _queued(session, _track(unit_of_work, "c"))
+    _add_occurrences(unit_of_work, occurrence)
+    return session, occurrence
+
+
 def test_session_tables_have_no_column_for_raw_text_or_ui_state(engine):
     """D33: no raw conversational text. D32: no UI-only state. Context is stored as structured JSON only."""
     inspector = inspect(engine)

@@ -4,15 +4,21 @@ Pure functions with no I/O. models.py keeps its own private helpers; its
 public behavior is protected and is not refactored here.
 """
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+
+# Exactly the strings str(uuid.UUID(...)) renders: checked first, because parsing every id read is costly (B11).
+_CANONICAL_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def require_canonical_uuid(value: object, field_name: str) -> str:
     """Require a lowercase, hyphenated UUID string, exactly as str(uuid.UUID(...)) renders it."""
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string")
+    if _CANONICAL_UUID.fullmatch(value):
+        return value
     try:
         parsed = uuid.UUID(value)
     except ValueError as error:

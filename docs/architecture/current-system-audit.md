@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and committed as `ac23287`. Phase B9 (frontend integration, frontend phase F9) followed the same day on top of `ac23287`; with its review corrections it was reviewed and committed as `886cf66` (2026-10-22), and GitHub Actions CI passed. Phase B10 (conservative long-term adaptation) followed on top of `886cf66` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), [B8](#b8-update-2026-10-21), [B9](#b9-update-2026-10-21), and [B10](#b10-update-2026-10-22) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all ten.
+**Current.** Last full audit: Phase B0, 2026-10-18, on branch `develop` at commit `c24f518`, with a clean working tree apart from the three untracked Prototype 1 documents. Those documents were committed afterwards (`d493392`), and the B1 prerequisites (ignore rules, database path, pinned dependencies) were applied the same day. Phase B1 (SQLite persistence foundation) was implemented on 2026-10-19 on branch `prototype-1`, on top of `ea6a08a`, and committed as `f000bb2`. Phase B2 (managed local library) was implemented the same day on top of `f000bb2` and committed as `079c6f4`. Phase B3 (background analysis) was implemented on 2026-10-20 on top of `079c6f4` and committed as `e2991cb`. Phase B4 (session domain) was implemented the same day on top of `e2991cb` and committed as `d4060af`. Phase B5 (Recommendation Policy v1) was implemented the same day on top of `d4060af` and committed as `8a1be05`. Phase B6 (feedback and playback events) was implemented the same day on top of `8a1be05`, with review fixes on 2026-10-21. Phase B7 (playlists) followed on 2026-10-21 in the same working tree, and B6 and B7 were committed together as `116276b`. Phase B8 (the FastAPI boundary) was implemented the same day on top of `116276b` and committed as `ac23287`. Phase B9 (frontend integration, frontend phase F9) followed the same day on top of `ac23287`; with its review corrections it was reviewed and committed as `886cf66` (2026-10-22), and GitHub Actions CI passed. Phase B10 (conservative long-term adaptation) followed on top of `886cf66`; with its review corrections it was reviewed and committed as `a5e0525` (2026-10-23). Phase B11 (evaluation and hardening) followed on top of `a5e0525` and is uncommitted. The [B1](#b1-update-2026-10-19), [B2](#b2-update-2026-10-19), [B3](#b3-update-2026-10-20), [B4](#b4-update-2026-10-20), [B5](#b5-update-2026-10-20), [B6](#b6-update-2026-10-20), [B7](#b7-update-2026-10-21), [B8](#b8-update-2026-10-21), [B9](#b9-update-2026-10-21), [B10](#b10-update-2026-10-22), and [B11](#b11-update-2026-10-23) updates, Current Files, Dependencies, Configuration, Missing Product Capabilities, and gap analysis sections below reflect all eleven.
 
 This file describes what exists. For what Prototype 1 will add, see the [Prototype 1 specification](../planning/intentune-backend-prototype-implementation-spec.md) and the [gap analysis](#prototype-1-gap-analysis-b0) below.
 
@@ -308,6 +308,37 @@ B10 tests per file:
 - `test_policy.py` +7;
 - `test_feedback_policy.py`, `test_intent_interpreter.py`, `test_api_messages.py`, and `test_migrations.py` +1 each.
 
+## B11 Update (2026-10-23)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `python -m pytest -q`, from `backend/` | **1374 passed, 1 skipped**: 1344 collected at `a5e0525`, plus 31 from B11 with its review corrections. One warning (Starlette's test client and httpx), as before. |
+| Frontend | `npm ci`, `npm test`, `npm run lint`, `npm run build`, `npm audit`, from `frontend/` | **276 passed**; lint and build clean; **0 vulnerabilities**. No frontend source changed. At the review, `npm audit fix` (no `--force`) patched `undici` 8.12.1 → 8.12.3 in `package-lock.json` only; it comes with the test environment (`jsdom`), not the browser build. |
+| Algorithm scenarios | `python -m evaluation.scenarios --check` | Match the stored baseline. |
+| Policy v1 outputs | 1,500 decisions recorded before the optimizations, checked after | **Identical.** The review's requested-genre correction then changes 152, every one where it releases a requested track. |
+| Performance | `python -m evaluation.performance --runs 3` | See the [evaluation report](../quality/evaluation-report.md). The interactive p95 budget is not reliably met at 1,000 tracks, and is around the target but not reliably met at 5,000; startup is comfortably within. |
+| Migration | upgrade to head, `compare_metadata`, downgrade to `5d8e2b7a9c41` and back, with data; an upgrade from `2540be2956b8` with B2-era rows | One revision row; nothing else changes. The old database is served after the upgrade. |
+| Mutations | 13 single-rule mutations of the hardening, 7 of the review corrections | **20/20** caught. |
+| Manual run | the real server on a scratch database with the startup scan and worker on, over HTTP, restarted once | **15/15**, before and after the review corrections: every library change while it ran was seen by the next read; after a hard stop the library, sessions, and feedback were kept, and listening started fresh. |
+
+Found and corrected in the evaluation tooling itself, before any figure was used:
+- **tracemalloc during timing:** the first harness timed the API loop with tracemalloc on, which slows Python several times over.
+- **Contention errors:** its contention run reported `422 INTENT_UNAVAILABLE` errors. Its tracks had no managed audio, so the worker rightly marked them missing and genres disappeared.
+- **Database size:** it counted an uncheckpointed write-ahead log as data.
+- **p95:** with 10 or 15 samples, its p95 was the maximum.
+
+Changed tests:
+- Two test doubles of `RecommendationService.refresh_queue()` accept its new `library` argument.
+- The fixed-vocabulary capability double in `test_message_service.py` reads the real library for the refresh.
+- At the review, B5's `test_a_rejected_track_does_not_use_up_the_cooldown` requests no genre. It pinned a requested genre leaving itself once its tracks were cooling, the behavior the review corrected; a new test beside it pins the correction.
+
+B11 tests per file:
+- `test_track_snapshot.py` 12;
+- `test_policy.py` +10;
+- `test_evaluation.py` 5;
+- `test_restart_and_upgrade.py` 2;
+- `test_session_repositories.py` and `test_migrations.py` +1 each.
+
 ## Current Files
 
 ### Backend
@@ -470,6 +501,24 @@ Added in B10 (2026-10-22):
 - `backend/src/intentune/application/adaptation.py` (`LongTermAdaptationService`)
 - `backend/src/intentune/ports/adaptation.py` (`LongTermProfileRepository`)
 - `backend/tests/test_adaptation_policy.py`, `backend/tests/test_long_term_adaptation_service.py`
+
+Added in B11 (2026-10-23):
+
+- `backend/alembic/versions/20261023_5ed16a5d9ff5_add_library_revision.py`
+- `backend/evaluation/` (not part of the app): `performance.py`, `scenarios.py`, `synthetic.py`, `baselines/scenarios.json`
+- `backend/tests/test_track_snapshot.py`, `backend/tests/test_restart_and_upgrade.py`, `backend/tests/test_evaluation.py`
+- `docs/quality/evaluation-report.md`
+
+Changed in B11:
+- `domain/policy.py`: the diversity step stops early; `_Scorer` scores alike candidates once; the ranker keeps reference targets. The outputs are unchanged.
+- `domain/library.py` and `domain/validation.py`: cheaper checks that accept exactly what they did before.
+- `persistence/repositories.py`:
+  - rows instead of records for the library and a listener's history;
+  - `TrackSnapshot` and the library revision;
+  - `get_many`, and `list_for_listener` on the turn, occurrence, and feedback event repositories.
+- `persistence/models.py`: `LibraryRevisionRecord`. `persistence/unit_of_work.py` and `api/container.py`: the shared snapshot. `ports/library.py` and `ports/sessions.py`: the new reads.
+- `application/capability.py`, `application/listening.py`, `application/messages.py`, `application/feedback.py`, and `application/recommendations.py`: one library read per command.
+- `application/adaptation.py`: batched history and track reads. `application/library.py`: `get_tracks()` uses `get_many`.
 
 Changed in B10:
 - `domain/policy.py`: `interpretations_by_track()` extracted; `Interpretation` names its deciding event or turn; intent fit reads current intent only (`Targets.from_context()`).

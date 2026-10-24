@@ -101,6 +101,59 @@ All meaningful product, architecture, and behavior changes should be recorded he
 - 100 tests in `tests/test_session_domain.py`, `tests/test_session_repositories.py`, and `tests/test_session_service.py`. The suite is 618 passed and 1 skipped; no existing test changed, and no dependency was added.
 - TD-015 records the B4 implementation decisions.
 
+### Added — Phase B11: Evaluation and hardening (2026-10-23)
+
+- **Evaluation tooling** (`backend/evaluation/`, not part of the app; TD-022):
+  - `python -m evaluation.performance` measures, with budgets and repeated runs:
+    - decide and refresh latency;
+    - the listening loop over HTTP, in steady state and cold;
+    - long-term adaptation against history size;
+    - import and analysis throughput;
+    - contention with the background scan and worker;
+    - memory, restart, database and managed-copy size, and playlists.
+  - `python -m evaluation.scenarios` runs:
+    - spec §28's five scenarios on a feature-complete synthetic catalog;
+    - what a library as imported today can act on;
+    - simulated long-term listeners through the real services;
+    - two comparisons: the long-term neutral point and a stricter gate.
+
+    Its output is a stored baseline (`evaluation/baselines/scenarios.json`) that a test checks.
+  - Synthetic libraries live in scratch databases and folders; nothing touches `backend/data`.
+- **`library_revision`** (migration `5ed16a5d9ff5`) and **`TrackSnapshot`**: the API reuses its last full read of the library while no track has changed. The revision is an integer that every track write advances; only committed reads are kept, and a newer one is never replaced by an older one.
+- **Batched reads:** `TrackRepository.get_many`, and `list_for_listener` on the turn, occurrence, and feedback event repositories.
+- **The [Evaluation Report](quality/evaluation-report.md)** and **TD-022**.
+- **Tests:** 31 backend tests (the suite is 1374 passed, 1 skipped):
+  - restart end to end, and an upgrade from the first library migration with data;
+  - the library revision and snapshot, including concurrent readers and writers; one library read per command;
+  - the policy optimizations checked against the rule they speed up;
+  - a requested genre rotating past the old exhaustion point;
+  - the history reads, and the evaluation tooling and its baseline.
+
+  20 single-rule mutations of the hardening and the review corrections are each caught.
+
+### Changed — Phase B11 (2026-10-23)
+
+- **Faster, with the same outputs** (1,500 recorded Policy v1 decisions identical before and after):
+  - Policy v1's diversity step stops scanning once no later candidate can win, and a refresh scores candidates alike in every feature once;
+  - the library and a listener's history are read as rows, not ORM records, into the same validated domain objects;
+  - a start, refinement, or typed message reads the library once, for both its capability check and its refresh;
+  - long-term adaptation reads the history in three queries, and only the tracks it mentions.
+- **The effect** (p50 of the slowest interactive command): from 268 to 65 ms at 1,000 tracks, and from 517 to 74 ms at 2,000. The budgets are not reliably met on this machine; see TD-022.
+- **README:** the test command is `python -m pytest`, since a bare `pytest` cannot import `src`. The README also says how to run the evaluation.
+
+### Changed — at the B11 review (2026-10-24)
+
+- **A requested genre no longer runs out** (Policy v1, D17): with an explicit genre request, the genre's own plays are held back only as long as its available tracks allow. It keeps rotating, least recently played first, instead of leaving the genre once a large library's 20-play cooldown covers it.
+  - It only releases tracks earlier; the track playing is never released.
+  - Without a genre request, nothing changes.
+  - One scenario baseline changed (the 60-play Jazz session's genre match, from 0.97 to 1.0).
+- **`TrackSnapshot`:**
+  - an integer revision instead of a random token;
+  - no publication from a transaction that has written;
+  - a lock-guarded publication that never goes backwards.
+- **SQLite durability:** `synchronous` stays FULL (TD-022); the latency budgets stay reported as not reliably met.
+- **Frontend dev-dependency maintenance:** `npm audit fix` updated `undici` 8.12.1 → 8.12.3 in `package-lock.json` only. `undici` comes with the test environment (`jsdom`) and is not part of the browser build. `npm audit` reports 0.
+
 ### Added — Phase B10: Conservative long-term adaptation (2026-10-22)
 
 - **Long-Term Adaptation Policy v1** (`domain/adaptation.py`, `adaptation-v1`, TD-021):

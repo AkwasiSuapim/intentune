@@ -6,6 +6,9 @@ block always rolls back whatever was not committed and closes the session,
 so an exception or an early return never leaves a half-written change.
 
 Keep these transactions short: SQLite allows one writer at a time.
+
+A TrackSnapshot, when given, is shared by every unit of work made with it, so
+a full read of an unchanged library is reused across requests (B11).
 """
 
 from types import TracebackType
@@ -26,12 +29,14 @@ from src.intentune.persistence.repositories import (
     SqlAlchemySessionTurnRepository,
     SqlAlchemyTrackFeatureRepository,
     SqlAlchemyTrackRepository,
+    TrackSnapshot,
 )
 
 
 class SqlAlchemyUnitOfWork:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], track_snapshot: Optional[TrackSnapshot] = None) -> None:
         self._session_factory = session_factory
+        self._track_snapshot = track_snapshot
         self._session: Optional[Session] = None
         self._listener_profiles: Optional[SqlAlchemyListenerProfileRepository] = None
         self._library_sources: Optional[SqlAlchemyLibrarySourceRepository] = None
@@ -101,7 +106,7 @@ class SqlAlchemyUnitOfWork:
         self._listener_profiles = SqlAlchemyListenerProfileRepository(self._session)
         self._library_sources = SqlAlchemyLibrarySourceRepository(self._session)
         self._source_files = SqlAlchemySourceFileRepository(self._session)
-        self._tracks = SqlAlchemyTrackRepository(self._session)
+        self._tracks = SqlAlchemyTrackRepository(self._session, self._track_snapshot)
         self._analysis_jobs = SqlAlchemyAnalysisJobRepository(self._session)
         self._track_features = SqlAlchemyTrackFeatureRepository(self._session)
         self._listening_sessions = SqlAlchemyListeningSessionRepository(self._session)

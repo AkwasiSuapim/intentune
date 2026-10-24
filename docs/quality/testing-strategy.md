@@ -31,6 +31,17 @@ API tests (B8) run the real app, startup included, through Starlette's test clie
 
 Run the full suite after every phase (spec §28).
 
+### Evaluation (B11)
+
+From `backend/`, with the backend virtual environment active:
+
+```text
+python -m evaluation.scenarios --check    # the algorithm scenarios against their stored baseline (seconds)
+python -m evaluation.performance --runs 3 # performance at library scale (about 25 minutes)
+```
+
+The suite already checks the scenario baseline (`tests/test_evaluation.py`). After a deliberate change to Recommendation Policy v1 or Long-Term Adaptation Policy v1, review the difference, report it, then store it with `python -m evaluation.scenarios --write-baseline`. The performance harness is not part of the suite, because its timings depend on the machine; its own smoke tests are. Results: [Evaluation Report](evaluation-report.md).
+
 ### Frontend
 
 From `frontend/`:
@@ -199,6 +210,60 @@ What B10's tests cover:
 - **Carry-forward:** a library mood makes mood usable; Tune offers only curated moods present; a typed library mood is accepted.
 
 24 single-rule mutations each make a test fail (5 of them for the review corrections). The first draft of two hierarchy tests passed trivially: a tie decided by the tie-break, and a Not for me that had also removed the preference. They were rewritten to state what the formulas do.
+
+## After B11 (2026-10-23)
+
+| Suite | Result |
+|---|---|
+| Backend `python -m pytest -q` | **1374 passed, 1 skipped**: 1344 collected at `a5e0525` plus 31 from B11, with the review corrections. |
+| Frontend `npm ci`, `npm test`, lint, build, `npm audit` | **276 passed**; lint and build clean; **0 vulnerabilities**. No frontend source changed; at the review, `npm audit fix` patched the test environment's `undici` in `package-lock.json` only (8.12.1 → 8.12.3). |
+| Algorithm scenarios `python -m evaluation.scenarios --check` | Match the stored baseline. |
+| Manual run over a real server, restarted once | **15/15**, before and after the review corrections: library changes made while it ran (a rescan's new genre, a missing copy, the worker's status changes) were seen by the next read; a restart kept everything. |
+| Performance `python -m evaluation.performance --runs 3` | At 1,000 tracks the p95 budget is not reliably met (106 to 225 ms against 100 ms); at 5,000 it is around the target and not reliably met (256 to 350 ms against 300 ms); startup is comfortably within. See the [evaluation report](evaluation-report.md). |
+
+What B11's tests cover:
+- **Restart, end to end** (spec §30 items 13–14): a library imported over the API, a playlist, feedback in two sessions, and the long-term profile they built, with one session left playing. After a restart, the listener, tracks, metadata, playlist, turns, feedback events, profile, and adjustments are exactly as before; the open session ended `app_restarted` with nothing queued; a new session starts with a fresh queue; audio still streams.
+- **Migrations on existing data:** a database written at the first library migration, with rows as B2 wrote them, is upgraded to head by the app's own startup. Then its tracks, labels, listener, vocabulary, and a new session work. The B11 migration adds one revision row, a track write changes it, and its downgrade drops only that table.
+- **The library revision and snapshot:**
+  - an unchanged library is read once and handed out as a fresh list of the same objects;
+  - a committed add or relabel is seen by the next read;
+  - a writing transaction reads its own change, keeps nothing, and its rollback invalidates nothing;
+  - a writer that keeps no snapshot still advances the revision.
+- **The snapshot under concurrent access** (review):
+  - an older read finishing last never replaces a newer one;
+  - eight threads publishing 200 revisions in any order leave the newest installed;
+  - three readers and a writer: after each of 40 commits, a read that began after it sees at least every committed track;
+  - only the track repository writes the track tables, and each of its writes advances the revision.
+- **A requested genre is a finite library of its own** (review), over a 200-track library:
+  - genres of 20 and 8 tracks keep every queue in the genre for 60 plays, each track coming back in turn;
+  - two tracks alternate, and one track returns whenever it is not playing;
+  - a rejected track stays out;
+  - with no genre request, or a genre larger than the cooldown, nothing comes back within 20 plays, as before.
+
+  B5's test of a rejection not using up the cooldown is now stated without a genre request. A new test beside it pins the corrected behavior for the same plays with Ambient requested.
+- **One full library read per command:** start, play, Like, refine, Next with the player's facts, Not for me, a typed refinement, and a typed start each read the library once.
+- **Reads in batches:** tracks by id beyond one batch, in import order and with their labels; a listener's whole history equal to reading their sessions one by one, and nobody else's.
+- **The policy optimizations against the rule they speed up:**
+  - candidates alike in all but one feature, any of the seven, keep their own scores;
+  - the early-stopping diversity scan chooses exactly what a full scan chooses, on 150 random libraries.
+- **The evaluation tooling:** the scenarios reproduce their baseline exactly; the performance harness measures a tiny library, its restart, adaptation, import, and playlists, and renders only the parts measured.
+
+20 single-rule mutations each make a test fail.
+- **13 of the hardening:**
+  - the score memo's key and the diversity bound (twice);
+  - the revision write on add and on save, the snapshot's revision check, and the history's listener filter;
+  - the adaptation's track read, and the single read in a start, a refinement, and a typed message;
+  - the UUID fast path and the one-primary-label check.
+- **7 of the review corrections:**
+  - publication going backwards, a writing transaction publishing, a write not marking its transaction, and the revision not advancing;
+  - the requested genre never released, the playing track released, and the requested window as long as the library's.
+
+1,500 Policy v1 decisions recorded before the optimizations were identical after them. The requested-genre correction then changes 152 of them, every one where it releases a requested track.
+
+Changed tests:
+- Two test doubles of `RecommendationService.refresh_queue()` accept its new `library` argument.
+- The fixed-vocabulary capability double reads the real library for the refresh.
+- B5's `test_a_rejected_track_does_not_use_up_the_cooldown` requests no genre (above).
 
 ## Current Test Coverage
 
@@ -514,6 +579,10 @@ Added in B8 (HTTP API):
 - `tests/test_persistence_db.py`: a read-then-write transaction survives another connection's commit (`BEGIN IMMEDIATE`); with a deferred `BEGIN` it fails with "database is locked".
 - `tests/test_architecture_boundaries.py`: only the API's composition root imports persistence, adapters, or storage libraries, and no inner layer imports the API.
 - `tests/test_listener_repository.py`: uncommitted changes stay invisible to a unit of work in another thread, which waits for the writer.
+- *(B11)* `tests/test_restart_and_upgrade.py`: restart end to end; an upgrade from the first library migration with data.
+- *(B11)* `tests/test_track_snapshot.py`: the library revision and the kept read; one full library read per listening command; tracks by id in batches.
+- *(B11)* `tests/test_evaluation.py`: the scenario baseline, and smoke tests of the performance harness.
+- *(B11)* `tests/test_policy.py`, `tests/test_session_repositories.py`, `tests/test_migrations.py`: the policy optimizations against the rule, a listener's whole history in one read, and the B11 migration.
 
 ### Frontend
 
@@ -535,11 +604,13 @@ Described in [the frontend architecture](../frontend/ARCHITECTURE.md) §26: pure
 | API validation and error envelope; request IDs; no paths or stack traces in errors; audio range requests | B8 — **Current** (2026-10-21) |
 | Frontend service boundary against the HTTP adapter | B9 — **Current** (2026-10-21) |
 | Long-term evidence threshold; bounded, reversible adjustments | B10 — **Current** (2026-10-22) |
-| Restart behavior; migrations on existing data; performance with hundreds to thousands of tracks | B11 |
+| Restart behavior; migrations on existing data; performance with hundreds to thousands of tracks | B11 — **Current** (2026-10-23) |
 
 ### Deterministic evaluation scenarios
 
 Create fixed scenarios to compare policy versions: `study/calm`, `workout/high energy`, `party/dance`, `relax`, `discovery`. Algorithm changes are reported against these scenarios, not asserted as improvements.
+
+**Current (B11):** `backend/evaluation/scenarios.py` runs the five on a feature-complete synthetic catalog, together with the long-term listeners. Its output is stored as `backend/evaluation/baselines/scenarios.json`, and `tests/test_evaluation.py` fails on any difference. A policy change is therefore reported as that difference and reviewed. The [evaluation report](evaluation-report.md) has the results.
 
 ## Test Layers
 

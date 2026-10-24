@@ -70,9 +70,10 @@ The documents are grouped into folders by purpose.
 - [Implementation Phases](frontend/IMPLEMENTATION_PHASES.md)
 - [Approved design reference](frontend/design/approved/README.md)
 
-### `quality/` — testing and security
+### `quality/` — testing, evaluation, and security
 
 - [Testing Strategy](quality/testing-strategy.md)
+- [Evaluation Report](quality/evaluation-report.md) (B11): performance at library scale, restart and migrations, and the algorithm scenarios
 - [Security and Privacy](quality/security-and-privacy.md)
 
 ### `operations/` — running the system

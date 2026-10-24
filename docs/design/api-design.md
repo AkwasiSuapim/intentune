@@ -30,7 +30,7 @@ The frontend calls it through `frontend/src/services/http/`, its default runtime
 - Enumerations travel in lowercase snake_case: `not_for_me`, `queued`, `missing_managed_file`, `app_restarted`. Turn kinds and feedback events use the spec's names.
 - Times are ISO 8601 in UTC (`2026-10-21T16:21:54.735291Z`).
 - Ids are the domain's canonical UUID strings. An id that names nothing is a not-found error, whatever its shape.
-- Lists that can grow are paged with `limit` (1 to 500, default 100) and `offset` (0 or more), and answer `{items, total, limit, offset}`. In Prototype 1 the page is cut from the full list after it is loaded, which is fine for a personal library and is revisited in B11.
+- Lists that can grow are paged with `limit` (1 to 500, default 100) and `offset` (0 or more), and answer `{items, total, limit, offset}`. In Prototype 1 the page is cut from the full list after it is loaded. *B11 measured it and kept it (TD-022):* the track list is the library's kept full read (the API reuses it while the library is unchanged), so a page of a 5,000-track library answers in about 5 ms.
 - A track's audio is addressed by its `audio_url`, `/api/v1/tracks/{track_id}/audio`.
 
 ## Routes
@@ -492,7 +492,7 @@ This route may be included for development or administrative use. It should not 
 ## Open Decisions
 
 - Whether and how artwork is served (no route; B2 extracts none)
-- Whether manual Import and Rescan should answer at once and scan in the background, with progress, instead of within the request ([trade-off](../decisions/trade-offs.md)). *Decided after the B8 review: they stay synchronous for Prototype 1; B11 revisits performance and progress, unless B9 shows concrete UX evidence sooner.*
+- Whether manual Import and Rescan should answer at once and scan in the background, with progress, instead of within the request ([trade-off](../decisions/trade-offs.md)). *Decided after the B8 review: they stay synchronous for Prototype 1; B11 revisits performance and progress, unless B9 shows concrete UX evidence sooner.* *B11 (TD-022): they stay synchronous. Import is bound by file access (10 to 15 tracks per second on this machine), and other requests are served meanwhile; progress waits for a library screen.*
 - Whether the API should expose explanation text for a recommendation; Policy v1's reasons are not stored today (B9 hides Why this fits instead)
 - Whether a past session's songs should be playable again in a new session: there is no route to play a specific track, so Replay works only within the playing session
 

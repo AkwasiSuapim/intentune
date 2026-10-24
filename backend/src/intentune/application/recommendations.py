@@ -7,6 +7,12 @@ surfaces them through SessionService.queue_recommendations(), with the
 policy version as the algorithm and its exploration pick marked. Whatever was
 still queued becomes REPLACED.
 
+A caller that has just read the library for the same command (a start or a
+refinement checks the intent against it first) passes those tracks in, so
+the command reads the library once (B11). They are a few milliseconds old,
+which changes nothing a queue promises: a refresh has always read the library
+in one transaction and written the queue in the next.
+
 Callers refresh after anything meaningful: a session start, a refinement,
 a steering turn, or feedback (FeedbackService refreshes after every event,
 B6). This re-ranks the remaining candidates immediately (spec §21). Nothing
@@ -30,9 +36,10 @@ Inputs that do not exist yet stay absent rather than being invented:
 
 import random
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from src.intentune.application.sessions import SessionService
+from src.intentune.domain.library import Track
 from src.intentune.domain.policy import POLICY_V1, PolicyDecision, RecommendationPolicy, candidate_from_track, decide, signals_from_session
 from src.intentune.domain.session import InvalidSessionTransition, SessionNotFound, SessionState
 from src.intentune.ports.unit_of_work import UnitOfWork
@@ -60,9 +67,12 @@ class RecommendationService:
     def policy(self) -> RecommendationPolicy:
         return self._policy
 
-    def refresh_queue(self, session_id: str) -> SessionState:
-        """Replace the session's upcoming queue with Policy v1's current choice. This draws from the generator."""
-        decision = self._decide(session_id)
+    def refresh_queue(self, session_id: str, library: Optional[Sequence[Track]] = None) -> SessionState:
+        """Replace the session's upcoming queue with Policy v1's current choice. This draws from the generator.
+
+        library is every track, as the caller has just read it for this command; without it, the library is read here.
+        """
+        decision = self._decide(session_id, library)
         state = self._sessions.queue_recommendations(
             session_id,
             decision.recommendations(),
@@ -86,14 +96,14 @@ class RecommendationService:
         finally:
             self._rng.setstate(state)
 
-    def _decide(self, session_id: str) -> PolicyDecision:
+    def _decide(self, session_id: str, library: Optional[Sequence[Track]] = None) -> PolicyDecision:
         with self._uow:
             session = self._uow.listening_sessions.get(session_id)
             if session is None:
                 raise SessionNotFound(session_id)
             if not session.is_active:
                 raise InvalidSessionTransition("The session has ended. Start a new session to keep listening.")
-            tracks = {track.track_id: track for track in self._uow.tracks.list_all()}
+            tracks = {track.track_id: track for track in (library if library is not None else self._uow.tracks.list_all())}
             turns = self._uow.session_turns.list_for_session(session_id)
             occurrences = self._uow.recommendation_occurrences.list_for_session(session_id)
             events = self._uow.feedback_events.list_for_session(session_id)

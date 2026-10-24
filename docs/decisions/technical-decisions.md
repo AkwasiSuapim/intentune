@@ -914,9 +914,121 @@ The user made the product decisions at the B9 review (2026-10-21), recorded belo
 - **Repeated tracks:** the same track liked in several sessions counts once per session, but cannot establish a preference without a second distinct track.
 
 **Revisit When:**
-- B11 evaluates the thresholds (whether `min_distinct_tracks` should be stricter) and the 0.5 long-term neutral point.
+- B11 evaluates the thresholds (whether `min_distinct_tracks` should be stricter) and the 0.5 long-term neutral point. *Done in B11 (TD-022): both kept.*
 - A feature pipeline fills numeric features.
 - Histories grow large enough to need incremental derivation.
+
+## TD-022: B11 Evaluation and Hardening
+
+**Status:** Accepted, awaiting B11 review (the review corrections applied 2026-10-24)
+
+**Date:** 2026-10-23
+
+**Context:** Execution guide §14 sets the scope: "Measure before adding new infrastructure", for scoring, import, analysis, SQLite, API, memory, queue response, and restart. Spec §28 asks for deterministic evaluation scenarios, and §30 items 13–14 for restart behavior. Earlier phases left these to B11:
+- `BEGIN IMMEDIATE` and WAL under contention (TD-019);
+- synchronous manual Import and Rescan;
+- paging after a full load;
+- raw-event retention and managed-copy disk use;
+- the B10 thresholds and the 0.5 long-term neutral point, and the whole-history recompute per event (TD-021).
+
+B11 starts from `a5e0525` (B10, committed). It remains an evaluation phase: the budgets were set before the first measurement and are not revised after it, and nothing is added merely to meet them.
+
+**Decision:**
+
+1. **Measure with tooling kept in the repository** (`backend/evaluation/`, not part of the app): `python -m evaluation.performance` and `python -m evaluation.scenarios`. Both build scratch databases with synthetic libraries and never open `backend/data`. Synthetic values never reach a real track (D21). The results are in the [Evaluation Report](../quality/evaluation-report.md).
+2. **Budgets.** These are Prototype 1 engineering targets, set before the first measurement, for a steady-state command; the first command after startup is reported on its own.
+
+| Budget | Value | Why |
+|---|---|---|
+| Interactive command p95 at 1,000 tracks | 100 ms | about the threshold at which a response feels immediate |
+| Interactive command p95 at 5,000 tracks | 300 ms | well under the 400 ms after which the frontend shows "Working on it…" |
+| Startup on a populated database | 5 s | |
+
+   Interactive commands are the ones that re-rank the queue: start, play (Next while nothing plays), Like, refine, and Next with the player's facts.
+3. **Hardening, each step from a measured cause.** Every step keeps the same outputs.
+   - **Policy v1 step 6 (diversity)** stops scanning once no later candidate can beat the best so far. The scan runs in combined order and a penalty only lowers a score, so the choice is the same. A test compares it with the full scan on 150 random libraries, and 1,500 decisions recorded before the optimizations were identical after them.
+   - **Less scoring work per refresh:** the targets are read from the signals once, and candidates alike in every feature the fit reads share one score. A library described by genre and mood labels has a few dozen distinct feature sets, however many tracks it holds. A test pins that one differing feature, any of the seven, is enough to be scored apart.
+   - **Reading the library:** plain rows instead of ORM records, into the same validated `Track` objects. Two validators are cheaper without changing what they accept: the canonical-UUID check tries an exactly equivalent pattern first, and the one-primary-label rule is checked in one pass.
+   - **One full library read per command:** a start, refinement, or typed message checks its intent against the library and then ranks the same tracks (`IntentCapability.library()`, and the `library` argument of `refresh_queue()`). A test counts one read for each listening command.
+   - **The library snapshot** (`TrackSnapshot`, migration `5ed16a5d9ff5`): it is the one piece of new infrastructure. Re-reading an unchanged library was most of every command's time from 1,000 tracks up. See decision 6 for how it stays correct.
+   - **Long-term adaptation** reads the listener's history in three queries (`list_for_listener`), not three per session, and only the tracks it mentions (`TrackRepository.get_many`).
+4. **Kept, on the evidence:**
+   - **`BEGIN IMMEDIATE` and WAL** (TD-019): no request failed while the background scan imported and the worker analyzed. Commands queue briefly behind the scan's short transactions.
+   - **SQLite `synchronous` stays FULL**, the Prototype 1 setting (decided at the B11 review, 2026-10-24).
+     - **What NORMAL measured:** interactive p50 improved from about 44 to 33 ms, and p95 from about 70 to 54 ms, at 1,000 tracks (250 samples each).
+     - **Why that is not enough:** the absolute gain does not justify weakening commit durability for the listener's local state: feedback, playlists, the long-term profile, and its audit trail. With NORMAL in WAL mode, a power cut or OS crash could lose the last committed transactions.
+     - **The budgets:** they stay reported as not reliably met; this decision does not satisfy them and does not claim to.
+     - No database setting changes.
+   - **Manual Import and Rescan stay within their request** (TD-019). Import is bound by opening files: five per imported file, at about 8 ms each on this machine. The copy is verified and flushed to disk by design. Progress needs a library screen first.
+   - **Paging after a full load:** the full list is the kept read, so a page costs about 4 ms even at 5,000 tracks.
+   - **Raw history is kept in full,** with no retention limit. A thousand sessions with their feedback take about 3.4 MiB, and adaptation derives from them in about a quarter of a second.
+   - **Managed copies** take exactly the disk of their sources: one more copy (D02).
+   - **Whole-list playlist writes** (TD-018): at 1,000 tracks an add, remove, or reorder takes about 60 to 70 ms.
+   - **Whole-history recompute per relevant event** (TD-021): it is linear in the listener's history, about 0.25 ms per past session. That is fine to roughly a thousand sessions; incremental derivation is the remedy beyond that.
+   - **Long-Term Adaptation Policy v1's thresholds and the 0.5 neutral point:** unchanged; see the scenario comparisons below.
+   - **No vector search, no new service, and no new runtime dependency.**
+5. **A requested genre is a finite library of its own** (a correctness correction at the B11 review, within Policy v1).
+   - **The problem:** B11 found that a requested genre with about as many available tracks as the 20-play cooldown ran out in a long session. The cooldown window was set by the whole library, so a large library's window could cover every track of the genre, and the queue left it. That contradicts D17: a finite library repeats after a cooldown.
+   - **The correction:** with an explicit genre request, the genre's own plays are held back only as long as its own available tracks allow.
+     - **The rule:** after the availability and Not-for-me exclusions, all but a queue's worth of the requested genre's most recent plays stay cooling (`requested_cooldown_window()`: at most 20). Its older plays become eligible again, and the graded recent-play penalty rotates them, least recently played first.
+     - **Scope:** it only ever releases tracks earlier. The track playing is never released, nothing outside the genre changes, and without a genre request nothing changes at all. The global constant is not lowered.
+     - **Tiny genres:** they offer what they have. Two tracks alternate, and a single track returns whenever it is not playing.
+   - **The effect:** 152 of the 1,500 recorded decisions change, every one of them a decision in which the correction releases a requested track. In the scenarios, only the 60-play Jazz session changes: its genre match goes from 0.97 to 1.0.
+6. **How the snapshot stays correct** (verified at the B11 review, 2026-10-24).
+   - **The revision:** an integer in the one-row `library_revision`. `SqlAlchemyTrackRepository.add()` and `save()` advance it in the same transaction as their change. They are the only writers of `tracks` and `track_labels`, so every change to what a `Track` holds advances it: metadata, labels, status, and availability. A test pins both facts.
+   - **Reads are never older than a finished commit:** a read takes the committed revision, which every earlier commit has advanced, and uses a kept read only under exactly that revision.
+   - **Only committed states are kept:** a transaction that has written tracks reads afresh and keeps nothing, so a rolled-back write neither publishes nor invalidates a revision.
+   - **Publication never goes backwards:** an older read finishing last cannot replace a newer one. `keep()` installs a read only if its revision is newer, under a lock, and every kept value is immutable.
+   - **The first design:** random tokens, with every read kept. Correct for reads, but publication could go backwards, and a writing transaction kept its own uncommitted read. `BEGIN IMMEDIATE` happened to prevent overlapping reads, but nothing in the snapshot itself did.
+   - **For future work:** when measured features become part of what Policy v1 reads from the library, their writes (`TrackFeatureRepository.replace_for_analyzer()`) must advance the revision too.
+7. **Algorithm evaluation.** `evaluation/scenarios.py` does three things:
+   - it runs spec §28's five scenarios on a feature-complete synthetic catalog;
+   - it reports what an imported library can act on today;
+   - it runs simulated listeners through the real adaptation services.
+
+   Its output is stored as `evaluation/baselines/scenarios.json`. A test fails when either policy changes that output, so any algorithm change arrives as a reviewed difference, never as a claimed improvement. Two comparisons answer TD-021's open questions:
+   - **The neutral point:** at 0.0 (B10 as first built), one Like of a Rock track this session cannot beat a stored Jazz preference. At 0.5 it can, and an explicit intent beats both. 0.5 stays.
+   - **The gate:** a stricter gate (6 signals, 3 sessions, 3 tracks) holds a random listener's chance preferences back from session 4 to session 10. It also costs every consistent listener one session. The synthetic listeners are no evidence about real ones, so adaptation-v1 stays at 4 / 2 / 2.
+8. **Frontend dev-dependency maintenance** (at the B11 review). `npm audit` reported an advisory in `undici`, which reaches the frontend only through `jsdom`, the test environment. It is not part of the browser build.
+   - **The fix:** `npm audit fix`, without `--force`, changed only `package-lock.json`: `undici` 8.12.1 → 8.12.3, a patch release within `jsdom`'s range.
+   - **The result:** `package.json` is unchanged, and `npm audit` reports 0.
+
+**Alternatives Considered:**
+- **An in-process revision counter** instead of the database revision: not transactional with the change, so a read could keep a state that was never committed.
+- **Random revision tokens** (the first design): they have no order, so publication could not be kept from going backwards.
+- **SQLite triggers** to advance the revision: lost silently on a batch table rebuild.
+- **`PRAGMA data_version` or a fingerprint** (row count, latest update time): per connection, or not exact at the clock's 1 ms resolution.
+- **Skipping domain validation on read:** rejected; the faster read keeps every invariant.
+- **Caching candidate projections** with the kept read: about 40 ms of a 5,000-track refresh, so it would only matter near the top of the range. Not done.
+- **`synchronous = NORMAL`:** measured, and rejected at the review (decision 4).
+- **Tuning the garbage collector, or WAL auto-checkpoints:** measured, with no material change in the tail.
+- **Lowering the global cooldown** to stop a genre running out: rejected, because it would shorten the cooldown for every library.
+- **Incremental long-term derivation:** not needed at Prototype 1 history sizes, and it would give up recomputation from raw history.
+- **Changing the thresholds or the neutral point:** there is no evidence from real listeners.
+- **Vector search or another store:** guide §14; nothing measured needs it.
+
+**Consequences:**
+- **Results:** at 1,000 to 2,000 tracks, interactive commands are about 4 to 7 times faster (the slowest command's p50 went from 268 to 65 ms at 1,000 tracks, and from 517 to 74 ms at 2,000). The 1,500 recorded decisions were unchanged by the optimizations.
+- **Budgets:**
+  - **1,000 tracks: not reliably met.** p95 was 106 to 225 ms across five runs, against 100 ms.
+  - **5,000 tracks: around the target, not reliably met.** p95 was 256 to 350 ms, against 300 ms.
+  - **Startup:** comfortably within.
+  - **The tail** is mostly this one noisy Windows machine. The budgets stay as they were set.
+- **What still grows with the library:** building candidates from the kept read, and a full read after every library change. During an import, each command reads the library again.
+- **The requested-genre correction** costs about 1.2 µs per track per refresh (about 6 ms at 5,000 tracks), and only when a genre is requested.
+- **New state:** one table, a revision write on every track write (once per imported file), and a process-wide copy of the library, about 1.1 KiB per track.
+- **The adaptation cost grows with history:** a Like costs about 0.36 s for a listener with 1,000 past sessions.
+- **Findings left unresolved** (reported, not fixed; they need richer real features or real-listener evidence):
+  - automatic exploration rarely fires within one genre;
+  - a listener who likes broadly gets broad preferences;
+  - old long-term preferences never fade without negative evidence.
+
+**Revisit When:**
+- The budgets must hold on this machine or a listener's slower one. The candidates then are cached candidates, or a reconsidered durability decision.
+- Libraries grow beyond about 5,000 tracks, or histories beyond about 1,000 sessions.
+- The library screen needs import progress.
+- Measured features join what Policy v1 reads from the library: their writes must advance the revision.
+- Real listening data exists to evaluate the thresholds against.
 
 ## New Decision Template
 

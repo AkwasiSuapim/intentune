@@ -33,6 +33,9 @@ whatever it says.
 The text is interpreted and then dropped: only the structured turn or event
 it leads to is stored (D33). A message that is not understood changes and
 records nothing; MessageNotUnderstood says why.
+
+The library read for the vocabulary is the one the use case then checks and
+ranks: a message reads the library once (B11).
 """
 
 from dataclasses import dataclass
@@ -84,13 +87,14 @@ class MessageService:
 
     def start(self, listener_profile_id: str, text: str) -> MessageOutcome:
         """Start a session from the listener's first words. Refused, with nothing started, if they cannot be acted on."""
-        vocabulary = self._capability.require_ready()  # nothing can start before there is music to play
+        library = self._capability.library()
+        vocabulary = self._capability.require_ready(self._capability.vocabulary(library))  # nothing starts before there is music
         meaning = self._understood(text, None, vocabulary)
         if meaning.kind is MeaningKind.REFINE:
-            return MessageOutcome(meaning, self._listening.start(listener_profile_id, meaning.context))
+            return MessageOutcome(meaning, self._listening.start(listener_profile_id, meaning.context, library))
         if meaning.kind is MeaningKind.TURN and meaning.turn in _SESSION_CONTROLS:
-            started = self._listening.start(listener_profile_id, ListeningContext())
-            turn, state = self._listening.steer(started.session.session_id, meaning.turn)
+            started = self._listening.start(listener_profile_id, ListeningContext(), library)
+            turn, state = self._listening.steer(started.session.session_id, meaning.turn, library=library)
             return MessageOutcome(meaning, state, turn=turn)
         raise self._refusal(NotUnderstoodReason.NO_RECOMMENDATION, vocabulary)
 
@@ -103,27 +107,28 @@ class MessageService:
     ) -> MessageOutcome:
         """Act on a message in a session. occurrence_id is the recommendation in view; playback, how far it played."""
         current = self._sessions.get_session(session_id)
-        vocabulary = self._capability.vocabulary()
+        library = self._capability.library()
+        vocabulary = self._capability.vocabulary(library)
         meaning = self._understood(text, current.session.current_context, vocabulary)
         about = occurrence_id or (current.playing.occurrence_id if current.playing is not None else None)
 
         if meaning.kind is MeaningKind.REFINE:
-            turn, state = self._listening.steer(session_id, TurnKind.REFINE, context=meaning.context)
+            turn, state = self._listening.steer(session_id, TurnKind.REFINE, context=meaning.context, library=library)
             return MessageOutcome(meaning, state, turn=turn)
         if meaning.kind is MeaningKind.TURN and meaning.turn in _SESSION_CONTROLS:
-            turn, state = self._listening.steer(session_id, meaning.turn)
+            turn, state = self._listening.steer(session_id, meaning.turn, library=library)
             return MessageOutcome(meaning, state, turn=turn)
         if about is None:
             raise self._refusal(NotUnderstoodReason.NO_RECOMMENDATION, vocabulary)
         if meaning.kind is MeaningKind.TURN and meaning.turn is TurnKind.NEXT:
             playing = current.playing.occurrence_id if current.playing is not None else None
-            turn, state = self._listening.next(session_id, occurrence_id=playing, playback=playback if playing else None)
+            turn, state = self._listening.next(session_id, occurrence_id=playing, playback=playback if playing else None, library=library)
             return MessageOutcome(meaning, state, turn=turn)
         if meaning.kind is MeaningKind.TURN:  # NOT_FOR_ME, MORE_LIKE_THIS: about the recommendation in view
-            turn, state = self._listening.steer(session_id, meaning.turn, occurrence_id=about)
+            turn, state = self._listening.steer(session_id, meaning.turn, occurrence_id=about, library=library)
             return MessageOutcome(meaning, state, turn=turn)
         if meaning.kind is MeaningKind.REACTION:
-            outcome = self._feedback.react(session_id, about, meaning.reaction)
+            outcome = self._feedback.react(session_id, about, meaning.reaction, library)
             return MessageOutcome(meaning, outcome.state, feedback=outcome)
         return MessageOutcome(meaning, current)  # save requested: the UI asks where
 

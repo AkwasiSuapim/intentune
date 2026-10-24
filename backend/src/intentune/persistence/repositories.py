@@ -8,11 +8,12 @@ persistence package.
 
 import dataclasses
 import json
+import threading
 from collections import defaultdict
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Row, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from src.intentune.domain.adaptation import (
@@ -45,6 +46,7 @@ from src.intentune.domain.validation import new_uuid
 from src.intentune.persistence.models import (
     AnalysisJobRecord,
     FeedbackEventRecord,
+    LibraryRevisionRecord,
     LibrarySourceRecord,
     ListenerProfileRecord,
     LongTermAdjustmentEvidenceRecord,
@@ -213,7 +215,21 @@ class SqlAlchemySourceFileRepository:
         _apply_source_file(record, source_file)
 
 
-def _track_label_from_record(record: TrackLabelRecord) -> TrackLabel:
+# The library is read as plain rows of these columns, not ORM records: building a record per track and label
+# was most of a full read's cost (B11). A row and a record answer the same attribute names.
+_TRACK_COLUMNS = tuple(getattr(TrackRecord, column.key) for column in TrackRecord.__table__.columns)
+_LABEL_COLUMNS = tuple(getattr(TrackLabelRecord, column.key) for column in TrackLabelRecord.__table__.columns)
+_TrackRow = Union[TrackRecord, Row]
+# A listener's whole history is read as rows too: thousands of them for a long history (B11).
+_TURN_COLUMNS = tuple(getattr(SessionTurnRecord, column.key) for column in SessionTurnRecord.__table__.columns)
+_OCCURRENCE_COLUMNS = tuple(
+    getattr(RecommendationOccurrenceRecord, column.key) for column in RecommendationOccurrenceRecord.__table__.columns
+)
+_EVENT_COLUMNS = tuple(getattr(FeedbackEventRecord, column.key) for column in FeedbackEventRecord.__table__.columns)
+_IN_BATCH = 500  # ids per IN (...) list, well under SQLite's bound-parameter limit
+
+
+def _track_label_from_record(record: Union[TrackLabelRecord, Row]) -> TrackLabel:
     return TrackLabel(
         kind=record.kind,
         value=record.value,
@@ -223,7 +239,7 @@ def _track_label_from_record(record: TrackLabelRecord) -> TrackLabel:
     )
 
 
-def _track_from_record(record: TrackRecord, labels: Iterable[TrackLabel]) -> Track:
+def _track_from_record(record: _TrackRow, labels: Iterable[TrackLabel]) -> Track:
     return Track(
         track_id=record.id,
         sha256=record.sha256,
@@ -258,11 +274,63 @@ def _apply_track(record: TrackRecord, track: Track) -> None:
     record.updated_at = track.updated_at
 
 
-class SqlAlchemyTrackRepository:
-    """TrackRepository port implementation (see ports/library.py). Labels are stored in track_labels."""
+class TrackSnapshot:
+    """The library's last full read, kept for the next one while the library revision is unchanged (B11, TD-022).
 
-    def __init__(self, session: Session) -> None:
+    The revision is an integer in library_revision. SqlAlchemyTrackRepository advances it, in the same transaction,
+    with every write to a track or its labels, which is every change to what a Track holds: metadata, labels,
+    status, availability. The invariants:
+
+    - A read never returns a library older than a commit that finished before it began. The read takes the
+      revision the database has committed, which every earlier commit has advanced, and returns kept tracks only
+      when they were kept under exactly that revision.
+    - Only committed states are kept. A transaction that has written tracks reads the library afresh and keeps
+      nothing, so a rolled-back write neither publishes nor invalidates anything, and no uncommitted revision is
+      ever kept.
+    - Publication never goes backwards. keep() installs a read only if its revision is newer than the one kept,
+      under a lock, so two overlapping reads that finish in reverse order cannot leave the older one installed.
+      (Each kept value is an immutable tuple; tracks_for() reads it without the lock.)
+
+    For future work: a write to anything else this snapshot comes to hold must advance the revision too. When
+    measured features become part of what Policy v1 reads from the library, their writes
+    (TrackFeatureRepository.replace_for_analyzer()) must advance it as track writes do.
+
+    One per process (the API container).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._kept: Optional[Tuple[int, Tuple[Track, ...]]] = None
+
+    @property
+    def revision(self) -> Optional[int]:
+        """The revision of the kept read; None before the first."""
+        kept = self._kept
+        return kept[0] if kept is not None else None
+
+    def tracks_for(self, revision: int) -> Optional[Tuple[Track, ...]]:
+        kept = self._kept
+        return kept[1] if kept is not None and kept[0] == revision else None
+
+    def keep(self, revision: int, tracks: Sequence[Track]) -> None:
+        """Keep a read of the committed library at this revision, unless a newer read is already kept."""
+        value = (revision, tuple(tracks))
+        with self._lock:
+            if self._kept is None or revision > self._kept[0]:
+                self._kept = value
+
+
+class SqlAlchemyTrackRepository:
+    """TrackRepository port implementation (see ports/library.py). Labels are stored in track_labels.
+
+    Every write advances the library revision, in the same transaction. With a TrackSnapshot, list_all() returns
+    the kept full read while the revision is the one it was read under, and keeps reads of the committed library.
+    """
+
+    def __init__(self, session: Session, snapshot: Optional[TrackSnapshot] = None) -> None:
         self._session = session
+        self._snapshot = snapshot
+        self._wrote = False  # whether this session has written tracks: its reads are then its own, not the committed library
 
     def get(self, track_id: str) -> Optional[Track]:
         record = self._session.get(TrackRecord, track_id)
@@ -273,8 +341,24 @@ class SqlAlchemyTrackRepository:
         return self._with_labels([record])[0] if record is not None else None
 
     def list_all(self) -> List[Track]:
-        records = list(self._session.scalars(select(TrackRecord).order_by(TrackRecord.created_at, TrackRecord.id)))
-        return self._with_labels(records)
+        revision = self._revision() if self._snapshot is not None and not self._wrote else None
+        if revision is not None:
+            kept = self._snapshot.tracks_for(revision)
+            if kept is not None:
+                return list(kept)
+        rows = self._session.execute(select(*_TRACK_COLUMNS).order_by(TrackRecord.created_at, TrackRecord.id)).all()
+        tracks = self._with_labels(rows, every_track=True)
+        if revision is not None:
+            self._snapshot.keep(revision, tracks)
+        return tracks
+
+    def get_many(self, track_ids: Iterable[str]) -> List[Track]:
+        ids = sorted(set(track_ids))
+        rows = []
+        for start in range(0, len(ids), _IN_BATCH):
+            rows.extend(self._session.execute(select(*_TRACK_COLUMNS).where(TrackRecord.id.in_(ids[start : start + _IN_BATCH]))))
+        rows.sort(key=lambda row: (row.created_at, row.id))
+        return self._with_labels(rows)
 
     def ids_with_status(self, status: TrackStatus) -> Set[str]:
         return set(self._session.scalars(select(TrackRecord.id).where(TrackRecord.status == TrackStatus(status).value)))
@@ -285,12 +369,25 @@ class SqlAlchemyTrackRepository:
         self._session.add(record)
         self._session.flush()
         self._add_labels(track)
+        self._changed()
 
     def save(self, track: Track) -> None:
         record = _require_record(self._session.get(TrackRecord, track.track_id), "track", track.track_id)
         _apply_track(record, track)
         self._session.execute(delete(TrackLabelRecord).where(TrackLabelRecord.track_id == track.track_id))
         self._add_labels(track)
+        self._changed()
+
+    def _revision(self) -> Optional[int]:
+        """The library's revision, as this transaction sees it. None if the database has none."""
+        return self._session.scalar(select(LibraryRevisionRecord.revision).where(LibraryRevisionRecord.id == 1))
+
+    def _changed(self) -> None:
+        """Advance the library revision in this transaction, so no kept full read matches the library once it commits."""
+        self._session.execute(
+            update(LibraryRevisionRecord).where(LibraryRevisionRecord.id == 1).values(revision=LibraryRevisionRecord.revision + 1)
+        )
+        self._wrote = True
 
     def _add_labels(self, track: Track) -> None:
         for label in track.labels:
@@ -306,18 +403,22 @@ class SqlAlchemyTrackRepository:
                 )
             )
 
-    def _with_labels(self, records: List[TrackRecord]) -> List[Track]:
-        """Convert track records, loading their labels in one query."""
+    def _with_labels(self, records: Sequence[_TrackRow], every_track: bool = False) -> List[Track]:
+        """Convert track records or rows, loading their labels: every label at once for every_track, else by id."""
         if not records:
             return []
-        statement = select(TrackLabelRecord).order_by(
+        statement = select(*_LABEL_COLUMNS).order_by(
             TrackLabelRecord.kind, TrackLabelRecord.is_primary.desc(), TrackLabelRecord.value
         )
-        if len(records) == 1:
-            statement = statement.where(TrackLabelRecord.track_id == records[0].id)
+        if every_track:
+            statements = [statement]
+        else:
+            ids = [record.id for record in records]
+            statements = [statement.where(TrackLabelRecord.track_id.in_(ids[start : start + _IN_BATCH])) for start in range(0, len(ids), _IN_BATCH)]
         labels: Dict[str, List[TrackLabel]] = defaultdict(list)
-        for label_record in self._session.scalars(statement):
-            labels[label_record.track_id].append(_track_label_from_record(label_record))
+        for batch in statements:
+            for label_row in self._session.execute(batch):
+                labels[label_row.track_id].append(_track_label_from_record(label_row))
         return [_track_from_record(record, labels[record.id]) for record in records]
 
 
@@ -582,6 +683,15 @@ class SqlAlchemySessionTurnRepository:
         statement = select(SessionTurnRecord).where(SessionTurnRecord.session_id == session_id).order_by(SessionTurnRecord.sequence)
         return [_turn_from_record(record) for record in self._session.scalars(statement)]
 
+    def list_for_listener(self, listener_profile_id: str) -> List[SessionTurn]:
+        statement = (
+            select(*_TURN_COLUMNS)
+            .join(ListeningSessionRecord, ListeningSessionRecord.id == SessionTurnRecord.session_id)
+            .where(ListeningSessionRecord.listener_profile_id == listener_profile_id)
+            .order_by(SessionTurnRecord.session_id, SessionTurnRecord.sequence)
+        )
+        return [_turn_from_record(row) for row in self._session.execute(statement)]
+
     def add(self, turn: SessionTurn) -> None:
         self._session.add(
             SessionTurnRecord(
@@ -655,6 +765,20 @@ class SqlAlchemyRecommendationOccurrenceRepository:
             order = (RecommendationOccurrenceRecord.surfaced_at, RecommendationOccurrenceRecord.surfaced_position, RecommendationOccurrenceRecord.id)
         return [_occurrence_from_record(record) for record in self._session.scalars(statement.order_by(*order))]
 
+    def list_for_listener(self, listener_profile_id: str) -> List[RecommendationOccurrence]:
+        statement = (
+            select(*_OCCURRENCE_COLUMNS)
+            .join(ListeningSessionRecord, ListeningSessionRecord.id == RecommendationOccurrenceRecord.session_id)
+            .where(ListeningSessionRecord.listener_profile_id == listener_profile_id)
+            .order_by(
+                RecommendationOccurrenceRecord.session_id,
+                RecommendationOccurrenceRecord.surfaced_at,
+                RecommendationOccurrenceRecord.surfaced_position,
+                RecommendationOccurrenceRecord.id,
+            )
+        )
+        return [_occurrence_from_record(row) for row in self._session.execute(statement)]
+
     def add(self, occurrence: RecommendationOccurrence) -> None:
         record = RecommendationOccurrenceRecord(
             id=occurrence.occurrence_id,
@@ -704,6 +828,15 @@ class SqlAlchemyFeedbackEventRepository:
             .order_by(FeedbackEventRecord.occurred_at, FeedbackEventRecord.id)
         )
         return [_feedback_event_from_record(record) for record in self._session.scalars(statement)]
+
+    def list_for_listener(self, listener_profile_id: str) -> List[FeedbackEvent]:
+        statement = (
+            select(*_EVENT_COLUMNS)
+            .join(ListeningSessionRecord, ListeningSessionRecord.id == FeedbackEventRecord.session_id)
+            .where(ListeningSessionRecord.listener_profile_id == listener_profile_id)
+            .order_by(FeedbackEventRecord.session_id, FeedbackEventRecord.occurred_at, FeedbackEventRecord.id)
+        )
+        return [_feedback_event_from_record(row) for row in self._session.execute(statement)]
 
     def add(self, event: FeedbackEvent) -> None:
         self._session.add(

@@ -8,7 +8,9 @@ Observability helps the developer understand what the system is doing after othe
 
 **Current:** there is no logging setup. The CLI prints to the terminal.
 
-**Planned (Prototype 1):** every API error carries a `request_id` (spec §26). Background jobs persist their status in SQLite, which `GET /api/v1/library/jobs` exposes (B3, B8). B11 measures scoring latency, import and analysis throughput, SQLite latency, API latency, memory, queue response time, and restart behavior before any new infrastructure is added. Client responses never include raw local paths or stack traces, and logs never include secrets or raw conversational text. Metrics below that mention AI or YouTube are **Future**.
+**Planned (Prototype 1):** every API error carries a `request_id` (spec §26). Background jobs persist their status in SQLite, which `GET /api/v1/library/jobs` exposes (B3, B8). Client responses never include raw local paths or stack traces, and logs never include secrets or raw conversational text. Metrics below that mention AI or YouTube are **Future**.
+
+**Current (B11, 2026-10-23):** scoring latency, import and analysis throughput, SQLite latency, API latency, memory, queue response time, and restart behavior are measured offline, by `python -m evaluation.performance` (from `backend/`), on scratch databases with synthetic libraries. The app collects no metrics at runtime and has no metrics endpoint; nothing measured needed one. Results, budgets, and decisions: [Evaluation Report](../quality/evaluation-report.md) and TD-022.
 
 ## Logging
 

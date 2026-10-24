@@ -167,7 +167,7 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 - **Gain:** the library keeps working when the original files move or are deleted; storage names are generated, so filenames never become identifiers.
 - **Cost:** uses extra disk space, roughly one more copy of every imported track. Since B2, content that changes at the source adds a new copy and keeps the old one, until a removal feature exists (TD-013).
 - **Status:** Current since B2 (2026-10-19).
-- **Revisit when:** disk use becomes a problem for real libraries (B11).
+- **Revisit when:** disk use becomes a problem for real libraries (B11). *Measured in B11:* the managed copies of 200 imported files took exactly the bytes of their sources.
 
 ### SQLite + SQLAlchemy + Alembic (D22)
 
@@ -215,12 +215,12 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 
 - **Gain:** a small library keeps a full three-track queue; it repeats tracks after a cooldown instead of running dry, and a graded recent-play penalty makes it rotate rather than alternate two tracks.
 - **Cost:** in a library of a few tracks, a track can return after only a few plays.
-- **Status:** Current since B5 (2026-10-20). The cooldown is 20 plays, or the number of eligible tracks minus three, whichever is smaller (at least one).
+- **Status:** Current since B5 (2026-10-20). The cooldown is 20 plays, or the number of eligible tracks minus three, whichever is smaller (at least one). *Since the B11 review (2026-10-24):* with an explicit genre request, the genre's own plays follow the same rule over the genre's own available tracks, so a requested genre rotates instead of running out in a large library (TD-022).
 
 ### Feedback read from raw facts, per track (D10–D12)
 
 - **Gain:** only raw facts are stored, so Feedback Policy v1's thresholds can change, and the same history can be read again, without losing evidence. Reading everything about a track in a session at once makes explicit actions reliably take precedence over playback, even across queue refreshes, and a track never counts twice.
-- **Cost:** evidence is recomputed from the whole session at every refresh (cheap at session scale; measured in B11). A track heard twice in one session is judged once, by its latest explicit action or, without one, its latest playback.
+- **Cost:** evidence is recomputed from the whole session at every refresh (cheap at session scale; measured in B11: part of a refresh, which reading and ranking the library dominates). A track heard twice in one session is judged once, by its latest explicit action or, without one, its latest playback.
 - **Status:** Current since B6 (2026-10-20, TD-017).
 - **Revisit when:** B11 evaluates the thresholds, or B10 needs evidence across sessions.
 
@@ -236,7 +236,7 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
   - Duplicates need a product decision before they are allowed.
   - A whole-list write costs more than moving one row (negligible for playlists of hundreds of tracks).
 - **Status:** Current since B7 (2026-10-21, TD-018).
-- **Revisit when:** duplicates are approved, or playlists grow to thousands of tracks (B11 measurements).
+- **Revisit when:** duplicates are approved, or playlists grow to thousands of tracks (B11 measurements). *Measured in B11:* at 1,000 tracks an add, remove, or reorder takes about 60 to 70 ms (p50) and a read 15 ms. Kept.
 
 ### Playback effects of feedback (D12, D18, spec §22)
 
@@ -250,14 +250,14 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 - **Gain:** request threads, the analysis worker, and the startup scan can share one SQLite file. A read-then-write transaction no longer fails with "database is locked" when another connection commits in between; it waits its turn on the busy timeout. No use case needs retry logic.
 - **Cost:** transactions serialize, reads included, so WAL's concurrent readers are given up. A long transaction would stall every request; all of them are short today (file and analysis work happen between transactions), and the full suite runs no slower.
 - **Status:** Current since B8 (2026-10-21).
-- **Revisit when:** B11 measures contention with thousands of tracks, or a read-heavy load appears. The alternative is a deferred `BEGIN` for read-only units of work plus retries for writes.
+- **Revisit when:** B11 measures contention with thousands of tracks, or a read-heavy load appears. The alternative is a deferred `BEGIN` for read-only units of work plus retries for writes. *Measured in B11 (TD-022):* no request failed while the startup scan imported 200 files and the worker analyzed them; a start-play-Like loop took p50 138 ms and p95 320 ms meanwhile. Kept.
 
 ### Manual scans inside the request (D26)
 
 - **Gain:** Import and Rescan answer the actual scan report, with no scan-status resource the spec's routes lack. Scans never overlap. The server keeps answering other requests meanwhile, because a scan holds no long transaction.
 - **Cost:** a first import of a large folder keeps its request open until the scan ends, with no progress shown. D26 asks for background scanning; only the startup scan is fully in the background.
 - **Status:** Current since B8 (2026-10-21, TD-019).
-- **Revisit when:** the frontend gains a library screen that needs progress. That would mean `202 Accepted`, a scan-status resource, and keeping the last report.
+- **Revisit when:** the frontend gains a library screen that needs progress. That would mean `202 Accepted`, a scan-status resource, and keeping the last report. *B11 (TD-022):* kept; a first import of 200 five-second files took 15 s here.
 
 ### Starlette's range support instead of our own (spec §25)
 
@@ -297,7 +297,7 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 ### Recompute from raw history instead of updating the profile (TD-021, B10)
 
 - **Gain:** the same history always gives the same profile. A withdrawn Like takes its change back, as a new adjustment, and old evidence can never drift the profile.
-- **Cost:** each relevant event rereads the listener's history (B11 measures it). After withdrawn evidence, a numeric preference can move more than one step, to what the remaining evidence supports.
+- **Cost:** each relevant event rereads the listener's history (B11 measured it: about 0.25 ms per past session, 261 ms at 1,000 sessions). After withdrawn evidence, a numeric preference can move more than one step, to what the remaining evidence supports.
 
 ### Long-term history in its own stage only (TD-021, B10)
 
@@ -307,12 +307,26 @@ The "Expanded and Configurable Scoring Engine" milestone (see docs/planning/deve
 ### Long-term preference as positive affinity (TD-021, B10 review)
 
 - **Gain:** a stored preference lifts what the listener has repeatedly liked without penalizing everything else. Session evidence outweighs it, and current intent outweighs both, under the locked weights and without a tie-break.
-- **Cost:** a full match moves the long-term stage only from 0.5 to 1.0, so history's lift is gentler. The 0.5 neutral point is a heuristic for B11 to evaluate.
+- **Cost:** a full match moves the long-term stage only from 0.5 to 1.0, so history's lift is gentler. The 0.5 neutral point is a heuristic for B11 to evaluate. *Evaluated in B11:* at 0.0 a session's Like could not outrank a stored preference; at 0.5 it does. Kept.
 
 ### Two distinct tracks before a feature preference (TD-021, B10 review)
 
 - **Gain:** one favourite song never becomes a genre, mood, or feature preference by itself.
-- **Cost:** a listener who loves only one song in a genre builds no preference for it. Its raw evidence is kept for future work.
+- **Cost:** a listener who loves only one song in a genre builds no preference for it. Its raw evidence is kept for future work. *Evaluated in B11:* a one-song listener built nothing in ten sessions, and a consistent listener's preference came in the second session.
+
+### Reusing the last full library read (TD-022, B11)
+
+- **Gain:** a command no longer reads and validates the whole library when nothing in it changed. That was most of every command's time from 1,000 tracks up. Exact, because every track write advances the library revision in its own transaction. Only committed reads are kept, and a newer one is never replaced by an older one (verified under concurrency at the B11 review).
+- **Cost:** one table, a revision write on every track write, and a process-wide copy of the library in memory (about 1.1 KiB per track). A write to `tracks` made outside the app's repository, by hand, would not be seen until the app writes a track itself or restarts.
+- **Status:** Current since B11 (2026-10-23).
+- **Revisit when:** something other than the track repository writes tracks; measured features join what Policy v1 reads from the library (their writes must advance the revision); or the library is large enough that holding it in memory matters.
+
+### Commit durability over latency (TD-022, B11 review)
+
+- **Gain:** SQLite keeps `synchronous` at FULL, so a committed change survives a power cut or OS crash. That covers the listener's feedback, playlists, long-term profile, and audit trail.
+- **Cost:** an fsync per commit. Measured, NORMAL would have improved interactive p50 from about 44 to 33 ms and p95 from about 70 to 54 ms at 1,000 tracks. The p95 budgets stay not reliably met.
+- **Status:** Current, decided at the B11 review (2026-10-24).
+- **Revisit when:** measurements on listeners' machines show the commit cost matters to them.
 
 ### No raw conversational text by default (D33)
 

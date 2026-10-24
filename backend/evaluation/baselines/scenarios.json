@@ -1,0 +1,806 @@
+{
+  "adaptation_listeners": {
+    "changing (Jazz for five sessions, then Rock)": {
+      "adjustments": 4,
+      "after_each_session": [
+        "-",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Rock, Driven, Focused",
+        "Jazz, Rock, Driven, Focused",
+        "Jazz, Rock, Driven, Focused",
+        "Jazz, Rock, Driven, Focused"
+      ],
+      "causes": {
+        "GATE_MET": 4
+      },
+      "final": {
+        "genres": [
+          "Jazz",
+          "Rock"
+        ],
+        "moods": [
+          "Driven",
+          "Focused"
+        ]
+      },
+      "first_session_with_a_preference": 2,
+      "sessions": 10
+    },
+    "consistent (likes two different Jazz tracks a session)": {
+      "adjustments": 2,
+      "after_each_session": [
+        "-",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused"
+      ],
+      "causes": {
+        "GATE_MET": 2
+      },
+      "final": {
+        "genres": [
+          "Jazz"
+        ],
+        "moods": [
+          "Focused"
+        ]
+      },
+      "first_session_with_a_preference": 2,
+      "sessions": 10
+    },
+    "more like this only (never likes, asks for more like Jazz tracks)": {
+      "adjustments": 0,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-"
+      ],
+      "causes": {},
+      "final": {
+        "genres": [],
+        "moods": []
+      },
+      "first_session_with_a_preference": null,
+      "sessions": 10
+    },
+    "one song (likes the same Jazz track every session)": {
+      "adjustments": 0,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-"
+      ],
+      "causes": {},
+      "final": {
+        "genres": [],
+        "moods": []
+      },
+      "first_session_with_a_preference": null,
+      "sessions": 10
+    },
+    "random (likes two random tracks a session)": {
+      "adjustments": 4,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "Joyful",
+        "Driven, Joyful",
+        "Rock, Driven, Joyful",
+        "Rock, Driven, Joyful",
+        "Rock, Calm, Driven, Joyful",
+        "Rock, Calm, Driven, Joyful",
+        "Rock, Calm, Driven, Joyful"
+      ],
+      "causes": {
+        "GATE_MET": 4
+      },
+      "final": {
+        "genres": [
+          "Rock"
+        ],
+        "moods": [
+          "Calm",
+          "Driven",
+          "Joyful"
+        ]
+      },
+      "first_session_with_a_preference": 4,
+      "sessions": 10
+    },
+    "rejecting (Not for me on two Metal tracks a session)": {
+      "adjustments": 0,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-"
+      ],
+      "causes": {},
+      "final": {
+        "genres": [],
+        "moods": []
+      },
+      "first_session_with_a_preference": null,
+      "sessions": 10
+    }
+  },
+  "adaptation_listeners_stricter_gate": {
+    "changing (Jazz for five sessions, then Rock)": {
+      "adjustments": 4,
+      "after_each_session": [
+        "-",
+        "-",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Rock, Driven, Focused",
+        "Jazz, Rock, Driven, Focused",
+        "Jazz, Rock, Driven, Focused"
+      ],
+      "causes": {
+        "GATE_MET": 4
+      },
+      "final": {
+        "genres": [
+          "Jazz",
+          "Rock"
+        ],
+        "moods": [
+          "Driven",
+          "Focused"
+        ]
+      },
+      "first_session_with_a_preference": 3,
+      "sessions": 10
+    },
+    "consistent (likes two different Jazz tracks a session)": {
+      "adjustments": 2,
+      "after_each_session": [
+        "-",
+        "-",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused",
+        "Jazz, Focused"
+      ],
+      "causes": {
+        "GATE_MET": 2
+      },
+      "final": {
+        "genres": [
+          "Jazz"
+        ],
+        "moods": [
+          "Focused"
+        ]
+      },
+      "first_session_with_a_preference": 3,
+      "sessions": 10
+    },
+    "more like this only (never likes, asks for more like Jazz tracks)": {
+      "adjustments": 0,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-"
+      ],
+      "causes": {},
+      "final": {
+        "genres": [],
+        "moods": []
+      },
+      "first_session_with_a_preference": null,
+      "sessions": 10
+    },
+    "one song (likes the same Jazz track every session)": {
+      "adjustments": 0,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-"
+      ],
+      "causes": {},
+      "final": {
+        "genres": [],
+        "moods": []
+      },
+      "first_session_with_a_preference": null,
+      "sessions": 10
+    },
+    "random (likes two random tracks a session)": {
+      "adjustments": 2,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "Calm, Joyful"
+      ],
+      "causes": {
+        "GATE_MET": 2
+      },
+      "final": {
+        "genres": [],
+        "moods": [
+          "Calm",
+          "Joyful"
+        ]
+      },
+      "first_session_with_a_preference": 10,
+      "sessions": 10
+    },
+    "rejecting (Not for me on two Metal tracks a session)": {
+      "adjustments": 0,
+      "after_each_session": [
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-",
+        "-"
+      ],
+      "causes": {},
+      "final": {
+        "genres": [],
+        "moods": []
+      },
+      "first_session_with_a_preference": null,
+      "sessions": 10
+    }
+  },
+  "automatic_exploration": {
+    "exploration_picks_played": 0,
+    "explored": 0,
+    "first_play_outside_the_genre": null,
+    "genre_match": 1.0,
+    "rate_at_end": 0.1,
+    "refreshes": 60
+  },
+  "capability_today": {
+    "scenarios": {
+      "discovery": [],
+      "party/dance": [
+        "energy",
+        "danceability"
+      ],
+      "relax": [
+        "energy",
+        "valence",
+        "acousticness"
+      ],
+      "study/calm": [
+        "energy",
+        "acousticness"
+      ],
+      "workout/high energy": [
+        "energy",
+        "tempo"
+      ]
+    },
+    "usable_dimensions": [
+      "mood",
+      "genre"
+    ]
+  },
+  "catalog": {
+    "genres": 12,
+    "per_artist": 4,
+    "steps": 12,
+    "tracks": 240
+  },
+  "long_term_hierarchy": {
+    "nothing said this session": {
+      "0.0": [
+        "Jazz",
+        "Jazz",
+        "Jazz"
+      ],
+      "0.5": [
+        "Jazz",
+        "Jazz",
+        "Jazz"
+      ]
+    },
+    "one Like of a Rock track this session": {
+      "0.0": [
+        "Jazz",
+        "Jazz",
+        "Jazz"
+      ],
+      "0.5": [
+        "Rock",
+        "Jazz",
+        "Rock"
+      ]
+    },
+    "the intent asks for Ambient": {
+      "0.0": [
+        "Ambient",
+        "Ambient",
+        "Ambient"
+      ],
+      "0.5": [
+        "Ambient",
+        "Ambient",
+        "Ambient"
+      ]
+    }
+  },
+  "numeric_listeners": {
+    "one high-energy song (the same track every session)": {
+      "energy_after_each_session": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "scattered energy (0.20 and 0.90 every session)": {
+      "energy_after_each_session": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "steady high energy (two tracks at 0.85 to 0.90 a session)": {
+      "energy_after_each_session": [
+        null,
+        0.875,
+        0.875,
+        0.875,
+        0.875,
+        0.875,
+        0.875,
+        0.875,
+        0.875,
+        0.875
+      ]
+    }
+  },
+  "policy_scenarios": {
+    "discovery": {
+      "controls": {
+        "3": {
+          "control": "SURPRISE_ME",
+          "exploration_pick": {
+            "genre": "Jazz",
+            "queue_position": 3,
+            "title": "Jazz 06"
+          },
+          "explored": true,
+          "played": {
+            "genre": "Jazz",
+            "title": "Jazz 09"
+          }
+        },
+        "6": {
+          "control": "TRY_SOMETHING_DIFFERENT",
+          "exploration_pick": {
+            "genre": "Lofi",
+            "queue_position": 1,
+            "title": "Lofi 15"
+          },
+          "explored": true,
+          "played": {
+            "genre": "Lofi",
+            "title": "Lofi 15"
+          }
+        },
+        "9": {
+          "control": "MORE_FAMILIAR",
+          "exploration_pick": null,
+          "explored": false,
+          "played": {
+            "genre": "Jazz",
+            "title": "Jazz 14"
+          }
+        }
+      },
+      "distinct_artists": 6,
+      "feature_error": {},
+      "first_queue": [
+        {
+          "exploration": false,
+          "genre": "Jazz",
+          "intent_fit": 1.0,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Jazz 00"
+        },
+        {
+          "exploration": false,
+          "genre": "Jazz",
+          "intent_fit": 1.0,
+          "mood": "Focused",
+          "penalties": [],
+          "title": "Jazz 04"
+        },
+        {
+          "exploration": false,
+          "genre": "Jazz",
+          "intent_fit": 1.0,
+          "mood": "Focused",
+          "penalties": [],
+          "title": "Jazz 08"
+        }
+      ],
+      "genre_match": 0.9167,
+      "intent_fit": {
+        "mean": 0.9167,
+        "min": 0.0
+      },
+      "mood_match": null,
+      "played": [
+        "Jazz 00",
+        "Jazz 17",
+        "Jazz 09",
+        "Jazz 05",
+        "Jazz 12",
+        "Lofi 15",
+        "Jazz 16",
+        "Jazz 11",
+        "Jazz 14",
+        "Jazz 01",
+        "Jazz 13",
+        "Jazz 10"
+      ],
+      "refreshes_with_exploration": 2,
+      "repeated_tracks": 0,
+      "same_artist_back_to_back": 0
+    },
+    "party/dance": {
+      "distinct_artists": 10,
+      "feature_error": {
+        "danceability": 0.0319,
+        "energy": 0.0372
+      },
+      "feedback": {
+        "like": {
+          "queue_similarity_after": 0.7312,
+          "queue_similarity_before": 0.7076,
+          "track": "Hip-Hop 14"
+        },
+        "not_for_me": {
+          "queue_similarity_after": 0.7165,
+          "queue_similarity_before": 0.7246,
+          "still_queued": false,
+          "track": "Afrobeats 12"
+        }
+      },
+      "first_queue": [
+        {
+          "exploration": false,
+          "genre": "Afrobeats",
+          "intent_fit": 0.9949,
+          "mood": "Joyful",
+          "penalties": [],
+          "title": "Afrobeats 12"
+        },
+        {
+          "exploration": false,
+          "genre": "Hip-Hop",
+          "intent_fit": 0.9906,
+          "mood": "Joyful",
+          "penalties": [],
+          "title": "Hip-Hop 14"
+        },
+        {
+          "exploration": false,
+          "genre": "Pop",
+          "intent_fit": 0.9903,
+          "mood": "Joyful",
+          "penalties": [],
+          "title": "Pop 06"
+        }
+      ],
+      "genre_match": null,
+      "intent_fit": {
+        "mean": 0.9802,
+        "min": 0.9574
+      },
+      "mood_match": 1,
+      "played": [
+        "Afrobeats 12",
+        "Pop 06",
+        "Electronic 13",
+        "Pop 07",
+        "Electronic 10",
+        "Pop 08",
+        "Electronic 17",
+        "Pop 00",
+        "Electronic 05",
+        "Hip-Hop 14",
+        "Pop 12",
+        "Hip-Hop 15"
+      ],
+      "refreshes_with_exploration": 0,
+      "repeated_tracks": 0,
+      "same_artist_back_to_back": 0
+    },
+    "relax": {
+      "distinct_artists": 7,
+      "feature_error": {
+        "acousticness": 0.0553,
+        "energy": 0.0361,
+        "valence": 0.0943
+      },
+      "feedback": {
+        "like": {
+          "queue_similarity_after": 0.9472,
+          "queue_similarity_before": 0.7166,
+          "track": "Classical 04"
+        },
+        "not_for_me": {
+          "queue_similarity_after": 0.699,
+          "queue_similarity_before": 0.7071,
+          "still_queued": false,
+          "track": "Ambient 18"
+        }
+      },
+      "first_queue": [
+        {
+          "exploration": false,
+          "genre": "Ambient",
+          "intent_fit": 0.9821,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Ambient 18"
+        },
+        {
+          "exploration": false,
+          "genre": "Classical",
+          "intent_fit": 0.9699,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Classical 04"
+        },
+        {
+          "exploration": false,
+          "genre": "Jazz",
+          "intent_fit": 0.961,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Jazz 00"
+        }
+      ],
+      "genre_match": null,
+      "intent_fit": {
+        "mean": 0.9683,
+        "min": 0.9514
+      },
+      "mood_match": 1,
+      "played": [
+        "Ambient 18",
+        "Ambient 13",
+        "Classical 09",
+        "Ambient 10",
+        "Classical 04",
+        "Ambient 12",
+        "Classical 19",
+        "Ambient 09",
+        "Classical 01",
+        "Ambient 19",
+        "Classical 02",
+        "Ambient 16"
+      ],
+      "refreshes_with_exploration": 0,
+      "repeated_tracks": 0,
+      "same_artist_back_to_back": 0
+    },
+    "study/calm": {
+      "distinct_artists": 7,
+      "feature_error": {
+        "acousticness": 0.0625,
+        "energy": 0.0387
+      },
+      "feedback": {
+        "like": {
+          "queue_similarity_after": 0.9354,
+          "queue_similarity_before": 0.8232,
+          "track": "Jazz 09"
+        },
+        "not_for_me": {
+          "queue_similarity_after": 0.4655,
+          "queue_similarity_before": 0.7133,
+          "still_queued": false,
+          "track": "Lofi 15"
+        }
+      },
+      "first_queue": [
+        {
+          "exploration": false,
+          "genre": "Lofi",
+          "intent_fit": 0.9965,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Lofi 15"
+        },
+        {
+          "exploration": false,
+          "genre": "Jazz",
+          "intent_fit": 0.9885,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Jazz 09"
+        },
+        {
+          "exploration": false,
+          "genre": "Jazz",
+          "intent_fit": 0.9805,
+          "mood": "Calm",
+          "penalties": [],
+          "title": "Jazz 05"
+        }
+      ],
+      "genre_match": null,
+      "intent_fit": {
+        "mean": 0.9767,
+        "min": 0.9627
+      },
+      "mood_match": 1,
+      "played": [
+        "Lofi 15",
+        "Jazz 05",
+        "Lofi 17",
+        "Jazz 09",
+        "Lofi 18",
+        "Jazz 01",
+        "Lofi 13",
+        "Jazz 11",
+        "Lofi 07",
+        "Jazz 00",
+        "Ambient 06",
+        "Lofi 04"
+      ],
+      "refreshes_with_exploration": 0,
+      "repeated_tracks": 0,
+      "same_artist_back_to_back": 0
+    },
+    "workout/high energy": {
+      "distinct_artists": 8,
+      "feature_error": {
+        "energy": 0.0401,
+        "tempo_bpm": 6.1667
+      },
+      "feedback": {
+        "like": {
+          "queue_similarity_after": 0.8463,
+          "queue_similarity_before": 0.7184,
+          "track": "Rock 08"
+        },
+        "not_for_me": {
+          "queue_similarity_after": 0.7062,
+          "queue_similarity_before": 0.7285,
+          "still_queued": false,
+          "track": "Metal 14"
+        }
+      },
+      "first_queue": [
+        {
+          "exploration": false,
+          "genre": "Metal",
+          "intent_fit": 0.9993,
+          "mood": "Driven",
+          "penalties": [],
+          "title": "Metal 14"
+        },
+        {
+          "exploration": false,
+          "genre": "Rock",
+          "intent_fit": 0.992,
+          "mood": "Driven",
+          "penalties": [],
+          "title": "Rock 08"
+        },
+        {
+          "exploration": false,
+          "genre": "Electronic",
+          "intent_fit": 0.984,
+          "mood": "Driven",
+          "penalties": [],
+          "title": "Electronic 15"
+        }
+      ],
+      "genre_match": null,
+      "intent_fit": {
+        "mean": 0.9764,
+        "min": 0.9417
+      },
+      "mood_match": 1,
+      "played": [
+        "Metal 14",
+        "Metal 08",
+        "Metal 15",
+        "Metal 05",
+        "Rock 08",
+        "Metal 02",
+        "Rock 02",
+        "Metal 16",
+        "Rock 03",
+        "Metal 17",
+        "Electronic 15",
+        "Metal 01"
+      ],
+      "refreshes_with_exploration": 0,
+      "repeated_tracks": 0,
+      "same_artist_back_to_back": 0
+    }
+  },
+  "versions": {
+    "adaptation": "adaptation-v1",
+    "policy": "policy-v1"
+  }
+}

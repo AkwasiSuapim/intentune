@@ -120,7 +120,7 @@ def test_a_refused_turn_changes_nothing(listening, sessions, listener, ids):
 
 def test_a_failed_refresh_leaves_the_turn_recorded(unit_of_work, sessions, listener, ids):
     class FailingRecommendations:
-        def refresh_queue(self, session_id):
+        def refresh_queue(self, session_id, library=None):
             raise RuntimeError("policy failed")
 
     started = sessions.start_session(listener, ListeningContext(temporary_genres=("ambient",)))

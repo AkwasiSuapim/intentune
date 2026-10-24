@@ -24,8 +24,8 @@ Each phase ends with the full test suite, documentation updates, a report, and a
 | **B7** Playlists | CRUD, add/remove/reorder, persistence | **Complete and committed** (2026-10-21, `116276b`, together with B6). 905 backend tests pass and 1 is skipped (906 collected; B7 adds 75). |
 | **B8** FastAPI | Library/session/feedback/playlist/audio routes, errors, request IDs, API tests | **Complete and committed** (2026-10-21, `ac23287`), on top of `116276b`. 1075 backend tests pass and 1 is skipped (1076 collected; B8 adds 170). |
 | **B9** Frontend integration | Inspect the actual F8 service boundary; add an HTTP adapter without rewriting frontend state architecture | **Complete, reviewed, and committed** (2026-10-22, `886cf66`), on top of `ac23287`, with its review corrections. Corresponds to frontend phase F9. 1270 backend tests pass and 1 is skipped; 276 frontend tests pass. GitHub Actions CI passed. |
-| **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | **Complete, awaiting review** (2026-10-22; review corrections 2026-10-23), on top of `886cf66`. 1343 backend tests pass and 1 is skipped (B10 adds 73); 276 frontend tests pass (no frontend change). |
-| **B11** Evaluation/hardening | Performance with hundreds to thousands of tracks, restart behavior, migrations, algorithm evaluation | Not started |
+| **B10** Conservative long-term adaptation | 4 strong signals / 2 sessions gate, bounded changes, audit trail, reversibility | **Complete, reviewed, and committed** (2026-10-23, `a5e0525`), on top of `886cf66`, with its review corrections. 1343 backend tests pass and 1 is skipped (B10 adds 73); 276 frontend tests pass (no frontend change). |
+| **B11** Evaluation/hardening | Performance with hundreds to thousands of tracks, restart behavior, migrations, algorithm evaluation | **Complete, awaiting review** (2026-10-23; review corrections 2026-10-24), on top of `a5e0525`. 1374 backend tests pass and 1 is skipped (B11 adds 31); 276 frontend tests pass (no frontend source change; a dev-dependency lockfile patch). |
 
 Acceptance criteria for each phase are in the execution guide §4–§14. Prototype 1 is done when every item in spec §30 holds.
 
@@ -445,6 +445,71 @@ Review corrections (2026-10-23), before the commit:
 - a mapping for `current_mood`, `listening_goal`, and `activity`;
 - a library and import screen;
 - B11 evaluation of the thresholds and the long-term neutral point.
+
+### B11 record (2026-10-23)
+
+On branch `prototype-1`, on top of `a5e0525` (B10, reviewed and committed). Decisions: [TD-022](../decisions/technical-decisions.md#td-022-b11-evaluation-and-hardening). Results: [Evaluation Report](../quality/evaluation-report.md).
+
+What was built:
+- **Evaluation tooling** (`backend/evaluation/`, not part of the app):
+  - `python -m evaluation.performance`: latency by library size (100 to 5,000 tracks) in steady state and cold; long-term adaptation by history size; import, analysis, contention, memory, restart, disk, and playlists; with budgets and repeated runs.
+  - `python -m evaluation.scenarios`: spec §28's five scenarios, what an imported library can act on today, the long-term listeners, and two comparisons. The output is a stored baseline that a test checks.
+  - Scratch databases and synthetic libraries only.
+- **Hardening, each step from a measured cause, with outputs unchanged** (1,500 recorded Policy v1 decisions identical before and after the optimizations):
+  - Policy v1's diversity step stops early, and a refresh scores alike candidates once;
+  - the library and a listener's history are read as rows;
+  - each command reads the library once;
+  - the API reuses its last library read while no track has changed (`TrackSnapshot`, migration `5ed16a5d9ff5`);
+  - adaptation reads the history in three queries and only the tracks it mentions.
+
+What was measured, and decided:
+- **Before and after:** about 4 to 7 times faster at 1,000 to 2,000 tracks. The slowest interactive command's p50 went from 268 to 65 ms at 1,000 tracks, and from 517 to 74 ms at 2,000.
+- **Budgets** (set before the first measurement, not revised):
+  - **1,000 tracks: not reliably met.** p95 was 106 to 225 ms across five runs, against 100 ms.
+  - **5,000 tracks: around the target, not reliably met.** p95 was 256 to 350 ms, against 300 ms.
+  - **Startup:** comfortably within, at 0.07 to 0.32 s.
+  - **The tail** is mostly this one noisy Windows machine.
+- **Kept on the evidence:**
+  - `BEGIN IMMEDIATE` and WAL: no errors under the scan and worker;
+  - synchronous manual scans;
+  - paging after a full load, since a page is about 4 ms;
+  - full raw-history retention, at about 3.4 KiB per session;
+  - managed copies, one more copy of the library;
+  - whole-list playlist writes, about 60 to 70 ms at 1,000 tracks;
+  - the whole-history recompute, about 0.25 ms per past session;
+  - B10's thresholds and the 0.5 long-term neutral point;
+  - SQLite `synchronous` FULL, decided at the review: NORMAL measured faster (p50 about 44 → 33 ms, p95 about 70 → 54 ms at 1,000 tracks), but not enough to weaken commit durability for the listener's state;
+  - no vector search, no new service, and no new runtime dependency.
+- **Restart and migrations:** a restart keeps the library, metadata, playlists, feedback, history, and the long-term profile, and listening starts fresh. A database from the first library migration upgrades with its data, and the app serves it.
+
+What was verified:
+- **Suites:** 1374 backend tests pass and 1 is skipped (B11 adds 31). After `npm ci`, 276 frontend tests pass, lint and build are clean, and `npm audit` finds 0 vulnerabilities.
+- **Mutations:** 20 single-rule mutations of the hardening and the review corrections, each caught.
+- **Manual run over a real server** (`python -m src.intentune.api` on a scratch database, with the startup scan and worker on, over HTTP): **15/15**.
+  - An import, start, play, and Like.
+  - Changes made while it ran were each seen by the very next read: a rescan's new genre (in the vocabulary, the track list, and a start in that genre), a managed copy found missing, and the worker's status changes.
+  - After a hard stop and restart: the library and its metadata were the same (except the missing copy, which the startup scan repaired, as designed); the open session had ended `app_restarted`; the Like and every session were kept; and a new session started fresh.
+  - Repeated after the review corrections: 15/15 again.
+
+Review corrections (2026-10-24), before the commit:
+- **SQLite durability:** `synchronous` stays FULL, and the decision is recorded in TD-022. It does not satisfy the budgets, which stay reported as not reliably met.
+- **A requested genre no longer runs out:** a correctness correction to Policy v1 under D17.
+  - With an explicit genre request, the genre's own plays are held back only as long as its available tracks allow, so it keeps rotating in a large library.
+  - It only releases tracks earlier; the track playing, other tracks, sessions without a genre request, and the global cooldown are unchanged.
+  - 152 of the 1,500 recorded decisions change, every one where a requested track is released. One scenario baseline changed: the 60-play Jazz session's genre match, from 0.97 to 1.0.
+- **`TrackSnapshot` under concurrency:** the revision is now an integer the track repository advances. A transaction that has written keeps nothing, so a rollback neither publishes nor invalidates. Publication never goes backwards, under a lock. Concurrency tests check that a read never sees a library older than a commit finished before it began.
+- **Frontend dev-dependency maintenance:** `npm audit fix` (no `--force`) patched `undici` 8.12.1 → 8.12.3 in `package-lock.json` only. `undici` reaches the frontend only through the test environment (`jsdom`), not the browser build.
+
+**Findings left unresolved** (reported, not fixed; they need richer real features or real-listener evidence):
+- automatic exploration rarely fires within one genre;
+- broad listeners get broad long-term preferences;
+- long-term preferences never fade.
+
+**Still required before Prototype 1 is finished** (not B11, and not faked):
+- a trusted mood-label source;
+- a validated feature pipeline (D21);
+- a mapping for `current_mood`, `listening_goal`, and `activity`;
+- a library and import screen.
 
 ## Frontend Phases
 

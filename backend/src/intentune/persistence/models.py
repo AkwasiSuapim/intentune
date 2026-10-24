@@ -182,6 +182,19 @@ class TrackLabelRecord(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
+class LibraryRevisionRecord(Base):
+    """One row whose revision advances, in the same transaction, with every write to tracks or track_labels (B11).
+
+    SqlAlchemyTrackRepository writes it. A full read of the library is reused while it is unchanged (TrackSnapshot).
+    """
+
+    __tablename__ = "library_revision"
+    __table_args__ = (CheckConstraint("id = 1", name="single_row"), CheckConstraint("revision >= 1", name="revision"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class SourceFileRecord(Base):
     """What the last scan recorded about one file in a source: the incremental-scan state (spec §5)."""
 

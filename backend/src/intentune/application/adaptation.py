@@ -21,12 +21,14 @@ time: an Unlike that withdraws a Like takes back the change the Like
 supported, as a new recorded adjustment (nothing is deleted), and evidence
 already consumed by the derivation never moves the profile again.
 
-Cost: one read of the listener's history per relevant event. Prototype 1
-histories are small; B11 measures it.
+Cost: one read of the listener's history per relevant event: three queries
+for the whole history and one for the tracks it mentions, whatever its size
+(B11; the measurements are in docs/quality/evaluation-report.md).
 """
 
+from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, TypeVar
 
 from src.intentune.domain.adaptation import (
     ADAPTATION_V1,
@@ -48,6 +50,17 @@ from src.intentune.ports.unit_of_work import UnitOfWork
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+T = TypeVar("T")
+
+
+def _by_session(items: Iterable[T]) -> Dict[str, Tuple[T, ...]]:
+    """A listener-wide read split by session, each session's items in the order read."""
+    grouped: Dict[str, List[T]] = defaultdict(list)
+    for item in items:
+        grouped[item.session_id].append(item)
+    return {session_id: tuple(values) for session_id, values in grouped.items()}
 
 
 class LongTermAdaptationService:
@@ -129,14 +142,19 @@ class LongTermAdaptationService:
         return tuple(adjustments)
 
     def _derive(self, listener_profile_id: str) -> DerivedProfile:
+        turns = _by_session(self._uow.session_turns.list_for_listener(listener_profile_id))
+        occurrences = _by_session(self._uow.recommendation_occurrences.list_for_listener(listener_profile_id))
+        events = _by_session(self._uow.feedback_events.list_for_listener(listener_profile_id))
         histories = [
             SessionHistory(
                 session=session,
-                turns=tuple(self._uow.session_turns.list_for_session(session.session_id)),
-                occurrences=tuple(self._uow.recommendation_occurrences.list_for_session(session.session_id)),
-                feedback_events=tuple(self._uow.feedback_events.list_for_session(session.session_id)),
+                turns=turns.get(session.session_id, ()),
+                occurrences=occurrences.get(session.session_id, ()),
+                feedback_events=events.get(session.session_id, ()),
             )
             for session in self._uow.listening_sessions.list_for_listener(listener_profile_id)
         ]
-        tracks = {track.track_id: track for track in self._uow.tracks.list_all()}
+        # Evidence is only ever about a track the history surfaced, so only those tracks are read.
+        mentioned = {occurrence.track_id for history in histories for occurrence in history.occurrences}
+        tracks = {track.track_id: track for track in self._uow.tracks.get_many(mentioned)}
         return derive_profile(strong_evidence(histories, tracks, self._policy, self._feedback_policy), self._policy)

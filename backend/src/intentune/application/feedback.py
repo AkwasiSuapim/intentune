@@ -32,11 +32,12 @@ frontend owns playback position and reports how a track ended.
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.recommendations import RecommendationService
 from src.intentune.application.sessions import SessionService
+from src.intentune.domain.library import Track
 from src.intentune.domain.policy import Interpretation, event_weight, interpret_feedback
 from src.intentune.domain.session import FeedbackEvent, FeedbackEventType, SessionState
 from src.intentune.ports.unit_of_work import UnitOfWork
@@ -79,14 +80,19 @@ class FeedbackService:
         self._recommendations = recommendations
         self._adaptation = adaptation
 
-    def react(self, session_id: str, occurrence_id: str, reaction: FeedbackEventType) -> FeedbackOutcome:
-        """Record Like, Unlike, Save, Replay, or Not for me about an occurrence, then re-rank."""
+    def react(
+        self, session_id: str, occurrence_id: str, reaction: FeedbackEventType, library: Optional[Sequence[Track]] = None
+    ) -> FeedbackOutcome:
+        """Record Like, Unlike, Save, Replay, or Not for me about an occurrence, then re-rank.
+
+        library is every track, if the caller has just read it (a typed reaction, B11); otherwise the refresh reads it.
+        """
         reaction = FeedbackEventType(reaction)
         if reaction is FeedbackEventType.PLAYLIST_ADD:
             raise ValueError("A playlist add is recorded by PlaylistService.add_track(), with the playlist item it stands for.")
         if reaction not in REACTIONS:
             raise ValueError(f"{reaction.value} is not a reaction; report playback endings with report_playback().")
-        return self._record(session_id, occurrence_id, reaction, None, None)
+        return self._record(session_id, occurrence_id, reaction, None, None, library)
 
     def record_playlist_add(self, session_id: str, occurrence_id: str) -> FeedbackOutcome:
         """Record that a recommendation was added to a playlist (+1.00, B7), then re-rank.
@@ -117,10 +123,11 @@ class FeedbackService:
         event_type: FeedbackEventType,
         played_seconds: Optional[float],
         duration_seconds: Optional[float],
+        library: Optional[Sequence[Track]] = None,
     ) -> FeedbackOutcome:
         event, _ = self._sessions.record_feedback(session_id, occurrence_id, event_type, played_seconds, duration_seconds)
         self._adaptation.adapt_after(session_id)
-        state = self._recommendations.refresh_queue(session_id)
+        state = self._recommendations.refresh_queue(session_id, library)
         history = self._sessions.history(session_id)
         track_id = next(occurrence.track_id for occurrence in history.occurrences if occurrence.occurrence_id == occurrence_id)
         same_track = {occurrence.occurrence_id for occurrence in history.occurrences if occurrence.track_id == track_id}

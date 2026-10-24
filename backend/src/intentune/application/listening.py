@@ -28,16 +28,18 @@ against the library as it is now (B9). With no playable tracks, nothing can be
 recommended: LibraryNotReady. An intent that sets a dimension the library has
 no usable data for raises IntentUnavailable. Either way nothing is started,
 recorded, or surfaced. Typed refinements arrive here too, so both kinds of
-input meet the same rule.
+input meet the same rule. The tracks it checked against are the ones the
+refresh then ranks: each command reads the library once (B11).
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 from src.intentune.application.adaptation import LongTermAdaptationService
 from src.intentune.application.capability import IntentCapability
 from src.intentune.application.recommendations import RecommendationService
 from src.intentune.application.sessions import SessionService
+from src.intentune.domain.library import Track
 from src.intentune.domain.models import ListeningContext
 from src.intentune.domain.session import FeedbackEventType, SessionState, SessionTurn, TurnKind
 
@@ -63,14 +65,18 @@ class ListeningService:
         self._capability = capability
         self._adaptation = adaptation
 
-    def start(self, listener_profile_id: str, context: ListeningContext) -> SessionState:
+    def start(
+        self, listener_profile_id: str, context: ListeningContext, library: Optional[Sequence[Track]] = None
+    ) -> SessionState:
         """Start a session (the listener's previous one ends) and surface its first queue. Nothing plays yet.
 
         Refused, before anything changes, if the library is not ready or the intent asks for what it cannot act on.
+        library is every track, if the caller has just read it (IntentCapability.library()); otherwise it is read here.
         """
-        self._capability.require(ListeningContext(), context)
+        library = library if library is not None else self._capability.library()
+        self._capability.require(ListeningContext(), context, self._capability.vocabulary(library))
         started = self._sessions.start_session(listener_profile_id, context)
-        return self._recommendations.refresh_queue(started.session.session_id)
+        return self._recommendations.refresh_queue(started.session.session_id, library)
 
     def steer(
         self,
@@ -78,30 +84,34 @@ class ListeningService:
         kind: TurnKind,
         context: Optional[ListeningContext] = None,
         occurrence_id: Optional[str] = None,
+        library: Optional[Sequence[Track]] = None,
     ) -> Tuple[SessionTurn, SessionState]:
         """Record a steering turn, then re-rank the queue. Returns the turn and the session after the refresh.
 
         A REFINE is refused, before anything changes, if the library is not ready or the new intent asks for what it
-        cannot act on.
+        cannot act on. library is every track, as in start().
         """
         if kind is TurnKind.REFINE and context is not None:
-            self._capability.require(self._sessions.get_session(session_id).session.current_context, context)
+            library = library if library is not None else self._capability.library()
+            current = self._sessions.get_session(session_id).session.current_context
+            self._capability.require(current, context, self._capability.vocabulary(library))
         turn = self._sessions.apply_turn(session_id, kind, context=context, occurrence_id=occurrence_id)
         if turn.kind is TurnKind.NOT_FOR_ME:  # More like this steers the session only: no long-term evidence
             self._adaptation.adapt_after(session_id)
-        return turn, self._recommendations.refresh_queue(session_id)
+        return turn, self._recommendations.refresh_queue(session_id, library)
 
     def next(
         self,
         session_id: str,
         occurrence_id: Optional[str] = None,
         playback: Optional[PlaybackFacts] = None,
+        library: Optional[Sequence[Track]] = None,
     ) -> Tuple[SessionTurn, SessionState]:
         """Move on: the NEXT turn, the SKIP fact about the track it ended (when the player reported one), then re-rank.
 
         occurrence_id, when given, must be the playing occurrence. The SKIP is
         recorded after the turn, as a report about an occurrence that has just
-        finished, so it moves nothing a second time (B6).
+        finished, so it moves nothing a second time (B6). library is every track, as in start().
         """
         turn = self._sessions.apply_turn(session_id, TurnKind.NEXT, occurrence_id=occurrence_id)
         if playback is not None and turn.occurrence_id is not None:
@@ -109,4 +119,4 @@ class ListeningService:
                 session_id, turn.occurrence_id, FeedbackEventType.SKIP, playback.played_seconds, playback.duration_seconds
             )
             self._adaptation.adapt_after(session_id)
-        return turn, self._recommendations.refresh_queue(session_id)
+        return turn, self._recommendations.refresh_queue(session_id, library)

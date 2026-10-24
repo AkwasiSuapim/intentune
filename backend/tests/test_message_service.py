@@ -103,13 +103,17 @@ def _titles(occurrences, ids):
 
 
 class _FixedCapability(IntentCapability):
-    """The capability of a library with this vocabulary (which no library has today), counting the checks it is asked for."""
+    """The capability of a library with this vocabulary (which no library has today), counting the checks it is asked for.
 
-    def __init__(self, vocabulary):
+    Its tracks are the real library's, so the queue refresh still ranks them.
+    """
+
+    def __init__(self, unit_of_work, vocabulary):
+        super().__init__(unit_of_work)
         self.fixed = vocabulary
         self.checks = 0
 
-    def vocabulary(self):
+    def vocabulary(self, library=None):
         return self.fixed
 
     def require(self, before, after, vocabulary=None):
@@ -124,9 +128,9 @@ class _CountingRecommendations:
         self._inner = inner
         self.refreshes = 0
 
-    def refresh_queue(self, session_id):
+    def refresh_queue(self, session_id, library=None):
         self.refreshes += 1
-        return self._inner.refresh_queue(session_id)
+        return self._inner.refresh_queue(session_id, library)
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
@@ -198,7 +202,8 @@ def test_a_refinement_is_a_refine_turn_with_the_new_context(messages, sessions, 
 def energetic(unit_of_work, sessions, feedback):
     """Listening and messages over a library that, unlike any today, has energy and mood evidence."""
     capability = _FixedCapability(
-        Vocabulary(genres=("Ambient", "Jazz"), library_moods=("Calm",), capability=LibraryCapability(6, ("mood", "genre", "energy")))
+        unit_of_work,
+        Vocabulary(genres=("Ambient", "Jazz"), library_moods=("Calm",), capability=LibraryCapability(6, ("mood", "genre", "energy"))),
     )
     listening = ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability, LongTermAdaptationService(unit_of_work))
     return listening, MessageService(DeterministicIntentInterpreter(), sessions, listening, feedback, capability)
@@ -240,7 +245,7 @@ def test_a_mood_no_track_declares_is_refused_and_clearing_one_is_always_allowed(
 
 def test_typed_and_structured_intent_meet_the_same_capability_rule(unit_of_work, sessions, feedback, listener, ids):
     """One capability answers both paths: what it refuses, both refuse alike, and what it allows, both apply."""
-    capability = _FixedCapability(Vocabulary(genres=("Ambient", "Jazz"), capability=LibraryCapability(6, ("genre",))))
+    capability = _FixedCapability(unit_of_work, Vocabulary(genres=("Ambient", "Jazz"), capability=LibraryCapability(6, ("genre",))))
     listening = ListeningService(sessions, RecommendationService(unit_of_work, rng=_NeverExplore(0)), capability, LongTermAdaptationService(unit_of_work))
     messages = MessageService(DeterministicIntentInterpreter(), sessions, listening, feedback, capability)
     session_id = listening.start(listener, ListeningContext(temporary_genres=("Ambient",))).session.session_id

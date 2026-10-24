@@ -105,13 +105,24 @@ The Python backend lives in `backend/`. Run the commands below from that directo
 
 ### Running Tests
 
-Run the starter tests from the `backend/` directory with:
+Run the tests from the `backend/` directory, with the virtual environment active:
 
 ```bash
-pytest
+python -m pytest
 ```
 
-You can add more tests in `backend/tests/test_recommender.py`.
+Run it as a module: it puts `backend/` on the import path, which the tests' `src.…` imports need (a bare `pytest` does not).
+
+### Evaluating Performance and the Algorithms
+
+From `backend/`, with the virtual environment active:
+
+```bash
+python -m evaluation.performance   # latency by library size, adaptation cost, import, contention, memory, restart (a few minutes)
+python -m evaluation.scenarios     # the five algorithm scenarios and the long-term listeners; --check compares with the stored baseline
+```
+
+Both build scratch databases and synthetic libraries, and never touch `backend/data`. The results, budgets, and the decisions taken on them are in the [Evaluation Report](docs/quality/evaluation-report.md).
 
 ---
 

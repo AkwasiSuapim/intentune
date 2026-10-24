@@ -84,6 +84,8 @@ ranking     long-term stage = 0.5 + 0.5 x profile similarity: positive affinity,
             neutral for a mismatch (intent fit and signed session fit unchanged)
 ```
 
+*Evaluated in B11 (2026-10-23, TD-022)* against fixed scenarios, with the Recommendation, Feedback, and Queue policies: every constant kept. The scenarios' output is a stored baseline, so any later change to a policy shows as a reviewed difference ([evaluation report](../quality/evaluation-report.md)). B11's performance work changed no policy output. *Corrected at the B11 review (2026-10-24, TD-022):* under D17, an explicitly requested genre is held to a cooldown bounded by its own available tracks, so it keeps rotating instead of running out in a large library.
+
 ## Queue Policy v1
 
 ```text

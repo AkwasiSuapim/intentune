@@ -40,6 +40,7 @@ from src.intentune.application.recommendations import RecommendationService
 from src.intentune.application.sessions import SessionService
 from src.intentune.persistence.db import create_database_engine, create_session_factory
 from src.intentune.persistence.migrations import upgrade_database
+from src.intentune.persistence.repositories import TrackSnapshot
 from src.intentune.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 logger = logging.getLogger("intentune.api")
@@ -53,6 +54,7 @@ class Container:
         self._rng_factory = rng_factory
         self._engine = create_database_engine(settings.database_url)
         self._session_factory = create_session_factory(self._engine)
+        self._track_snapshot = TrackSnapshot()  # the library's last full read, reused while it is unchanged (B11)
         self._media = LocalManagedMedia(settings.media_root)
         self._folders = LocalSourceFolders(excluded_directories=[self._media.root])
         self._inspector = MutagenAudioInspector()
@@ -142,4 +144,4 @@ class Container:
         return RecommendationService(unit_of_work, rng=self._rng_factory())
 
     def _unit_of_work(self) -> SqlAlchemyUnitOfWork:
-        return SqlAlchemyUnitOfWork(self._session_factory)
+        return SqlAlchemyUnitOfWork(self._session_factory, self._track_snapshot)

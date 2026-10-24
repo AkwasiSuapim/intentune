@@ -5,7 +5,7 @@ every repository, these stage changes; the unit of work that owns them
 commits (ports/unit_of_work.py). They accept and return domain models only.
 """
 
-from typing import List, Optional, Protocol, Set
+from typing import Iterable, List, Optional, Protocol, Set
 
 from src.intentune.domain.library import LibrarySource, SourceFile, Track, TrackStatus
 
@@ -52,6 +52,10 @@ class TrackRepository(Protocol):
 
     def list_all(self) -> List[Track]:
         """Every track, in import order."""
+        ...
+
+    def get_many(self, track_ids: Iterable[str]) -> List[Track]:
+        """The tracks with these ids, in import order. Ids of no track are left out (B11: one read, not one per id)."""
         ...
 
     def ids_with_status(self, status: TrackStatus) -> Set[str]:

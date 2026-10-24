@@ -508,6 +508,50 @@ def test_the_b10_migration_adds_long_term_adaptation_and_its_downgrade_keeps_the
         engine.dispose()
 
 
+def test_the_b11_migration_adds_one_library_revision_and_its_downgrade_drops_only_it(migrated_database_url):
+    """B11 adds the one-row library_revision a full library read is kept under. A track write advances it;
+    downgrading drops the table and nothing else; upgrading again starts it afresh."""
+    def revision_rows():
+        engine = create_database_engine(migrated_database_url)
+        try:
+            with engine.connect() as connection:
+                return connection.exec_driver_sql("SELECT id, revision FROM library_revision").all()
+        finally:
+            engine.dispose()
+
+    assert revision_rows() == [(1, 1)]
+    engine = create_database_engine(migrated_database_url)
+    try:
+        unit_of_work = SqlAlchemyUnitOfWork(create_session_factory(engine))
+        now = datetime(2026, 10, 23, 9, 0, tzinfo=timezone.utc)
+        with unit_of_work:
+            unit_of_work.tracks.add(Track(
+                track_id=str(uuid.UUID(int=1)), sha256="1" * 64, size_bytes=10, audio_format=AudioFormat.FLAC, status=TrackStatus.READY,
+                original_filename="song.flac", created_at=now, updated_at=now, labels=(TrackLabel(LabelKind.GENRE, "Jazz", "tag", True),),
+            ))
+            unit_of_work.commit()
+        with engine.connect() as connection:
+            tracks_before = connection.exec_driver_sql("SELECT * FROM tracks").all()
+            labels_before = connection.exec_driver_sql("SELECT * FROM track_labels").all()
+    finally:
+        engine.dispose()
+    assert revision_rows() == [(1, 2)]
+
+    command.downgrade(alembic_config(migrated_database_url), "5d8e2b7a9c41")
+
+    assert "library_revision" not in _table_names(migrated_database_url)
+    engine = create_database_engine(migrated_database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT * FROM tracks").all() == tracks_before
+            assert connection.exec_driver_sql("SELECT * FROM track_labels").all() == labels_before
+    finally:
+        engine.dispose()
+
+    command.upgrade(alembic_config(migrated_database_url), "head")
+    assert revision_rows() == [(1, 1)]
+
+
 def test_migrated_database_uses_wal_and_leaves_no_foreign_key_violations(engine):
     with engine.connect() as connection:
         assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"

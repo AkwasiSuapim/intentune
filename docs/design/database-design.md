@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21; B8 `BEGIN IMMEDIATE`, 2026-10-21, with no schema change; B10 long-term adaptation, 2026-10-22), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
+**Current (B1 persistence foundation and B2 managed library, 2026-10-19; B3 background analysis, B4 session domain, B5 occurrence columns, and B6 feedback recording, 2026-10-20; B7 playlists, 2026-10-21; B8 `BEGIN IMMEDIATE`, 2026-10-21, with no schema change; B10 long-term adaptation, 2026-10-22; B11 library revision, 2026-10-23), Planned (the remaining Prototype 1 concepts), Superseded (earlier draft).** Reconciled with Prototype 1 in Phase B0 (2026-10-18).
 
 **Current:**
 - **B1** built the SQLite persistence foundation: engine and connection configuration, ORM records, a repository and unit-of-work pattern, Alembic migrations, and `listener_profiles` (see [Current Schema (B1)](#current-schema-b1)).
@@ -13,6 +13,7 @@
 - **B6** records feedback into the B4 `feedback_events` table, with no schema change (see [Feedback events (B6)](#feedback-events-b6)).
 - **B7** added `playlists` and `playlist_items`, and `feedback_events` accepts `PLAYLIST_ADD` (see [Current Schema (B7)](#current-schema-b7)).
 - **B10** added `long_term_profiles`, `long_term_adjustments`, and `long_term_adjustment_evidence` (see [Current Schema (B10)](#current-schema-b10)).
+- **B11** added the one-row `library_revision`, which lets the API reuse a full read of an unchanged library (see [Current Schema (B11)](#current-schema-b11)). B11 also measured the schema at scale and settled raw-event retention (see [Data Retention](#data-retention)).
 - The recommendation catalog used by the CLI is still `backend/data/songs.csv`.
 - Nothing in the running CLI opens the database yet. The FastAPI startup (B8) will apply migrations, create the default listener, and run the startup scan.
 
@@ -361,6 +362,29 @@ How the tables are used:
 - **Downgrade:** drops the three tables. The raw history stays, so the profile can be derived again; a test checks it.
 - **Not stored:** audio, typed text, or any copy of the raw history.
 
+## Current Schema (B11)
+
+**Current.** Migration `5ed16a5d9ff5` (`backend/alembic/versions/20261023_5ed16a5d9ff5_add_library_revision.py`), which revises `5d8e2b7a9c41`. Additive: nothing existing changes.
+
+### `library_revision`
+
+One row. Its revision advances, in the same transaction, with every write to `tracks` or `track_labels`.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | `INTEGER` | not null | Primary key; always 1 (CHECK `id = 1`). |
+| `revision` | `INTEGER` | not null | `>= 1` (CHECK). The migration writes 1. `SqlAlchemyTrackRepository.add()` and `save()` add 1 to it. |
+
+How it is used (TD-022, decision 6):
+- **The read:** `TrackRepository.list_all()` reads the revision in its own transaction. With a `TrackSnapshot` (one per API process), a read under the kept revision returns the kept tracks: the same immutable `Track` objects. Otherwise it reads the library and keeps it under that revision.
+- **What advances it:** every change to what a `Track` holds (metadata, labels, status, availability). The track repository is the only writer of both tables, and a test pins that each of its writes advances the revision. Migrations also write tracks, but they run at startup, before any read is kept.
+- **Never older than a finished commit:** a read uses a kept read only under exactly the revision the database has committed, and every earlier commit has advanced it.
+- **Only committed states are kept:** a transaction that has written tracks reads afresh and keeps nothing, so a rolled-back write neither publishes nor invalidates a revision.
+- **Publication never goes backwards:** an older read finishing last cannot replace a newer one. `TrackSnapshot.keep()` installs a read only if its revision is newer, under a lock.
+- **Why not a trigger:** a later batch rebuild of `tracks` or `track_labels` (the SQLite `ALTER` path) would silently drop it, and every invalidation with it.
+- **For future work:** when measured features join what Policy v1 reads from the library, their writes must advance the revision too.
+- **Downgrade:** drops the table; nothing else changes (tested).
+
 ## Prototype 1 Concepts
 
 **Planned**, except these, which exist:
@@ -537,6 +561,9 @@ Resolved for Prototype 1:
 - Accounts: none; one local listener (D01).
 - Imported music: managed copies stay on the device and are never shared externally (spec §27).
 
+- *(B11, TD-022)* **Raw history is kept in full.** Sessions, turns, occurrences, and feedback events are never pruned: Feedback Policy v1 and Long-Term Adaptation Policy v1 recompute from them, and the audit trail references them. Measured: 1,000 listening sessions with their feedback take a few MiB of SQLite (the [evaluation report](../quality/evaluation-report.md) has the figures), and reading them all for adaptation stays within a few hundred milliseconds. Retention becomes a question only for histories far beyond that, or when the listener can delete history.
+- *(B11)* **Managed copies** take as much disk as the source files they copy, byte for byte (measured; D02, D23).
+
 Still open:
 
 - Whether the listener can delete history, feedback, or the whole library from inside the app, and what deletion removes.
@@ -548,9 +575,9 @@ Still open:
 
 - **Ports** (`backend/src/intentune/ports/`):
   - `ListenerProfileRepository` (`get`, `get_default`, `add`);
-  - *(B2, `ports/library.py`)* `LibrarySourceRepository` (`get`, `get_by_path`, `list_all`, `add`, `save`), `SourceFileRepository` (`list_for_source`, `add`, `save`), and `TrackRepository` (`get`, `get_by_sha256`, `list_all`, `ids_with_status`, `add`, `save`; a track's labels are saved with it);
+  - *(B2, `ports/library.py`)* `LibrarySourceRepository` (`get`, `get_by_path`, `list_all`, `add`, `save`), `SourceFileRepository` (`list_for_source`, `add`, `save`), and `TrackRepository` (`get`, `get_by_sha256`, `list_all`, `ids_with_status`, `add`, `save`; a track's labels are saved with it; *B11:* `get_many`, the tracks with these ids in one read);
   - *(B3, `ports/analysis.py`)* `AnalysisJobRepository` (`get`, `list_all`, `list_for_analyzer`, `add`, `save`, `claim_next`) and `TrackFeatureRepository` (`list_for_track`, `replace_for_analyzer`).
-  - *(B4, `ports/sessions.py`)* `ListeningSessionRepository` (`get`, `get_active_for_listener`, `list_for_listener`, `list_active`, `add`, `save`), `SessionTurnRepository` (`list_for_session`, `add`), `RecommendationOccurrenceRepository` (`get`, `list_for_session`, `add`, `save`), and `FeedbackEventRepository` (`list_for_session`, `add`). Turns and feedback events are history: added, never changed.
+  - *(B4, `ports/sessions.py`)* `ListeningSessionRepository` (`get`, `get_active_for_listener`, `list_for_listener`, `list_active`, `add`, `save`), `SessionTurnRepository` (`list_for_session`, `add`), `RecommendationOccurrenceRepository` (`get`, `list_for_session`, `add`, `save`), and `FeedbackEventRepository` (`list_for_session`, `add`). Turns and feedback events are history: added, never changed. *B11:* the last three also have `list_for_listener`, a listener's whole history in one query each, for long-term adaptation.
   - *(B7, `ports/playlists.py`)* `PlaylistRepository` (`get`, `get_by_name`, `list_for_listener`, `track_counts`, `add`, `save`, `delete`, `items`, `replace_items`).
 
     The occurrence repository flushes every write at once, so writes reach the database in the caller's order. That keeps the one-`PLAYING` and queue-position indexes satisfied after every statement.
@@ -559,6 +586,7 @@ Still open:
   - `UnitOfWork`, which exposes all of these plus `commit()` and `rollback()`.
 
   Application use cases depend only on these ports.
+- **Reads at scale** *(B11, TD-022)*: the library and a listener's history are read as plain rows rather than ORM records, which was most of a full read's cost, and converted to the same validated domain models. The API's unit of work carries a `TrackSnapshot`, so `list_all()` reuses its last full read while the [library revision](#library_revision) is unchanged.
 - **Adapters** (`backend/src/intentune/persistence/`): `SqlAlchemyListenerProfileRepository`, `SqlAlchemyLibrarySourceRepository`, `SqlAlchemySourceFileRepository`, `SqlAlchemyTrackRepository`, `SqlAlchemyAnalysisJobRepository`, `SqlAlchemyTrackFeatureRepository`, the four session repositories (B4), `SqlAlchemyPlaylistRepository` (B7), and `SqlAlchemyUnitOfWork`. A unit of work is not thread-safe; the analysis worker uses its own.
 - A repository works inside the session it is given, never commits, and accepts and returns domain models only.
 - A unit of work is used as `with unit_of_work:`. Each block is one fresh session and transaction. `commit()` makes staged changes durable. Leaving the block always rolls back anything uncommitted, whether by an early return or an exception, then closes the session. A unit of work is not re-entrant, and it refuses use outside a `with` block. It can be reused for consecutive transactions.
@@ -566,7 +594,7 @@ Still open:
 
 ## Migration Strategy
 
-**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5); `ce0b59df2cd1` creates the playlist tables and rebuilds `feedback_events` to accept `PLAYLIST_ADD` (B7); `4b1e9c7d2a6f` rebuilds it again to accept `UNLIKE` (B9). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
+**Current (B1).** Version-controlled Alembic migrations from the first table. History: `6ef3a3452ab7` creates `listener_profiles` (B1); `2540be2956b8` creates the managed-library tables (B2); `7a42f0b9c8bf` creates the analysis tables and rebuilds `tracks` for the new states (B3); `dd7360f46b8b` creates the session tables (B4); `de244c476f3a` adds and backfills `surfaced_position`, then rebuilds `recommendation_occurrences` with it and `is_exploration` (B5); `ce0b59df2cd1` creates the playlist tables and rebuilds `feedback_events` to accept `PLAYLIST_ADD` (B7); `4b1e9c7d2a6f` rebuilds it again to accept `UNLIKE` (B9); `5d8e2b7a9c41` creates the long-term adaptation tables (B10); `5ed16a5d9ff5` creates `library_revision` (B11). The B3 rebuild found that Alembic's batch mode re-creates a table's constraints in a varying order (it copies them from an unordered set). The schema snapshot tests therefore compare each table's clauses as a set.
 
 - From `backend/`: `alembic upgrade head` (or `alembic -c backend/alembic.ini upgrade head` from the repository root). The target is the database resolved from `DATABASE_URL`, as above.
 - From Python: `upgrade_database(url)` in `backend/src/intentune/persistence/migrations.py`, used by tests and later by application startup. It passes the URL through Alembic's `Config.attributes`, so paths containing `%` are not affected by `configparser` interpolation, and it leaves the caller's logging alone.
@@ -579,15 +607,15 @@ Still open:
   - migrations matching the ORM records exactly (Alembic `compare_metadata`; `alembic check` reports the same from the command line);
   - a deliberately failing migration rolling back schema and data completely;
   - *(B3, B5)* the table rebuilds keeping their rows, in both directions: tracks for B3, and for B5 occurrences together with the turns that reference them;
-  - *(B5)* surfaced positions recovered for pre-B5 occurrences, across two sessions and two queues, including out-of-rank order.
+  - *(B5)* surfaced positions recovered for pre-B5 occurrences, across two sessions and two queues, including out-of-rank order;
+  - *(B11)* a database written at the first library migration (`2540be2956b8`), with rows as B2 wrote them, upgraded through every later revision by the app's own startup and then served: its tracks, labels, listener, vocabulary, and a new session (`backend/tests/test_restart_and_upgrade.py`).
 
   These tests are written against whatever tables the ORM declares, so they cover each new migration without edits. The B2 library tables' constraints are tested in `backend/tests/test_library_repositories.py`.
 
 ## Open Trade-offs
 
-- How long raw playback events are kept as the history grows (B11)
-
 Resolved:
+- *(B11)* Raw playback events and the rest of the history are kept in full (see [Data Retention](#data-retention)).
 - SQLite for Prototype 1, PostgreSQL later (D22).
 - Normalized `track_labels` for plural genres and moods (spec §9).
 - Recommendation occurrences are stored (spec §9).

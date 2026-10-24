@@ -11,6 +11,7 @@ Randomness only decides whether to explore; tests fix it with _FixedRandom.
 """
 
 import random
+from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -544,14 +545,28 @@ def test_a_large_library_holds_back_the_last_twenty_plays():
 
 
 def test_a_rejected_track_does_not_use_up_the_cooldown():
-    """Five tracks remain after a rejection, so the two most recent plays of those five cool down."""
+    """Five tracks remain after a rejection, so the two most recent plays of those five cool down.
+
+    No genre is requested here: a requested genre's own plays follow its own cooldown (B11, next test)."""
+    candidates = [_candidate(track_id, energy=0.5) for track_id in ("rejected", "a", "b", "c", "d", "e")]
+    signals = SessionSignals(context=_MID_ENERGY, recent_track_ids=("rejected", "a", "b"), excluded_track_ids=frozenset({"rejected"}))
+
+    decision = decide(candidates, signals, rng=_never_explore())
+
+    assert _ids(decision) == ["c", "d", "e"]
+
+
+def test_a_requested_genre_whose_last_tracks_are_cooling_keeps_playing_them_instead_of_leaving_it():
+    """The same plays, asking for Ambient: a and b are all the genre has left after the rejection, so neither is held
+    back, and the queue stays in the genre, least recently played first, before anything else fills it (B11)."""
     candidates = [_candidate("rejected", genre="ambient"), _candidate("a", genre="ambient"), _candidate("b", genre="ambient")]
     candidates += [_candidate(track_id, genre="rock") for track_id in ("c", "d", "e")]
     signals = SessionSignals(context=_AMBIENT, recent_track_ids=("rejected", "a", "b"), excluded_track_ids=frozenset({"rejected"}))
 
     decision = decide(candidates, signals, rng=_never_explore())
 
-    assert _ids(decision) == ["c", "d", "e"]
+    assert _ids(decision) == ["b", "a", "c"]
+    assert [pick.penalties for pick in decision.picks[:2]] == [("recently played",), ("recently played",)]
 
 
 def test_a_one_track_library_has_nothing_to_queue_while_it_plays():
@@ -1055,3 +1070,160 @@ def test_a_track_without_tags_keeps_its_unknown_artist_unknown():
 
 def test_a_track_whose_managed_file_is_missing_is_unavailable():
     assert not candidate_from_track(_track(status=TrackStatus.MISSING_MANAGED_FILE)).available
+
+
+# --- B11: the same scores and choices, with less work ----------------------------------------------------------------
+
+_ALL_TARGETS = ListeningContext(
+    temporary_genres=("Jazz",), temporary_moods=("Calm",), target_energy=0.5, target_danceability=0.5, target_tempo_bpm=100,
+    target_valence=0.5, target_acousticness=0.5,
+)
+_BASE_FEATURES = dict(genre="Jazz", mood="Calm", energy=0.5, danceability=0.5, tempo_bpm=100.0, valence=0.5, acousticness=0.5)
+_OTHER_FEATURES = dict(genre="Rock", mood="Driven", energy=0.9, danceability=0.1, tempo_bpm=160.0, valence=0.1, acousticness=0.9)
+
+
+def test_candidates_alike_in_all_but_one_feature_keep_their_own_scores():
+    """A refresh scores alike candidates once (B11). One differing feature, any of the seven, is enough to be scored apart."""
+    base = _candidate("base", **_BASE_FEATURES)
+    variants = [base] + [_candidate(f"other-{name}", **{**_BASE_FEATURES, name: value}) for name, value in _OTHER_FEATURES.items()]
+    signals = SessionSignals(
+        context=_ALL_TARGETS,
+        evidence=(SessionEvidence(base.music, 1.0),),
+        long_term=UserProfile(preferred_genres=("Jazz",), preferred_moods=("Calm",), preferred_energy=0.5, preferred_tempo_bpm=100.0),
+    )
+    everything = replace(POLICY_V1, queue_size=len(variants))
+
+    decision = decide(variants, signals, everything, rng=_never_explore())
+
+    assert len(decision.picks) == len(variants)
+    assert {pick.candidate.track_id: pick.score for pick in decision.picks} == {
+        candidate.track_id: score(candidate, signals, everything) for candidate in variants
+    }
+
+
+def test_the_diversity_scan_stops_early_but_chooses_exactly_what_a_full_scan_chooses():
+    """Step 6 stops once no later candidate can beat the best so far (B11). Against the full scan, on random libraries
+    where artists repeat and features are coarse, so penalties and near-ties are common."""
+    from src.intentune.domain.policy import _Ranker, _tie_break
+
+    for seed in range(150):
+        rng = random.Random(seed)
+        catalog = [
+            _candidate(
+                f"t{number:03d}", artist=rng.choice(["A", "B", "C", "D", None]), genre=rng.choice(["Jazz", "Rock", "Pop", None]),
+                mood=rng.choice(["Calm", "Driven", None]), energy=round(rng.random(), 1), danceability=round(rng.random(), 1),
+                valence=rng.choice([None, round(rng.random(), 1)]),
+            )
+            for number in range(rng.choice([4, 9, 25, 60]))
+        ]
+        signals = SessionSignals(
+            context=ListeningContext(temporary_genres=tuple(rng.sample(["Jazz", "Rock", "Pop"], rng.randrange(0, 2))), target_energy=round(rng.random(), 1)),
+            evidence=tuple(SessionEvidence(rng.choice(catalog).music, rng.choice([1.0, -1.0, 0.8, -0.5])) for _ in range(rng.randrange(0, 5))),
+            last_played=rng.choice(catalog),
+        )
+
+        decision = decide(catalog, signals, rng=_never_explore())
+
+        scored = {candidate.track_id: score(candidate, signals) for candidate in catalog}
+        ranker = _Ranker({}, POLICY_V1)
+        remaining, chosen = list(catalog), []
+        while remaining and len(chosen) < POLICY_V1.queue_size:
+            references = [signals.last_played] + chosen
+
+            def key(candidate):
+                penalty, _ = ranker.penalties(candidate, references)
+                return (not scored[candidate.track_id].is_scorable, -(scored[candidate.track_id].combined - penalty), _tie_break(candidate))
+
+            best = min(remaining, key=key)
+            chosen.append(best)
+            remaining.remove(best)
+        expected = [candidate.track_id for candidate in chosen]
+        if decision.second_plays_first:
+            expected[:2] = expected[1::-1]
+        assert _ids(decision) == expected, seed
+
+
+# --- B11: a requested genre is a finite library of its own ------------------------------------------------------------
+
+_JAZZ = ListeningContext(temporary_genres=("jazz",))
+
+
+def _library_with_jazz(jazz_tracks, rock_tracks=200):
+    """A large library of rock tracks and a few requested jazz tracks, every track by its own artist."""
+    jazz = [_candidate(f"jazz{number:02d}", artist=f"J{number}", genre="jazz") for number in range(jazz_tracks)]
+    rock = [_candidate(f"rock{number:03d}", artist=f"R{number}", genre="rock") for number in range(rock_tracks)]
+    return jazz + rock
+
+
+def _listen(candidates, context, plays, excluded=frozenset()):
+    """Play the first queued track each time, as Next does. Returns the tracks played and every queue, in order."""
+    by_id = {candidate.track_id: candidate for candidate in candidates}
+    recent, played, queues = (), [], []
+    for _ in range(plays):
+        signals = SessionSignals(
+            context=context, recent_track_ids=recent, last_played=by_id[recent[0]] if recent else None, excluded_track_ids=excluded
+        )
+        decision = decide(candidates, signals, rng=_never_explore())
+        queues.append(_ids(decision))
+        played.append(decision.picks[0].candidate.track_id)
+        recent = (played[-1],) + recent
+    return played, queues
+
+
+def _jazz(track_ids):
+    return [track_id for track_id in track_ids if track_id.startswith("jazz")]
+
+
+@pytest.mark.parametrize("jazz_tracks", [POLICY_V1.cooldown_plays, 8])
+def test_a_requested_genre_no_larger_than_the_cooldown_keeps_rotating_through_its_own_tracks(jazz_tracks):
+    """Before B11, a requested genre of 20 tracks or fewer ran out once the large library's 20-play cooldown covered
+    all of them, and the queue left the genre. Now every queue stays in it, well past that point, and its tracks
+    come back in turn, least recently played first."""
+    plays = 3 * POLICY_V1.cooldown_plays
+    played, queues = _listen(_library_with_jazz(jazz_tracks), _JAZZ, plays)
+
+    assert all(len(_jazz(queue)) == POLICY_V1.queue_size for queue in queues)
+    assert len(set(played[:jazz_tracks])) == jazz_tracks  # each once before any comes back
+    counts = Counter(played)
+    assert set(counts) == {f"jazz{number:02d}" for number in range(jazz_tracks)}
+    assert max(counts.values()) - min(counts.values()) <= 1
+    assert all(played[index] != played[index - 1] for index in range(1, plays))
+
+
+def test_a_requested_genre_of_two_tracks_alternates_them_and_offers_only_what_it_has():
+    played, queues = _listen(_library_with_jazz(2), _JAZZ, plays=10)
+
+    assert played == ["jazz00", "jazz01"] * 5
+    assert all(queue[0].startswith("jazz") and len(_jazz(queue)) == 1 for queue in queues[1:])  # the other one is playing
+
+
+def test_a_requested_genre_of_one_track_comes_back_as_soon_as_it_is_not_playing():
+    played, queues = _listen(_library_with_jazz(1), _JAZZ, plays=10)
+
+    assert played[::2] == ["jazz00"] * 5
+    assert len(set(played[1::2])) == 5 and not _jazz(played[1::2])  # in between, the rest of the library, by its cooldown
+    assert all("jazz00" not in queue for queue in queues[1::2])  # never queued while it plays
+
+
+def test_a_rejected_track_of_the_requested_genre_stays_out_while_the_rest_keep_rotating():
+    played, queues = _listen(_library_with_jazz(8), _JAZZ, plays=40, excluded=frozenset({"jazz03"}))
+
+    assert "jazz03" not in {track_id for queue in queues for track_id in queue}
+    assert all(len(_jazz(queue)) == POLICY_V1.queue_size for queue in queues)
+    assert set(played) == {f"jazz{number:02d}" for number in range(8)} - {"jazz03"}
+
+
+def test_without_a_requested_genre_the_library_cooldown_is_unchanged():
+    """30 equally good tracks and no genre: nothing comes back within 20 plays, as before B11."""
+    candidates = [_candidate(f"t{number:02d}", energy=0.5) for number in range(30)]
+    played, _ = _listen(candidates, _MID_ENERGY, plays=60)
+
+    assert all(played[index] not in played[max(0, index - POLICY_V1.cooldown_plays) : index] for index in range(60))
+    assert played[POLICY_V1.cooldown_plays + 1] == played[0]  # back once it is out of the 20-play cooldown, as before
+
+
+def test_a_requested_genre_larger_than_the_cooldown_keeps_the_full_cooldown():
+    played, queues = _listen(_library_with_jazz(40), _JAZZ, plays=60)
+
+    assert all(played[index] not in played[max(0, index - POLICY_V1.cooldown_plays) : index] for index in range(60))
+    assert all(len(_jazz(queue)) == POLICY_V1.queue_size for queue in queues)

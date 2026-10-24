@@ -441,9 +441,10 @@ class Track:
         labels = tuple(self.labels)
         if not all(isinstance(label, TrackLabel) for label in labels):
             raise ValueError("labels must contain only TrackLabel instances")
-        for kind in LabelKind:
-            if sum(1 for label in labels if label.kind is kind and label.is_primary) > 1:
-                raise ValueError(f"a track has at most one primary {kind.value} label")
+        primary_kinds = [label.kind for label in labels if label.is_primary]
+        if len(primary_kinds) != len(set(primary_kinds)):
+            kind = next(kind for kind in LabelKind if primary_kinds.count(kind) > 1)
+            raise ValueError(f"a track has at most one primary {kind.value} label")
         object.__setattr__(self, "labels", labels)
 
     @property
